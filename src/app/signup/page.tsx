@@ -401,8 +401,19 @@ export default function SignupPage() {
                     {/* Countdown */}
                     {countdown !== null && (
                         <div className="mb-3 text-center">
-                            <label className="form-label">Link expires in</label>
-                            <div className="countdown">{formatCountdown(countdown)}</div>
+                            <label className="form-label">
+                                {countdown <= 0 ? 'Link Status' : 'Link expires in'}
+                            </label>
+                            <div className="countdown" style={{
+                                color: countdown <= 0 ? '#dc3545' : '#ffc107'
+                            }}>
+                                {formatCountdown(countdown)}
+                            </div>
+                            {countdown <= 0 && (
+                                <p style={{ fontSize: '12px', color: '#dc3545', marginTop: '8px' }}>
+                                    This link has expired. Generate a new one if needed.
+                                </p>
+                            )}
                         </div>
                     )}
 
