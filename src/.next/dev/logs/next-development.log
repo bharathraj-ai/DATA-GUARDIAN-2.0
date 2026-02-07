@@ -1,0 +1,117 @@
+[00:00:05.762] Server  LOG     
+[00:00:05.763] Server  LOG       We detected TypeScript in your project and created a tsconfig.json file for you.
+[00:00:05.853] Server  WARN    ⚠ The "middleware" file convention is deprecated. Please use "proxy" instead. Learn more: https://nextjs.org/docs/messages/middleware-to-proxy
+[00:00:06.903] Server  LOG     ✓ Ready in 5.2s
+[00:00:25.490] Server  LOG     ○ Compiling / ...
+[00:00:38.835] Server  ERROR   ⨯ ./Downloads/DATA GAURDIAN/DATA GAURDIAN/DATA-GUARDIAN-2.0/src/app/layout.tsx:4:1
+Module not found: Can't resolve '@/components/Navbar'
+  2 | import Link from 'next/link';
+  3 | import "./globals.css";
+> 4 | import Navbar from "@/components/Navbar";
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  5 |
+  6 | export const metadata: Metadata = {
+  7 |   title: "Data Guardian - Secure Data Protection",
+
+
+
+https://nextjs.org/docs/messages/module-not-found
+
+
+[00:00:42.082] Server  LOG     ○ Compiling /_error ...
+[00:00:50.944] Browser ERROR   uncaughtError: Error: ./Downloads/DATA GAURDIAN/DATA GAURDIAN/DATA-GUARDIAN-2.0/src/app/layout.tsx:4:1
+Module not found: Can't resolve '@/components/Navbar'
+  2 | import Link from 'next/link';
+  3 | import "./globals.css";
+> 4 | import Navbar from "@/components/Navbar";
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  5 |
+  6 | export const metadata: Metadata = {
+  7 |   title: "Data Guardian - Secure Data Protection",
+
+
+
+https://nextjs.org/docs/messages/module-not-found
+
+
+[00:00:51.254] Browser ERROR   ./Downloads/DATA GAURDIAN/DATA GAURDIAN/DATA-GUARDIAN-2.0/src/app/layout.tsx:4:1
+Module not found: Can't resolve '@/components/Navbar'
+  2 | import Link from 'next/link';
+  3 | import "./globals.css";
+> 4 | import Navbar from "@/components/Navbar";
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  5 |
+  6 | export const metadata: Metadata = {
+  7 |   title: "Data Guardian - Secure Data Protection",
+
+https://nextjs.org/docs/messages/module-not-found
+[00:00:51.254] Browser ERROR   ./Downloads/DATA GAURDIAN/DATA GAURDIAN/DATA-GUARDIAN-2.0/src/app/layout.tsx:4:1
+Module not found: Can't resolve '@/components/Navbar'
+  2 | import Link from 'next/link';
+  3 | import "./globals.css";
+> 4 | import Navbar from "@/components/Navbar";
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  5 |
+  6 | export const metadata: Metadata = {
+  7 |   title: "Data Guardian - Secure Data Protection",
+
+https://nextjs.org/docs/messages/module-not-found
+[00:00:52.270] Browser ERROR   ./Downloads/DATA GAURDIAN/DATA GAURDIAN/DATA-GUARDIAN-2.0/src/app/layout.tsx:4:1
+Module not found: Can't resolve '@/components/Navbar'
+  2 | import Link from 'next/link';
+  3 | import "./globals.css";
+> 4 | import Navbar from "@/components/Navbar";
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  5 |
+  6 | export const metadata: Metadata = {
+  7 |   title: "Data Guardian - Secure Data Protection",
+
+https://nextjs.org/docs/messages/module-not-found
+[00:02:09.850] Server  LOG     ✓ Compiled in 181ms
+[00:02:24.394] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+[00:02:38.624] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+[00:02:39.053] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+[00:02:52.783] Server  LOG     ○ Compiling /signup ...
+[00:03:55.647] Server  ERROR   Error creating secure link: "ENCRYPTION_KEY not configured in environment variables"
+[00:03:56.419] Server  ERROR   PrismaClientInitializationError: Prisma Client could not locate the Query Engine for runtime "windows".
+
+This is likely caused by tooling that has not copied "query_engine-windows.dll.node" to the deployment folder.
+Ensure that you ran `prisma generate` and that "query_engine-windows.dll.node" has been copied to "node_modules\.prisma\client".
+
+We would appreciate if you could take the time to share some information with us.
+Please help us by answering a few questions: https://pris.ly/engine-not-found-tooling-investigation
+
+The following locations have been searched:
+  C:\Users\bhara\Downloads\DATA GAURDIAN\DATA GAURDIAN\DATA-GUARDIAN-2.0\src\node_modules\.prisma\client
+  C:\Users\bhara\Downloads\DATA GAURDIAN\DATA GAURDIAN\DATA-GUARDIAN-2.0\src\.next\dev\server\chunks
+  C:\Users\GOWTHAMGOWRI\Desktop\DATA GAURDIAN\DATA-GUARDIAN-2.0\node_modules\@prisma\client
+  C:\Users\bhara\Downloads\DATA GAURDIAN\DATA GAURDIAN\DATA-GUARDIAN-2.0\src\.next\dev\.prisma\client
+  /tmp/prisma-engines
+[00:03:56.865] Server  ERROR   ⨯ "unhandledRejection:" PrismaClientInitializationError: Prisma Client could not locate the Query Engine for runtime "windows".
+
+This is likely caused by tooling that has not copied "query_engine-windows.dll.node" to the deployment folder.
+Ensure that you ran `prisma generate` and that "query_engine-windows.dll.node" has been copied to "node_modules\.prisma\client".
+
+We would appreciate if you could take the time to share some information with us.
+Please help us by answering a few questions: https://pris.ly/engine-not-found-tooling-investigation
+
+The following locations have been searched:
+  C:\Users\bhara\Downloads\DATA GAURDIAN\DATA GAURDIAN\DATA-GUARDIAN-2.0\src\node_modules\.prisma\client
+  C:\Users\bhara\Downloads\DATA GAURDIAN\DATA GAURDIAN\DATA-GUARDIAN-2.0\src\.next\dev\server\chunks
+  C:\Users\GOWTHAMGOWRI\Desktop\DATA GAURDIAN\DATA-GUARDIAN-2.0\node_modules\@prisma\client
+  C:\Users\bhara\Downloads\DATA GAURDIAN\DATA GAURDIAN\DATA-GUARDIAN-2.0\src\.next\dev\.prisma\client
+  /tmp/prisma-engines
+[00:03:57.239] Server  ERROR   ⨯ "unhandledRejection: " PrismaClientInitializationError: Prisma Client could not locate the Query Engine for runtime "windows".
+
+This is likely caused by tooling that has not copied "query_engine-windows.dll.node" to the deployment folder.
+Ensure that you ran `prisma generate` and that "query_engine-windows.dll.node" has been copied to "node_modules\.prisma\client".
+
+We would appreciate if you could take the time to share some information with us.
+Please help us by answering a few questions: https://pris.ly/engine-not-found-tooling-investigation
+
+The following locations have been searched:
+  C:\Users\bhara\Downloads\DATA GAURDIAN\DATA GAURDIAN\DATA-GUARDIAN-2.0\src\node_modules\.prisma\client
+  C:\Users\bhara\Downloads\DATA GAURDIAN\DATA GAURDIAN\DATA-GUARDIAN-2.0\src\.next\dev\server\chunks
+  C:\Users\GOWTHAMGOWRI\Desktop\DATA GAURDIAN\DATA-GUARDIAN-2.0\node_modules\@prisma\client
+  C:\Users\bhara\Downloads\DATA GAURDIAN\DATA GAURDIAN\DATA-GUARDIAN-2.0\src\.next\dev\.prisma\client
+  /tmp/prisma-engines

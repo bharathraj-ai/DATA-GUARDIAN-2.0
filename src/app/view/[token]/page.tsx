@@ -42,7 +42,11 @@ export default function ViewPage({ params }: ViewPageProps) {
 
     // Resolve params
     useEffect(() => {
-        params.then((p) => setToken(p.token));
+        params.then((p) => {
+            // Remove any query parameters (like timestamp) from token
+            const cleanToken = p.token.split('?')[0];
+            setToken(cleanToken);
+        });
     }, [params]);
 
     // Initial data fetch
@@ -261,7 +265,19 @@ export default function ViewPage({ params }: ViewPageProps) {
                             {isRevoked ? 'Access Revoked' : isExpired ? 'Session Expired' : 'Access Denied'}
                         </h2>
                         <p className="error-message">{error}</p>
-                        <a href="/signup" className="return-button">Create New Link</a>
+                        <button 
+                            onClick={() => {
+                                // Clear any cached data
+                                setUserData(null);
+                                setFullData(null);
+                                setError(null);
+                                // Force full page navigation to bypass all caches
+                                window.location.href = `/signup?t=${Date.now()}`;
+                            }}
+                            className="return-button"
+                        >
+                            Create New Link
+                        </button>
                     </div>
                 </div>
             </main>

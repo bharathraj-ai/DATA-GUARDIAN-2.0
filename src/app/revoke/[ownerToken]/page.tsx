@@ -27,8 +27,10 @@ export default function RevokePage({ params }: RevokePageProps) {
 
     useEffect(() => {
         params.then(async (p) => {
-            setOwnerToken(p.ownerToken);
-            const result = await getLinkStatus(p.ownerToken);
+            // Remove any query parameters (like timestamp) from token
+            const cleanToken = p.ownerToken.split('?')[0];
+            setOwnerToken(cleanToken);
+            const result = await getLinkStatus(cleanToken);
             if (result.success && result.status) {
                 setStatus({
                     ...result.status,

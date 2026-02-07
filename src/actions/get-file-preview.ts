@@ -102,12 +102,12 @@ export async function getFilePreview(token: string, fileId: string): Promise<Fil
                     action: 'PREVIEW_RESTRICTED',
                     linkId: fileRecord.secureLink.id,
                     reason: `Preview restricted: ${fileRecord.fileName}`,
-                    metadata: {
+                    metadata: JSON.stringify({
                         fileId: fileRecord.id,
                         type: mime,
                         restrictionType,
                         totalSize
-                    },
+                    }),
                 },
             });
         };

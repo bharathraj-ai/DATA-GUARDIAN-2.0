@@ -196,12 +196,12 @@ export async function sendAccessNotification(payload: NotificationPayload): Prom
             data: {
                 action: 'NOTIFIED',
                 reason: `${payload.event} notification sent`,
-                metadata: {
+                metadata: JSON.stringify({
                     event: payload.event,
                     notificationEmail: payload.email.substring(0, 3) + '***', // Masked
                     timestamp: payload.timestamp.toISOString(),
                     ...payload.metadata
-                },
+                }),
                 linkId: payload.tokenId
             }
         });

@@ -168,11 +168,11 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
             data: {
                 action: 'CREATED',
                 linkId: result.id,
-                metadata: {
+                metadata: JSON.stringify({
                     fileCount: files.length,
                     purpose: purpose || undefined,
                     hasNotifications: !!notificationEmail
-                },
+                }),
             },
         }).catch(err => console.warn('[AUDIT] Failed to log:', err.message));
 

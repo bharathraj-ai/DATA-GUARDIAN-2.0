@@ -3,9 +3,8 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")      // Pooled connection for queries
-  directUrl = env("DIRECT_URL")        // Direct connection for migrations
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
 }
 
 // Stores encrypted user data - NO READABLE PII
@@ -79,7 +78,7 @@ model AuditLog {
                        // V2.1: + 'NOTIFIED' | 'SESSION_END' | 'PREVIEW_RESTRICTED'
   timestamp DateTime @default(now())
   reason    String?  // Privacy-safe reason (e.g., "Max attempts exceeded")
-  metadata  Json?    // Non-PII metadata (e.g., {"sessionDuration": 120, "purpose": "AUDIT", "restrictionType": "excel_rows"})
+  metadata  String?  // Non-PII metadata as JSON string (e.g., {"sessionDuration": 120, "purpose": "AUDIT", "restrictionType": "excel_rows"})
   
   // Relation to SecureLink (optional - link may be deleted)
   linkId     String?

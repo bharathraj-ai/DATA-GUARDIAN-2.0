@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["file:///C:/Users/bhara/Downloads/DATA%20GAURDIAN/DATA%20GAURDIAN/DATA-GUARDIAN-2.0/src/app/signup/layout.tsx"],"sourcesContent":["import { ReactNode } from 'react';\r\n\r\n// Force dynamic rendering for signup page\r\nexport const dynamic = 'force-dynamic';\r\nexport const revalidate = 0;\r\nexport const fetchCache = 'force-no-store';\r\nexport const runtime = 'nodejs';\r\n\r\nexport default function SignupLayout({\r\n    children,\r\n}: {\r\n    children: ReactNode;\r\n}) {\r\n    return <>{children}</>;\r\n}\r\n"],"names":[],"mappings":";;;;;;;;;;;;;;AAGO,MAAM,UAAU;AAChB,MAAM,aAAa;AACnB,MAAM,aAAa;AACnB,MAAM,UAAU;AAER,SAAS,aAAa,EACjC,QAAQ,EAGX;IACG,qBAAO;kBAAG;;AACd"}}]
+}

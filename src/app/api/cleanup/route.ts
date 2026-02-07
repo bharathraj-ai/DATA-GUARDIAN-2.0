@@ -17,13 +17,19 @@ export async function GET(request: Request) {
 
     const result = await cleanupExpiredData();
 
+    const headers = {
+        'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+    };
+
     if (result.success) {
         return NextResponse.json({
             message: 'Cleanup completed',
             deletedLinks: result.deletedLinks,
             deletedUsers: result.deletedUsers,
-        });
+        }, { headers });
     }
 
-    return NextResponse.json({ error: result.error }, { status: 500 });
+    return NextResponse.json({ error: result.error }, { status: 500, headers });
 }

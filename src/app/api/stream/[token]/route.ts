@@ -149,7 +149,7 @@ export async function GET(
                             action: 'SESSION_ENDED',
                             linkId: secureLink.id,
                             reason: `Session ended: ${reason}`,
-                            metadata: { durationSeconds: duration, endReason: reason },
+                            metadata: JSON.stringify({ durationSeconds: duration, endReason: reason }),
                         },
                     });
                 } catch (e) {
@@ -239,7 +239,9 @@ export async function GET(
     return new Response(stream, {
         headers: {
             'Content-Type': 'text/event-stream',
-            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
+            'Pragma': 'no-cache',
+            'Expires': '0',
             'Connection': 'keep-alive',
             'X-Accel-Buffering': 'no', // Disable nginx buffering
         },

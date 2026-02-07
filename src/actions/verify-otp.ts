@@ -88,11 +88,11 @@ export async function verifyOTP(input: OTPVerifyInput): Promise<VerifyOTPResult>
                 data: {
                     action: 'DENIED',
                     reason: 'Rate limit exceeded',
-                    metadata: {
+                    metadata: JSON.stringify({
                         ip: clientIP.substring(0, 6) + '***',
                         type: 'rate_limit',
                         retryAfter: rateLimit.retryAfter
-                    }
+                    })
                 }
             });
 
@@ -182,10 +182,10 @@ export async function verifyOTP(input: OTPVerifyInput): Promise<VerifyOTPResult>
                     action: 'DENIED',
                     linkId: secureLink.id,
                     reason: 'OTP reuse attempt blocked',
-                    metadata: {
+                    metadata: JSON.stringify({
                         type: 'otp_reuse',
                         originalVerifyTime: secureLink.otpVerifiedAt.toISOString()
-                    }
+                    })
                 }
             });
 
@@ -208,10 +208,10 @@ export async function verifyOTP(input: OTPVerifyInput): Promise<VerifyOTPResult>
                         action: 'DENIED',
                         linkId: secureLink.id,
                         reason: 'OTP verification window expired',
-                        metadata: {
+                        metadata: JSON.stringify({
                             type: 'otp_window_expired',
                             windowMinutes: OTP_VERIFY_WINDOW_MINUTES
-                        }
+                        })
                     }
                 });
 
@@ -232,7 +232,7 @@ export async function verifyOTP(input: OTPVerifyInput): Promise<VerifyOTPResult>
                     action: 'DENIED',
                     linkId: secureLink.id,
                     reason: 'Device mismatch (Session hijacking prevention)',
-                    metadata: { type: 'device_mismatch' },
+                    metadata: JSON.stringify({ type: 'device_mismatch' }),
                 }
             });
 
@@ -357,10 +357,10 @@ export async function verifyOTP(input: OTPVerifyInput): Promise<VerifyOTPResult>
                 data: {
                     action: 'ACCESSED',
                     linkId: secureLink.id,
-                    metadata: {
+                    metadata: JSON.stringify({
                         ttlSeconds,
                         purpose: secureLink.purpose || undefined  // V2.1: Log purpose
-                    },
+                    }),
                 },
             });
         });

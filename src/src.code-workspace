@@ -1,0 +1,25 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../prisma"
+		},
+		{
+			"path": "../public"
+		},
+		{
+			"path": "../node_modules"
+		},
+		{
+			"path": "../lib"
+		},
+		{
+			"path": "../.git"
+		},
+		{
+			"path": "../.next"
+		}
+	]
+}

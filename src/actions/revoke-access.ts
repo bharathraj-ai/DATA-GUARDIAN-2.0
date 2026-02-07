@@ -80,7 +80,7 @@ export async function revokeAccess(
                         action: 'REVOKED',
                         linkId: secureLink.id,
                         reason: 'Owner requested manual revocation',
-                        metadata: { killSwitchLatencyMs: 0 }, // Will be updated below
+                        metadata: JSON.stringify({ killSwitchLatencyMs: 0 }), // Will be updated below
                     },
                 });
 

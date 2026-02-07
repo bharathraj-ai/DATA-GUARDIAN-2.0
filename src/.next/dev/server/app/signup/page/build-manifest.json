@@ -1,0 +1,22 @@
+{
+  "devFiles": [],
+  "ampDevFiles": [],
+  "polyfillFiles": [
+    "static/chunks/738ba_next_dist_build_polyfills_polyfill-nomodule.js"
+  ],
+  "lowPriorityFiles": [],
+  "rootMainFiles": [
+    "static/chunks/[turbopack]_browser_dev_hmr-client_hmr-client_ts_d8da8a3e._.js",
+    "static/chunks/738ba_next_dist_compiled_react-dom_c0a8e631._.js",
+    "static/chunks/738ba_next_dist_compiled_react-server-dom-turbopack_9e3e4b6d._.js",
+    "static/chunks/738ba_next_dist_compiled_next-devtools_index_d386e486.js",
+    "static/chunks/738ba_next_dist_compiled_17412d86._.js",
+    "static/chunks/738ba_next_dist_client_aa7b7dd7._.js",
+    "static/chunks/738ba_next_dist_0ae312ff._.js",
+    "static/chunks/738ba_@swc_helpers_cjs_6c0c4995._.js",
+    "static/chunks/Downloads_DATA GAURDIAN_DATA GAURDIAN_DATA-GUARDIAN-2_0_src_a0ff3932._.js",
+    "static/chunks/turbopack-Downloads_DATA GAURDIAN_DATA GAURDIAN_DATA-GUARDIAN-2_0_src_6dea6e4a._.js"
+  ],
+  "pages": {},
+  "ampFirstPages": []
+}

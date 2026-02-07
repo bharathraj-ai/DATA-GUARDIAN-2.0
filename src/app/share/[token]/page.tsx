@@ -20,10 +20,31 @@ export default function SharePage({ params }: SharePageProps) {
     const [countdown, setCountdown] = useState(300); // 5 minutes
     const [shake, setShake] = useState(false);
     const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
+    const [isLoading, setIsLoading] = useState(true);
+
+    // Force refresh on mount to clear any cached data
+    useEffect(() => {
+        // Clear any browser cache for this page
+        if (typeof window !== 'undefined') {
+            // Force reload if coming from cache
+            if (window.performance && window.performance.navigation.type === 2) {
+                window.location.reload();
+            }
+        }
+    }, []);
 
     // Resolve params
     useEffect(() => {
-        params.then((p) => setToken(p.token));
+        params.then((p) => {
+            console.log('Token resolved:', p.token);
+            // Remove any query parameters (like timestamp) from token
+            const cleanToken = p.token.split('?')[0];
+            setToken(cleanToken);
+            setIsLoading(false);
+        }).catch((err) => {
+            console.error('Failed to resolve params:', err);
+            setIsLoading(false);
+        });
     }, [params]);
 
     // Countdown timer
@@ -112,9 +133,9 @@ export default function SharePage({ params }: SharePageProps) {
 
             if (result.success) {
                 setState('success');
-                // Smooth transition to view page
+                // Force full page navigation to bypass all caches
                 setTimeout(() => {
-                    router.push(`/view/${token}`);
+                    window.location.href = `/view/${token}?t=${Date.now()}`;
                 }, 1200);
             } else {
                 setState('error');
@@ -146,7 +167,7 @@ export default function SharePage({ params }: SharePageProps) {
         }
     }, [otp, state, handleSubmit]);
 
-    if (!token) {
+    if (isLoading || !token) {
         return (
             <main className="otp-wrapper">
                 <div className="otp-card">
