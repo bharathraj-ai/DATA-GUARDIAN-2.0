@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { getUserData, MaskedUserData } from '@/actions/get-user';
 import { getFilePreview, FilePreviewResult } from '@/actions/get-file-preview';
+import { revokeOnScreenshot } from '@/actions/revoke-on-screenshot';
 
 interface ViewPageProps {
     params: Promise<{ token: string }>;
@@ -48,6 +49,62 @@ export default function ViewPage({ params }: ViewPageProps) {
             setToken(cleanToken);
         });
     }, [params]);
+
+    // Screenshot Protection - Revoke access when window loses focus or visibility changes
+    // (Browsers block keydown for PrintScreen/Win+Shift+S, but blur/visibility events work)
+    useEffect(() => {
+        let isRevoking = false;
+
+        const triggerSecurityViolation = async (reason: string) => {
+            if (isRevoking || !token) return;
+            isRevoking = true;
+
+            console.warn(`[SECURITY] ${reason}`);
+
+            // Close any open SSE stream immediately
+            if (eventSourceRef.current) {
+                eventSourceRef.current.close();
+            }
+
+            // Clear visible data immediately
+            setUserData(null);
+            setFullData(null);
+            setError('Security Violation: Access revoked due to potential screenshot attempt.');
+            setConnectionStatus('disconnected');
+
+            // Call server to revoke access and notify owner
+            await revokeOnScreenshot(token);
+        };
+
+        // Detect when tab/window loses visibility (e.g., snipping tool overlay)
+        const handleVisibilityChange = () => {
+            if (document.hidden) {
+                triggerSecurityViolation('Tab hidden - possible screenshot');
+            }
+        };
+
+        // Detect when window loses focus (e.g., snipping tool opens)
+        const handleBlur = () => {
+            triggerSecurityViolation('Window lost focus - possible screenshot');
+        };
+
+        // Detect PrintScreen key (works in some browsers)
+        const handleKeyUp = (e: KeyboardEvent) => {
+            if (e.key === 'PrintScreen') {
+                triggerSecurityViolation('PrintScreen key detected');
+            }
+        };
+
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        window.addEventListener('blur', handleBlur);
+        window.addEventListener('keyup', handleKeyUp);
+
+        return () => {
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+            window.removeEventListener('blur', handleBlur);
+            window.removeEventListener('keyup', handleKeyUp);
+        };
+    }, [token]);
 
     // Initial data fetch
     const fetchUserData = useCallback(async (t: string) => {
@@ -265,7 +322,7 @@ export default function ViewPage({ params }: ViewPageProps) {
                             {isRevoked ? 'Access Revoked' : isExpired ? 'Session Expired' : 'Access Denied'}
                         </h2>
                         <p className="error-message">{error}</p>
-                        <button 
+                        <button
                             onClick={() => {
                                 // Clear any cached data
                                 setUserData(null);
