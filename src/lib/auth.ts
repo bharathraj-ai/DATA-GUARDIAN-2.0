@@ -1,8 +1,7 @@
 import { NextAuthOptions, getServerSession } from 'next-auth';
 import GoogleProvider from 'next-auth/providers/google';
-import { PrismaAdapter } from '@auth/prisma-adapter';
+import { PrismaAdapter } from '@next-auth/prisma-adapter';
 import { prisma } from '@/lib/prisma';
-import type { Adapter } from 'next-auth/adapters';
 
 /**
  * NextAuth Configuration for Data Guardian (v4 Compatible)
@@ -13,7 +12,7 @@ import type { Adapter } from 'next-auth/adapters';
  * - Session strategy: database (more secure than JWT for sensitive apps)
  */
 export const authOptions: NextAuthOptions = {
-    adapter: PrismaAdapter(prisma) as Adapter,
+    adapter: PrismaAdapter(prisma),
     providers: [
         GoogleProvider({
             clientId: process.env.GOOGLE_CLIENT_ID!,
