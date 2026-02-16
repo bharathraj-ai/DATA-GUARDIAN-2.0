@@ -17,7 +17,8 @@ export type NotificationEvent =
     | 'EXPIRED'          // Link expired automatically
     | 'REVOKED'          // Link manually revoked by owner
     | 'DEVICE_MISMATCH'  // Anti-phishing: Access from different device
-    | 'FAILED_ATTEMPTS'; // Anti-phishing: Multiple OTP failures
+    | 'FAILED_ATTEMPTS'  // Anti-phishing: OTP failure (revoked immediately)
+    | 'FORWARDED_LINK';  // Zero Trust: Link opened by wrong email recipient
 
 interface NotificationPayload {
     email: string;
@@ -29,6 +30,7 @@ interface NotificationPayload {
         purpose?: string;
         expiryTime?: Date;
         failedAttempts?: number;   // for FAILED_ATTEMPTS alerts
+        intendedRecipient?: string; // for FORWARDED_LINK alerts
     };
 }
 
@@ -92,11 +94,19 @@ function createEmailTemplate(payload: NotificationPayload): { subject: string; h
             break;
 
         case 'FAILED_ATTEMPTS':
-            subject = '🚨 Data Guardian: Multiple Failed Attempts';
-            heading = 'Multiple OTP Failures Detected';
-            const attempts = metadata?.failedAttempts || 'multiple';
-            message = `${attempts} failed OTP verification attempts were detected on your secure link at ${formattedTime}. This may indicate a brute-force attack.`;
+            subject = '🚨 Data Guardian: Invalid OTP - Link Revoked';
+            heading = 'Link Revoked Due to Invalid OTP';
+            const attempts = metadata?.failedAttempts || 1;
+            message = `Your secure link was permanently revoked after ${attempts} invalid OTP attempt at ${formattedTime}. This is a security measure to prevent unauthorized access.`;
             iconColor = '#ef4444'; // red
+            break;
+
+        case 'FORWARDED_LINK':
+            subject = '🚫 Data Guardian: Forwarded Link Detected';
+            heading = 'Forwarded Link Access Attempt';
+            const intended = metadata?.intendedRecipient || 'the intended recipient';
+            message = `Someone tried to access your secure link at ${formattedTime}, but their email didn't match the intended recipient (${intended}). Access was DENIED to protect your data.`;
+            iconColor = '#dc2626'; // dark red
             break;
     }
 
@@ -309,7 +319,7 @@ export async function notifyDeviceMismatch(
 
 /**
  * Helper: Send failed attempts alert (Anti-Phishing)
- * Notifies owner of multiple OTP verification failures
+ * Notifies owner of OTP verification failure (link revoked)
  */
 export async function notifyFailedAttempts(
     email: string,
@@ -322,6 +332,24 @@ export async function notifyFailedAttempts(
         tokenId,
         timestamp: new Date(),
         metadata: { failedAttempts }
+    });
+}
+
+/**
+ * Helper: Send forwarded link alert (Zero Trust)
+ * Notifies owner when someone with wrong email tries to access their link
+ */
+export async function notifyForwardedLinkAttempt(
+    email: string,
+    tokenId: string,
+    intendedRecipient: string
+): Promise<void> {
+    await sendAccessNotification({
+        email,
+        event: 'FORWARDED_LINK',
+        tokenId,
+        timestamp: new Date(),
+        metadata: { intendedRecipient }
     });
 }
 

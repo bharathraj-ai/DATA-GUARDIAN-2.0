@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { useSession } from 'next-auth/react';
 import { createSecureLinkWithFiles } from '@/actions/create-link-with-files';
 import QRCode from 'qrcode';
 
@@ -14,10 +15,12 @@ interface FormDataState {
     gender: string;
     age: string;
     validityMinutes: string;
+    vendorEmail: string; // Zero Trust: only this email can access the link
 }
 
 export default function SignupPage() {
     const router = useRouter();
+    const { data: session, status: sessionStatus } = useSession();
     const [formData, setFormData] = useState<FormDataState>({
         firstName: '',
         lastName: '',
@@ -26,6 +29,7 @@ export default function SignupPage() {
         gender: '',
         age: '',
         validityMinutes: '',
+        vendorEmail: '',
     });
     const [files, setFiles] = useState<FileList | null>(null);
     const [generatedLink, setGeneratedLink] = useState('');
@@ -36,6 +40,13 @@ export default function SignupPage() {
     const [qrDataUrl, setQrDataUrl] = useState('');
     const [countdown, setCountdown] = useState<number | null>(null);
     const countdownRef = useRef<NodeJS.Timeout | null>(null);
+
+    // Redirect to sign-in if not authenticated
+    useEffect(() => {
+        if (sessionStatus === 'unauthenticated') {
+            router.push('/auth/signin?callbackUrl=/signup');
+        }
+    }, [sessionStatus, router]);
 
     // Force refresh on mount to clear any cached data
     useEffect(() => {
@@ -62,6 +73,10 @@ export default function SignupPage() {
         if (!formData.validityMinutes) return 'Time in minutes is required';
         const minutes = parseInt(formData.validityMinutes);
         if (isNaN(minutes) || minutes <= 0) return 'Time must be a positive number';
+        // Vendor email is optional but must be valid if provided
+        if (formData.vendorEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.vendorEmail)) {
+            return 'Invalid vendor email format';
+        }
         return null;
     };
 
@@ -94,10 +109,10 @@ export default function SignupPage() {
             if (result.success && result.shareUrl && result.otp) {
                 // Refresh router cache to ensure fresh data on next navigation
                 router.refresh();
-                
+
                 // Add timestamp to share URL to prevent caching
                 const shareUrlWithTimestamp = `${result.shareUrl}${result.shareUrl.includes('?') ? '&' : '?'}t=${Date.now()}`;
-                
+
                 setGeneratedLink(shareUrlWithTimestamp);
                 setOtp(result.otp);
                 setOwnerUrl(result.ownerUrl || '');
@@ -192,6 +207,9 @@ export default function SignupPage() {
             }
         };
     }, []);
+    // Authentication is optional for link creation
+    // If signed in, we can pre-fill the notification email
+    // Auth is required for VENDORS accessing links, not for OWNERS creating them
 
     return (
         <main className="signup-page">
@@ -324,6 +342,25 @@ export default function SignupPage() {
                                         />
                                         <small className="form-hint">
                                             Link will automatically expire after this duration
+                                        </small>
+                                    </div>
+
+                                    {/* Zero Trust: Vendor Email Binding */}
+                                    <div className="form-group">
+                                        <label className="form-label">
+                                            Vendor Email (Optional)
+                                            <span className="security-badge">Zero Trust</span>
+                                        </label>
+                                        <input
+                                            type="email"
+                                            name="vendorEmail"
+                                            value={formData.vendorEmail}
+                                            onChange={handleChange}
+                                            className="form-input"
+                                            placeholder="vendor@company.com"
+                                        />
+                                        <small className="form-hint">
+                                            If specified, only this email can verify the OTP. Prevents link forwarding.
                                         </small>
                                     </div>
 
@@ -512,6 +549,7 @@ export default function SignupPage() {
                                             gender: '',
                                             age: '',
                                             validityMinutes: '',
+                                            vendorEmail: '',
                                         });
                                         setFiles(null);
                                         // Force full page reload to clear all caches

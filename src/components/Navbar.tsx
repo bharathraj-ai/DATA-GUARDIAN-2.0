@@ -3,9 +3,11 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState, useEffect } from 'react';
+import { useSession, signOut } from 'next-auth/react';
 
 export default function Navbar() {
     const pathname = usePathname();
+    const { data: session, status } = useSession();
     const [isScrolled, setIsScrolled] = useState(false);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -22,6 +24,8 @@ export default function Navbar() {
         { name: 'How It Works', href: '/how-it-works' },
         { name: 'Services', href: '/services' },
     ];
+
+    const isAuthenticated = status === 'authenticated' && session?.user;
 
     return (
         <nav className={`navbar ${isScrolled ? 'navbar-scrolled' : ''}`}>
@@ -45,9 +49,41 @@ export default function Navbar() {
                             {link.name}
                         </Link>
                     ))}
-                    <Link href="/signup" className="btn btn-primary btn-sm">
-                        Get Secure Link
-                    </Link>
+
+                    {isAuthenticated ? (
+                        <>
+                            <Link
+                                href="/dashboard/owner"
+                                className={`nav-link ${pathname?.startsWith('/dashboard/owner') ? 'active' : ''}`}
+                            >
+                                Owner
+                            </Link>
+                            <Link
+                                href="/dashboard/vendor"
+                                className={`nav-link ${pathname?.startsWith('/dashboard/vendor') ? 'active' : ''}`}
+                            >
+                                Vendor
+                            </Link>
+                            <Link href="/signup" className="btn btn-primary btn-sm">
+                                Create Link
+                            </Link>
+                            <button
+                                onClick={() => signOut({ callbackUrl: '/' })}
+                                className="btn btn-secondary btn-sm"
+                            >
+                                Sign Out
+                            </button>
+                        </>
+                    ) : (
+                        <>
+                            <Link href="/auth/signin" className="btn btn-secondary btn-sm">
+                                Sign In
+                            </Link>
+                            <Link href="/signup" className="btn btn-primary btn-sm">
+                                Get Secure Link
+                            </Link>
+                        </>
+                    )}
                 </div>
 
                 {/* Mobile menu button */}
@@ -83,14 +119,64 @@ export default function Navbar() {
                             {link.name}
                         </Link>
                     ))}
+
+                    {isAuthenticated && (
+                        <>
+                            <Link
+                                href="/dashboard/owner"
+                                className={`nav-link-mobile ${pathname?.startsWith('/dashboard/owner') ? 'active' : ''}`}
+                                onClick={() => setIsMobileMenuOpen(false)}
+                            >
+                                Owner Dashboard
+                            </Link>
+                            <Link
+                                href="/dashboard/vendor"
+                                className={`nav-link-mobile ${pathname?.startsWith('/dashboard/vendor') ? 'active' : ''}`}
+                                onClick={() => setIsMobileMenuOpen(false)}
+                            >
+                                Vendor Dashboard
+                            </Link>
+                        </>
+                    )}
+
                     <div className="navbar-mobile-cta">
-                        <Link
-                            href="/signup"
-                            className="btn btn-primary btn-full"
-                            onClick={() => setIsMobileMenuOpen(false)}
-                        >
-                            Get Secure Link
-                        </Link>
+                        {isAuthenticated ? (
+                            <>
+                                <Link
+                                    href="/signup"
+                                    className="btn btn-primary btn-full"
+                                    onClick={() => setIsMobileMenuOpen(false)}
+                                >
+                                    Create Link
+                                </Link>
+                                <button
+                                    onClick={() => {
+                                        setIsMobileMenuOpen(false);
+                                        signOut({ callbackUrl: '/' });
+                                    }}
+                                    className="btn btn-secondary btn-full"
+                                >
+                                    Sign Out
+                                </button>
+                            </>
+                        ) : (
+                            <>
+                                <Link
+                                    href="/auth/signin"
+                                    className="btn btn-secondary btn-full"
+                                    onClick={() => setIsMobileMenuOpen(false)}
+                                >
+                                    Sign In
+                                </Link>
+                                <Link
+                                    href="/signup"
+                                    className="btn btn-primary btn-full"
+                                    onClick={() => setIsMobileMenuOpen(false)}
+                                >
+                                    Get Secure Link
+                                </Link>
+                            </>
+                        )}
                     </div>
                 </div>
             )}
