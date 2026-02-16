@@ -20,6 +20,7 @@ model User {
   name          String?
   image         String?
   role          String    @default("VENDOR") // OWNER | VENDOR
+  roleSelected  Boolean   @default(false)    // Has user explicitly chosen their role?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   
@@ -95,6 +96,7 @@ model SecureLink {
   token         String   @unique  // Share token (UUID)
   ownerToken    String   @unique  // Owner token for kill switch
   otpHash       String            // HMAC hash of OTP
+  otpPlain      String?           // Plaintext OTP for owner dashboard display
   expiresAt     DateTime          // Link expiry time
   isUsed        Boolean  @default(false)  // OTP verified flag
   isRevoked     Boolean  @default(false)  // Kill switch flag

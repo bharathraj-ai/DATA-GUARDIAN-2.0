@@ -22,6 +22,8 @@ export const authOptions: NextAuthOptions = {
             authorization: {
                 params: {
                     prompt: 'select_account',
+                    access_type: 'offline',
+                    response_type: 'code',
                 },
             },
         }),
@@ -43,6 +45,24 @@ export const authOptions: NextAuthOptions = {
         },
 
         /**
+         * Redirect new users to role selection page after sign-in
+         */
+        async redirect({ url, baseUrl }) {
+            // Don't redirect if already going to role-select
+            if (url.includes('/auth/role-select')) {
+                return url;
+            }
+            // For relative URLs or same-origin URLs, allow them
+            if (url.startsWith('/')) {
+                return `${baseUrl}${url}`;
+            }
+            if (url.startsWith(baseUrl)) {
+                return url;
+            }
+            return baseUrl;
+        },
+
+        /**
          * Add custom fields to the session
          * CRITICAL: Role is fetched from DB, never from client
          */
@@ -52,9 +72,10 @@ export const authOptions: NextAuthOptions = {
                 // Fetch role from database (server-side truth)
                 const dbUser = await prisma.user.findUnique({
                     where: { id: user.id },
-                    select: { role: true },
+                    select: { role: true, roleSelected: true },
                 });
                 (session.user as any).role = dbUser?.role || 'VENDOR';
+                (session.user as any).roleSelected = dbUser?.roleSelected ?? false;
             }
             return session;
         },
@@ -63,6 +84,8 @@ export const authOptions: NextAuthOptions = {
         signIn: '/auth/signin',
         error: '/auth/error',
     },
+    // Enable debug mode to surface OAuth errors
+    debug: true,
     events: {
         /**
          * Auto-create new users as VENDOR role by default
