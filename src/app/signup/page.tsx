@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { createSecureLinkWithFiles } from '@/actions/create-link-with-files';
+import { getAvailableVendors, VendorOption } from '@/actions/get-vendors';
 import QRCode from 'qrcode';
 
 interface FormDataState {
@@ -40,6 +41,16 @@ export default function SignupPage() {
     const [qrDataUrl, setQrDataUrl] = useState('');
     const [countdown, setCountdown] = useState<number | null>(null);
     const countdownRef = useRef<NodeJS.Timeout | null>(null);
+    const [vendors, setVendors] = useState<VendorOption[]>([]);
+
+    // Fetch available vendors on mount
+    useEffect(() => {
+        async function fetchVendors() {
+            const vendorList = await getAvailableVendors();
+            setVendors(vendorList);
+        }
+        fetchVendors();
+    }, []);
 
     // Redirect to sign-in if not authenticated
     useEffect(() => {
@@ -47,6 +58,15 @@ export default function SignupPage() {
             router.push('/auth/signin?callbackUrl=/signup');
         }
     }, [sessionStatus, router]);
+
+    const userRole = (session?.user as any)?.role as string | undefined;
+
+    // Block VENDOR users from creating links
+    useEffect(() => {
+        if (sessionStatus === 'authenticated' && userRole === 'VENDOR') {
+            router.push('/dashboard/vendor');
+        }
+    }, [sessionStatus, userRole, router]);
 
     // Force refresh on mount to clear any cached data
     useEffect(() => {
@@ -357,10 +377,18 @@ export default function SignupPage() {
                                             value={formData.vendorEmail}
                                             onChange={handleChange}
                                             className="form-input"
-                                            placeholder="vendor@company.com"
+                                            placeholder="Enter vendor email or leave empty"
+                                            list="vendor-list"
                                         />
+                                        <datalist id="vendor-list">
+                                            {vendors.map((vendor) => (
+                                                <option key={vendor.email} value={vendor.email}>
+                                                    {vendor.name ? `${vendor.name} (${vendor.email})` : vendor.email}
+                                                </option>
+                                            ))}
+                                        </datalist>
                                         <small className="form-hint">
-                                            If specified, only this email can verify the OTP. Prevents link forwarding.
+                                            If specified, only this vendor can verify the OTP. Prevents link forwarding.
                                         </small>
                                     </div>
 

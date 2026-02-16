@@ -16,7 +16,7 @@ export default function SharePage({ params }: SharePageProps) {
     const [otp, setOtp] = useState<string[]>(['', '', '', '', '', '']);
     const [state, setState] = useState<VerificationState>('idle');
     const [error, setError] = useState<string>('');
-    const [remainingAttempts, setRemainingAttempts] = useState(3);
+    const [remainingAttempts, setRemainingAttempts] = useState(1);
     const [countdown, setCountdown] = useState(300); // 5 minutes
     const [shake, setShake] = useState(false);
     const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
@@ -237,7 +237,7 @@ export default function SharePage({ params }: SharePageProps) {
                                 <input
                                     key={index}
                                     ref={(el) => { inputRefs.current[index] = el; }}
-                                    type="text"
+                                    type="password"
                                     inputMode="numeric"
                                     maxLength={1}
                                     value={digit}
@@ -262,7 +262,7 @@ export default function SharePage({ params }: SharePageProps) {
                             <line x1="12" y1="16" x2="12.01" y2="16" />
                         </svg>
                         <span>{error}</span>
-                        {remainingAttempts > 0 && remainingAttempts < 3 && (
+                        {remainingAttempts > 0 && remainingAttempts < 1 && (
                             <span className="attempts-left">
                                 {remainingAttempts} attempt{remainingAttempts !== 1 ? 's' : ''} remaining
                             </span>

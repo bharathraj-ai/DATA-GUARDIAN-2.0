@@ -13,6 +13,7 @@ import {
 } from '@/lib/crypto';
 import { userDataSchema, fileSchema, ACCEPTED_FILE_TYPES } from '@/lib/validations';
 import { z } from 'zod';
+import { auth } from '@/lib/auth';
 
 export type CreateSecureLinkResult = {
     success: boolean;
@@ -26,6 +27,16 @@ export type CreateSecureLinkResult = {
 
 export async function createSecureLinkWithFiles(formData: FormData): Promise<CreateSecureLinkResult> {
     try {
+        // ZERO TRUST: Only OWNER role can create secure links
+        const session = await auth();
+        if (!session?.user) {
+            return { success: false, error: 'Authentication required.' };
+        }
+        const userRole = (session.user as any)?.role;
+        if (userRole === 'VENDOR') {
+            return { success: false, error: 'Vendors cannot create secure links. Only owners can create links.' };
+        }
+
         // 1. Extract and Validate Text Data
         const rawData = {
             firstName: formData.get('firstName'),
@@ -148,8 +159,11 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
                     token,
                     ownerToken,
                     otpHash,
+                    otpPlain: otp,
                     expiresAt,
                     userId: userDataRecord.id,
+                    // OWNER BINDING: Associate link with authenticated user
+                    ownerId: session.user.id,
                     // V2.1 Additions
                     purpose: purpose || undefined,
                     purposeDetail: purposeDetail || undefined,

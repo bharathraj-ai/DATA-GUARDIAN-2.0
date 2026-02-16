@@ -12,6 +12,17 @@ export interface DashboardLink {
     createdAt: Date;
     allowedVendorEmail: string | null;
     status: 'active' | 'expired' | 'revoked' | 'used';
+    otp: string | null;
+    // Enhanced fields
+    purpose: string | null;
+    purposeDetail: string | null;
+    notificationEmail: string | null;
+    failedAttempts: number;
+    lockedAt: Date | null;
+    otpVerifiedAt: Date | null;
+    fileCount: number;
+    files: { fileName: string; fileSize: number; fileType: string }[];
+    auditLogs: { action: string; timestamp: Date; reason: string | null }[];
 }
 
 /**
@@ -35,12 +46,39 @@ export async function getOwnedLinks(userId: string): Promise<DashboardLink[]> {
                 isRevoked: true,
                 createdAt: true,
                 allowedVendorEmail: true,
+                purpose: true,
+                purposeDetail: true,
+                notificationEmail: true,
+                failedAttempts: true,
+                lockedAt: true,
+                otpVerifiedAt: true,
+                otpPlain: true,
+                files: {
+                    select: {
+                        fileName: true,
+                        fileSize: true,
+                        fileType: true,
+                    },
+                },
+                auditLogs: {
+                    select: {
+                        action: true,
+                        timestamp: true,
+                        reason: true,
+                    },
+                    orderBy: {
+                        timestamp: 'desc',
+                    },
+                    take: 10,
+                },
             },
         });
 
         return links.map((link) => ({
             ...link,
             status: getStatus(link),
+            fileCount: link.files.length,
+            otp: link.otpPlain,
         }));
     } catch (error) {
         console.error('Error fetching owned links:', error);
@@ -69,12 +107,39 @@ export async function getReceivedLinks(email: string): Promise<DashboardLink[]> 
                 isRevoked: true,
                 createdAt: true,
                 allowedVendorEmail: true,
+                purpose: true,
+                purposeDetail: true,
+                notificationEmail: true,
+                failedAttempts: true,
+                lockedAt: true,
+                otpVerifiedAt: true,
+                otpPlain: true,
+                files: {
+                    select: {
+                        fileName: true,
+                        fileSize: true,
+                        fileType: true,
+                    },
+                },
+                auditLogs: {
+                    select: {
+                        action: true,
+                        timestamp: true,
+                        reason: true,
+                    },
+                    orderBy: {
+                        timestamp: 'desc',
+                    },
+                    take: 10,
+                },
             },
         });
 
         return links.map((link) => ({
             ...link,
             status: getStatus(link),
+            fileCount: link.files.length,
+            otp: link.otpPlain,
         }));
     } catch (error) {
         console.error('Error fetching received links:', error);
