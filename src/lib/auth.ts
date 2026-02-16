@@ -11,6 +11,10 @@ import { prisma } from '@/lib/prisma';
  * - Roles assigned server-side, never trusted from client
  * - Session strategy: database (more secure than JWT for sensitive apps)
  */
+// Determine if running on localhost (non-HTTPS)
+const useSecureCookies = process.env.NEXTAUTH_URL?.startsWith('https://') ?? false;
+const cookiePrefix = useSecureCookies ? '__Secure-' : '';
+
 export const authOptions: NextAuthOptions = {
     adapter: PrismaAdapter(prisma),
     providers: [
@@ -27,6 +31,66 @@ export const authOptions: NextAuthOptions = {
             },
         }),
     ],
+    // Explicit cookie config to prevent "State cookie was missing" error
+    // This ensures cookies are properly set/read during OAuth redirects on localhost
+    useSecureCookies,
+    cookies: {
+        sessionToken: {
+            name: `${cookiePrefix}next-auth.session-token`,
+            options: {
+                httpOnly: true,
+                sameSite: 'lax',
+                path: '/',
+                secure: useSecureCookies,
+            },
+        },
+        callbackUrl: {
+            name: `${cookiePrefix}next-auth.callback-url`,
+            options: {
+                sameSite: 'lax',
+                path: '/',
+                secure: useSecureCookies,
+            },
+        },
+        csrfToken: {
+            name: `${cookiePrefix}next-auth.csrf-token`,
+            options: {
+                httpOnly: true,
+                sameSite: 'lax',
+                path: '/',
+                secure: useSecureCookies,
+            },
+        },
+        pkceCodeVerifier: {
+            name: `${cookiePrefix}next-auth.pkce.code_verifier`,
+            options: {
+                httpOnly: true,
+                sameSite: 'lax',
+                path: '/',
+                secure: useSecureCookies,
+                maxAge: 60 * 15, // 15 minutes
+            },
+        },
+        state: {
+            name: `${cookiePrefix}next-auth.state`,
+            options: {
+                httpOnly: true,
+                sameSite: 'lax',
+                path: '/',
+                secure: useSecureCookies,
+                maxAge: 60 * 15, // 15 minutes
+            },
+        },
+        nonce: {
+            name: `${cookiePrefix}next-auth.nonce`,
+            options: {
+                httpOnly: true,
+                sameSite: 'lax',
+                path: '/',
+                secure: useSecureCookies,
+            },
+        },
+    },
     session: {
         // Use database sessions for better security (revocable)
         strategy: 'database',
@@ -47,18 +111,21 @@ export const authOptions: NextAuthOptions = {
          * Redirect new users to role selection page after sign-in
          */
         async redirect({ url, baseUrl }) {
+            // Always use NEXTAUTH_URL as the baseUrl to prevent port mismatches
+            const canonicalBase = process.env.NEXTAUTH_URL || baseUrl;
+
             // Don't redirect if already going to role-select
             if (url.includes('/auth/role-select')) {
                 return url;
             }
             // For relative URLs or same-origin URLs, allow them
             if (url.startsWith('/')) {
-                return `${baseUrl}${url}`;
+                return `${canonicalBase}${url}`;
             }
-            if (url.startsWith(baseUrl)) {
+            if (url.startsWith(canonicalBase)) {
                 return url;
             }
-            return baseUrl;
+            return canonicalBase;
         },
 
         /**
@@ -83,8 +150,8 @@ export const authOptions: NextAuthOptions = {
         signIn: '/auth/signin',
         error: '/auth/error',
     },
-    // Enable debug mode to surface OAuth errors
-    debug: true,
+    // Disable debug mode in production to avoid leaking secrets
+    debug: process.env.NODE_ENV === 'development',
     events: {
         /**
          * Auto-create new users as VENDOR role by default

@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+/* Font is loaded via next/font in layout.tsx — zero render-blocking */
 
 :root {
   /* Professional Tech Color Palette */
@@ -465,6 +465,9 @@ body {
 .features-section {
   padding: 120px 20px;
   background: linear-gradient(180deg, var(--darker-bg) 0%, var(--dark-bg) 100%);
+  /* Performance optimization: skip rendering until scrolled into view */
+  content-visibility: auto;
+  contain-intrinsic-size: 1000px;
 }
 
 .section-header {
@@ -3025,6 +3028,7 @@ body {
   background: rgba(34, 197, 94, 0.12);
   color: #22c55e;
 }
+
 .status-pill.live .status-dot {
   background: #22c55e;
   animation: pulse 2s infinite;
@@ -3034,6 +3038,7 @@ body {
   background: rgba(59, 130, 246, 0.12);
   color: #3b82f6;
 }
+
 .status-pill.active .status-dot {
   background: #3b82f6;
   animation: pulse 2s infinite;
@@ -3043,6 +3048,7 @@ body {
   background: rgba(239, 68, 68, 0.12);
   color: #ef4444;
 }
+
 .status-pill.revoked .status-dot {
   background: #ef4444;
 }
@@ -3051,13 +3057,21 @@ body {
   background: rgba(245, 158, 11, 0.12);
   color: #f59e0b;
 }
+
 .status-pill.expired .status-dot {
   background: #f59e0b;
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.3;
+  }
 }
 
 /* Status Detail Rows */
@@ -3455,7 +3469,9 @@ body {
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .loading-text {

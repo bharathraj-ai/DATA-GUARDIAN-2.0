@@ -1,6 +1,7 @@
 'use server';
 
 import { prisma } from '@/lib/prisma';
+import { cleanupSingleLink } from '@/actions/cleanup';
 
 // Cache Redis availability check at module load (performance optimization)
 const isRedisConfigured = !!(
@@ -46,7 +47,7 @@ export async function revokeAccess(
         // Find the secure link by owner token
         const secureLink = await prisma.secureLink.findUnique({
             where: { ownerToken },
-            include: { userData: true },
+            include: { UserData: true },
         });
 
         if (!secureLink) {
@@ -85,7 +86,7 @@ export async function revokeAccess(
                 });
 
                 // Optionally delete encrypted data immediately
-                if (deleteDataImmediately && secureLink.userData) {
+                if (deleteDataImmediately && secureLink.UserData) {
                     // Create audit log BEFORE deleting (to satisfy FK constraint)
                     await tx.auditLog.create({
                         data: {
@@ -96,7 +97,7 @@ export async function revokeAccess(
 
                     // Now delete the user data
                     await tx.userData.delete({
-                        where: { id: secureLink.userData.id },
+                        where: { id: secureLink.UserData.id },
                     });
                 }
             })
@@ -105,11 +106,12 @@ export async function revokeAccess(
         // Log kill switch performance
         console.log(`[KILL SWITCH] Link ${secureLink.id} revoked | Redis: ${redisResult.success ? `${redisResult.latencyMs}ms` : 'N/A'} | Target: <100ms`);
 
+        // AUTO-CLEANUP: Purge ALL data after revocation (fire-and-forget)
+        cleanupSingleLink(secureLink.token).catch(() => { });
+
         return {
             success: true,
-            message: deleteDataImmediately
-                ? 'Access revoked and data deleted immediately.'
-                : 'Access revoked. Data will be deleted on cleanup.',
+            message: 'Access revoked and all data permanently deleted.',
         };
     } catch (error) {
         console.error('Error revoking access:', error instanceof Error ? error.message : 'Unknown');

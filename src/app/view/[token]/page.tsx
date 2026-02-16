@@ -207,7 +207,7 @@ export default function ViewPage({ params }: ViewPageProps) {
         const timer = setInterval(() => {
             setRemainingSeconds((prev) => {
                 if (prev <= 1) {
-                    setError('Session expired. Data is no longer accessible.');
+                    setError('Session expired. All data has been permanently deleted.');
                     setUserData(null);
                     setFullData(null);
                     return 0;

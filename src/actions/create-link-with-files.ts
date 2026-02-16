@@ -170,7 +170,7 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
                     notificationEmail: notificationEmail || undefined,
                     // Zero Trust: Email binding - only this email can verify OTP
                     allowedVendorEmail: vendorEmail || undefined,
-                    files: {
+                    UserFile: {
                         create: encryptedFiles,
                     },
                 },

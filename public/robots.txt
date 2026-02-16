@@ -1,0 +1,39 @@
+# Data Guardian - Block all sensitive routes from search engine crawlers
+User-agent: *
+Disallow: /share/
+Disallow: /view/
+Disallow: /revoke/
+Disallow: /api/
+Disallow: /auth/
+Disallow: /signup
+
+# Block all known search engine bots explicitly
+User-agent: Googlebot
+Disallow: /share/
+Disallow: /view/
+Disallow: /revoke/
+
+User-agent: Bingbot
+Disallow: /share/
+Disallow: /view/
+Disallow: /revoke/
+
+User-agent: Yahoo! Slurp
+Disallow: /share/
+Disallow: /view/
+Disallow: /revoke/
+
+User-agent: DuckDuckBot
+Disallow: /share/
+Disallow: /view/
+Disallow: /revoke/
+
+User-agent: Baiduspider
+Disallow: /share/
+Disallow: /view/
+Disallow: /revoke/
+
+User-agent: YandexBot
+Disallow: /share/
+Disallow: /view/
+Disallow: /revoke/

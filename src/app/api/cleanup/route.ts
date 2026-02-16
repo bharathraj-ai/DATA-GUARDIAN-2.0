@@ -25,9 +25,11 @@ export async function GET(request: Request) {
 
     if (result.success) {
         return NextResponse.json({
-            message: 'Cleanup completed',
+            message: 'Cleanup completed — all expired data permanently deleted',
             deletedLinks: result.deletedLinks,
-            deletedUsers: result.deletedUsers,
+            deletedUserData: result.deletedUserData,
+            deletedFiles: result.deletedFiles,
+            deletedAuditLogs: result.deletedAuditLogs,
         }, { headers });
     }
 

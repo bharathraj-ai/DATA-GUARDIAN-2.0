@@ -53,14 +53,14 @@ export async function getOwnedLinks(userId: string): Promise<DashboardLink[]> {
                 lockedAt: true,
                 otpVerifiedAt: true,
                 otpPlain: true,
-                files: {
+                UserFile: {
                     select: {
                         fileName: true,
                         fileSize: true,
                         fileType: true,
                     },
                 },
-                auditLogs: {
+                AuditLog: {
                     select: {
                         action: true,
                         timestamp: true,
@@ -76,8 +76,10 @@ export async function getOwnedLinks(userId: string): Promise<DashboardLink[]> {
 
         return links.map((link) => ({
             ...link,
+            files: link.UserFile,
+            auditLogs: link.AuditLog,
             status: getStatus(link),
-            fileCount: link.files.length,
+            fileCount: link.UserFile.length,
             otp: link.otpPlain,
         }));
     } catch (error) {
@@ -114,14 +116,14 @@ export async function getReceivedLinks(email: string): Promise<DashboardLink[]> 
                 lockedAt: true,
                 otpVerifiedAt: true,
                 otpPlain: true,
-                files: {
+                UserFile: {
                     select: {
                         fileName: true,
                         fileSize: true,
                         fileType: true,
                     },
                 },
-                auditLogs: {
+                AuditLog: {
                     select: {
                         action: true,
                         timestamp: true,
@@ -137,8 +139,10 @@ export async function getReceivedLinks(email: string): Promise<DashboardLink[]> 
 
         return links.map((link) => ({
             ...link,
+            files: link.UserFile,
+            auditLogs: link.AuditLog,
             status: getStatus(link),
-            fileCount: link.files.length,
+            fileCount: link.UserFile.length,
             otp: link.otpPlain,
         }));
     } catch (error) {

@@ -9,7 +9,7 @@ datasource db {
 }
 
 model Account {
-  id                String  @id
+  id                String  @id @default(cuid())
   userId            String
   type              String
   provider          String
@@ -21,13 +21,13 @@ model Account {
   scope             String?
   id_token          String?
   session_state     String?
-  User              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerAccountId])
 }
 
 model AuditLog {
-  id         String      @id
+  id         String      @id @default(cuid())
   action     String
   timestamp  DateTime    @default(now())
   linkId     String?
@@ -41,7 +41,7 @@ model AuditLog {
 }
 
 model SecureLink {
-  id                 String     @id
+  id                 String     @id @default(cuid())
   token              String     @unique
   otpHash            String
   expiresAt          DateTime
@@ -74,15 +74,15 @@ model SecureLink {
 }
 
 model Session {
-  id           String   @id
+  id           String   @id @default(cuid())
   sessionToken String   @unique
   userId       String
   expires      DateTime
-  User         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model User {
-  id            String       @id
+  id            String       @id @default(cuid())
   email         String       @unique
   emailVerified DateTime?
   name          String?
@@ -97,7 +97,7 @@ model User {
 }
 
 model UserData {
-  id            String      @id
+  id            String      @id @default(cuid())
   createdAt     DateTime    @default(now())
   dataHash      String
   encryptedData String
@@ -105,7 +105,7 @@ model UserData {
 }
 
 model UserFile {
-  id               String     @id
+  id               String     @id @default(cuid())
   fileName         String
   fileType         String
   fileSize         Int

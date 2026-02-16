@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { decryptData } from '@/lib/crypto';
 import { maskEmail, maskPhone } from '@/lib/masking';
 import { cookies } from 'next/headers';
+import { cleanupSingleLink } from '@/actions/cleanup';
 
 // Cache Redis availability check at module load (performance optimization)
 const isRedisConfigured = !!(
@@ -114,8 +115,8 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
         const secureLink = await prisma.secureLink.findUnique({
             where: { token },
             include: {
-                userData: true,
-                files: {
+                UserData: true,
+                UserFile: {
                     select: {
                         id: true,
                         fileName: true,
@@ -127,7 +128,7 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
         });
 
         // Link not found
-        if (!secureLink || !secureLink.userData) {
+        if (!secureLink || !secureLink.UserData) {
             return {
                 success: false,
                 error: 'This link is invalid or has been deleted.',
@@ -156,9 +157,11 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
         // Check if link is expired (backend enforcement - Zero Trust)
         const now = new Date();
         if (secureLink.expiresAt < now) {
+            // AUTO-CLEANUP: Delete all data when expired
+            cleanupSingleLink(token).catch(() => { });
             return {
                 success: false,
-                error: 'This link has expired. The data is no longer accessible.',
+                error: 'This link has expired. All data has been permanently deleted.',
                 errorType: 'EXPIRED',
             };
         }
@@ -170,7 +173,7 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
         // Decrypt user data
         let decryptedData: DecryptedUserData;
         try {
-            decryptedData = decryptData<DecryptedUserData>(secureLink.userData.encryptedData);
+            decryptedData = decryptData<DecryptedUserData>(secureLink.UserData.encryptedData);
         } catch (decryptError) {
             console.error('Decryption failed');
             return {
@@ -192,7 +195,7 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
                 age: decryptedData.age,
                 expiresAt: secureLink.expiresAt,
                 remainingSeconds,
-                files: secureLink.files || [],
+                files: secureLink.UserFile || [],
             },
         };
     } catch (error) {
@@ -231,10 +234,10 @@ export async function getFullUserData(token: string, sessionId: string): Promise
         // Get and decrypt data
         const secureLink = await prisma.secureLink.findUnique({
             where: { token },
-            include: { userData: true },
+            include: { UserData: true },
         });
 
-        if (!secureLink || !secureLink.userData || !secureLink.isUsed || secureLink.isRevoked) {
+        if (!secureLink || !secureLink.UserData || !secureLink.isUsed || secureLink.isRevoked) {
             return { success: false, error: 'Not accessible' };
         }
 
@@ -246,7 +249,7 @@ export async function getFullUserData(token: string, sessionId: string): Promise
         const remainingMs = secureLink.expiresAt.getTime() - now.getTime();
         const remainingSeconds = Math.max(0, Math.floor(remainingMs / 1000));
 
-        const decryptedData = decryptData<DecryptedUserData>(secureLink.userData.encryptedData);
+        const decryptedData = decryptData<DecryptedUserData>(secureLink.UserData.encryptedData);
 
         return {
             success: true,
