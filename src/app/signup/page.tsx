@@ -371,22 +371,19 @@ export default function SignupPage() {
                                             Vendor Email (Optional)
                                             <span className="security-badge">Zero Trust</span>
                                         </label>
-                                        <input
-                                            type="email"
+                                        <select
                                             name="vendorEmail"
                                             value={formData.vendorEmail}
                                             onChange={handleChange}
-                                            className="form-input"
-                                            placeholder="Enter vendor email or leave empty"
-                                            list="vendor-list"
-                                        />
-                                        <datalist id="vendor-list">
+                                            className="form-select"
+                                        >
+                                            <option value="">Enter vendor email or leave empty</option>
                                             {vendors.map((vendor) => (
                                                 <option key={vendor.email} value={vendor.email}>
-                                                    {vendor.name ? `${vendor.name} (${vendor.email})` : vendor.email}
+                                                    {vendor.name ? `${vendor.name} — ${vendor.email}` : vendor.email}
                                                 </option>
                                             ))}
-                                        </datalist>
+                                        </select>
                                         <small className="form-hint">
                                             If specified, only this vendor can verify the OTP. Prevents link forwarding.
                                         </small>

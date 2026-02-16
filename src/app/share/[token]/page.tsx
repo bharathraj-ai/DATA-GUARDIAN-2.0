@@ -3,12 +3,15 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { verifyOTP } from '@/actions/verify-otp';
+import { validateShareAccess } from '@/actions/validate-share-access';
+import { signIn } from 'next-auth/react';
 
 interface SharePageProps {
     params: Promise<{ token: string }>;
 }
 
 type VerificationState = 'idle' | 'loading' | 'success' | 'error';
+type AccessState = 'checking' | 'allowed' | 'denied' | 'requires_auth';
 
 export default function SharePage({ params }: SharePageProps) {
     const router = useRouter();
@@ -16,11 +19,13 @@ export default function SharePage({ params }: SharePageProps) {
     const [otp, setOtp] = useState<string[]>(['', '', '', '', '', '']);
     const [state, setState] = useState<VerificationState>('idle');
     const [error, setError] = useState<string>('');
+    const [accessError, setAccessError] = useState<string>('');
     const [remainingAttempts, setRemainingAttempts] = useState(1);
     const [countdown, setCountdown] = useState(300); // 5 minutes
     const [shake, setShake] = useState(false);
     const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [accessState, setAccessState] = useState<AccessState>('checking');
 
     // Force refresh on mount to clear any cached data
     useEffect(() => {
@@ -40,28 +45,52 @@ export default function SharePage({ params }: SharePageProps) {
             // Remove any query parameters (like timestamp) from token
             const cleanToken = p.token.split('?')[0];
             setToken(cleanToken);
-            setIsLoading(false);
         }).catch((err) => {
             console.error('Failed to resolve params:', err);
             setIsLoading(false);
         });
     }, [params]);
 
+    // SECURITY: Validate access before showing OTP form
+    useEffect(() => {
+        if (!token) return;
+
+        async function checkAccess() {
+            setAccessState('checking');
+            const result = await validateShareAccess(token);
+
+            if (result.allowed) {
+                setAccessState('allowed');
+                setIsLoading(false);
+            } else if (result.requiresAuth) {
+                setAccessState('requires_auth');
+                setAccessError(result.error || 'Authentication required.');
+                setIsLoading(false);
+            } else {
+                setAccessState('denied');
+                setAccessError(result.error || 'Access denied.');
+                setIsLoading(false);
+            }
+        }
+
+        checkAccess();
+    }, [token]);
+
     // Countdown timer
     useEffect(() => {
-        if (countdown <= 0) return;
+        if (countdown <= 0 || accessState !== 'allowed') return;
         const timer = setInterval(() => {
             setCountdown((prev) => Math.max(0, prev - 1));
         }, 1000);
         return () => clearInterval(timer);
-    }, [countdown]);
+    }, [countdown, accessState]);
 
     // Auto-focus first input
     useEffect(() => {
-        if (token && inputRefs.current[0]) {
+        if (token && accessState === 'allowed' && inputRefs.current[0]) {
             inputRefs.current[0].focus();
         }
-    }, [token]);
+    }, [token, accessState]);
 
     const formatTime = (seconds: number): string => {
         const mins = Math.floor(seconds / 60);
@@ -162,22 +191,142 @@ export default function SharePage({ params }: SharePageProps) {
 
     // Auto-submit when all 6 digits entered
     useEffect(() => {
-        if (otp.every((digit) => digit !== '') && state === 'idle') {
+        if (otp.every((digit) => digit !== '') && state === 'idle' && accessState === 'allowed') {
             handleSubmit();
         }
-    }, [otp, state, handleSubmit]);
+    }, [otp, state, handleSubmit, accessState]);
 
-    if (isLoading || !token) {
+    // Loading state
+    if (isLoading || accessState === 'checking') {
         return (
             <main className="otp-wrapper">
                 <div className="otp-card">
                     <div className="loading-spinner" />
-                    <p className="loading-text">Loading secure verification...</p>
+                    <p className="loading-text">Validating access permissions...</p>
                 </div>
             </main>
         );
     }
 
+    // SECURITY: Requires authentication — show sign-in prompt
+    if (accessState === 'requires_auth') {
+        return (
+            <main className="otp-wrapper">
+                <div className="bg-orb bg-orb-1" />
+                <div className="bg-orb bg-orb-2" />
+                <div className="bg-grid" />
+
+                <div className="otp-card">
+                    <div className="otp-header">
+                        <div className="lock-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                            </svg>
+                        </div>
+                        <h1 className="otp-title">Authentication Required</h1>
+                        <p className="otp-subtitle">
+                            This secure link is restricted to an authorized recipient.
+                            Please sign in with Google to verify your identity.
+                        </p>
+                    </div>
+
+                    <button
+                        onClick={() => signIn('google', { callbackUrl: `/share/${token}` })}
+                        className="otp-button idle"
+                        style={{ marginTop: '24px' }}
+                    >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: '20px', height: '20px' }}>
+                            <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+                            <polyline points="10 17 15 12 10 7" />
+                            <line x1="15" y1="12" x2="3" y2="12" />
+                        </svg>
+                        Sign in with Google
+                    </button>
+
+                    <div className="security-badge" style={{ marginTop: '24px' }}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                        </svg>
+                        <span>Only the authorized recipient can access this link</span>
+                    </div>
+                </div>
+            </main>
+        );
+    }
+
+    // SECURITY: Access denied — wrong email or link issues
+    if (accessState === 'denied') {
+        const isRevoked = accessError.includes('revoked');
+        const isExpired = accessError.includes('expired');
+        const isEmailMismatch = accessError.includes('different recipient');
+        return (
+            <main className="otp-wrapper">
+                <div className="bg-orb bg-orb-1" />
+                <div className="bg-orb bg-orb-2" />
+                <div className="bg-grid" />
+
+                <div className="otp-card">
+                    <div className="otp-header">
+                        <div className="lock-icon" style={{ color: '#ef4444' }}>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                {isEmailMismatch ? (
+                                    <><circle cx="12" cy="12" r="10" /><line x1="4.93" y1="4.93" x2="19.07" y2="19.07" /></>
+                                ) : (
+                                    <><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></>
+                                )}
+                            </svg>
+                        </div>
+                        <h1 className="otp-title" style={{ color: '#ef4444' }}>
+                            {isRevoked ? 'Access Revoked' : isExpired ? 'Link Expired' : isEmailMismatch ? 'Unauthorized Access' : 'Access Denied'}
+                        </h1>
+                        <p className="otp-subtitle">{accessError}</p>
+                    </div>
+
+                    {isEmailMismatch && (
+                        <div className="phishing-warning" style={{
+                            background: 'rgba(239, 68, 68, 0.1)',
+                            border: '1px solid rgba(239, 68, 68, 0.3)',
+                            borderRadius: '8px',
+                            padding: '12px 16px',
+                            margin: '16px 0',
+                            display: 'flex',
+                            alignItems: 'flex-start',
+                            gap: '10px'
+                        }}>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2" style={{ width: '20px', height: '20px', flexShrink: 0, marginTop: '2px' }}>
+                                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                            </svg>
+                            <div style={{ fontSize: '12px', color: '#f87171', lineHeight: '1.4' }}>
+                                <strong style={{ display: 'block', marginBottom: '4px' }}>🔒 Security Notice</strong>
+                                This link was created for a specific vendor. If you believe this is an error,
+                                contact the person who shared it with you and ask them to create a new link for your email.
+                            </div>
+                        </div>
+                    )}
+
+                    <button
+                        onClick={() => {
+                            window.location.href = `/signup?t=${Date.now()}`;
+                        }}
+                        className="otp-button idle"
+                        style={{ marginTop: '16px' }}
+                    >
+                        Return Home
+                    </button>
+
+                    <div className="security-badge" style={{ marginTop: '24px' }}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                        </svg>
+                        <span>Protected by Data Guardian V2</span>
+                    </div>
+                </div>
+            </main>
+        );
+    }
+
+    // ACCESS GRANTED — Show OTP form (only reaches here if accessState === 'allowed')
     return (
         <main className="otp-wrapper">
             {/* Decorative Background Elements */}

@@ -3,44 +3,49 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   output: 'standalone',
 
-  // Enable compression for better performance
+  // Enable GZIP/Brotli compression
   compress: true,
 
-  // Optimize production builds
+  // No source maps in production (smaller bundle)
   productionBrowserSourceMaps: false,
 
-  // React strict mode for better development
+  // React strict mode for development
   reactStrictMode: true,
+
+  // Performance: Skip type checking during build (use CI for that)
+  typescript: {
+    ignoreBuildErrors: false,
+  },
 
   // Experimental features
   experimental: {
     serverActions: {
       bodySizeLimit: '150mb',
     },
-    // Optimize more package imports for faster cold starts
-    optimizePackageImports: ['zod', 'bcryptjs', 'uuid', '@prisma/client', 'qrcode'],
+    // Tree-shake these packages for faster cold starts
+    optimizePackageImports: [
+      'zod',
+      'bcryptjs',
+      'uuid',
+      '@prisma/client',
+      'qrcode',
+      'next-auth',
+      'exceljs',
+    ],
   },
 
-  // Image optimization
+  // Optimized image handling
   images: {
     formats: ['image/avif', 'image/webp'],
-    minimumCacheTTL: 60,
+    minimumCacheTTL: 3600, // 1 hour (was 60s — too aggressive)
     deviceSizes: [640, 750, 828, 1080, 1200],
     imageSizes: [16, 32, 48, 64, 96, 128, 256],
   },
 
-  // DNS prefetch for faster database connections
-  async rewrites() {
-    return {
-      beforeFiles: [],
-      afterFiles: [],
-      fallback: [],
-    };
-  },
-
-  // Security headers + caching for static assets
+  // Security headers + aggressive caching for static assets
   async headers() {
     return [
+      // Global security headers
       {
         source: '/(.*)',
         headers: [
@@ -51,70 +56,70 @@ const nextConfig: NextConfig = {
           { key: 'X-DNS-Prefetch-Control', value: 'on' },
         ],
       },
-      // NO CACHE for dynamic routes
+      // NO CACHE for dynamic/secure routes
       {
         source: '/signup/:path*',
         headers: [
-          { key: 'Cache-Control', value: 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0' },
+          { key: 'Cache-Control', value: 'no-store, no-cache, must-revalidate, max-age=0' },
           { key: 'Pragma', value: 'no-cache' },
-          { key: 'Expires', value: '0' },
         ],
       },
       {
         source: '/share/:path*',
         headers: [
-          { key: 'Cache-Control', value: 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0' },
+          { key: 'Cache-Control', value: 'no-store, no-cache, must-revalidate, max-age=0' },
           { key: 'Pragma', value: 'no-cache' },
-          { key: 'Expires', value: '0' },
         ],
       },
       {
         source: '/view/:path*',
         headers: [
-          { key: 'Cache-Control', value: 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0' },
+          { key: 'Cache-Control', value: 'no-store, no-cache, must-revalidate, max-age=0' },
           { key: 'Pragma', value: 'no-cache' },
-          { key: 'Expires', value: '0' },
         ],
       },
       {
         source: '/revoke/:path*',
         headers: [
-          { key: 'Cache-Control', value: 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0' },
+          { key: 'Cache-Control', value: 'no-store, no-cache, must-revalidate, max-age=0' },
           { key: 'Pragma', value: 'no-cache' },
-          { key: 'Expires', value: '0' },
         ],
       },
       {
         source: '/api/:path*',
         headers: [
-          { key: 'Cache-Control', value: 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0' },
+          { key: 'Cache-Control', value: 'no-store, no-cache, must-revalidate, max-age=0' },
           { key: 'Pragma', value: 'no-cache' },
-          { key: 'Expires', value: '0' },
         ],
       },
-      // Cache static assets aggressively
+      // AGGRESSIVE CACHE for static assets (1 year, immutable)
       {
         source: '/_next/static/(.*)',
         headers: [
           { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' },
         ],
       },
-      // Cache fonts
       {
         source: '/fonts/(.*)',
         headers: [
           { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' },
         ],
       },
+      // Cache robots.txt and favicon
+      {
+        source: '/robots.txt',
+        headers: [
+          { key: 'Cache-Control', value: 'public, max-age=86400' },
+        ],
+      },
     ];
   },
 
-  // Turbopack config (Next.js 16+ default bundler)
+  // Turbopack config (Next.js 16 default bundler)
   turbopack: {},
 
-  // Webpack optimizations (legacy, kept for backwards compatibility)
+  // Webpack optimizations (fallback for non-Turbopack builds)
   webpack: (config, { isServer }) => {
-    // Optimize chunks
     if (!isServer) {
       config.optimization = {
         ...config.optimization,
@@ -125,10 +130,18 @@ const nextConfig: NextConfig = {
           cacheGroups: {
             default: false,
             vendors: false,
+            // Shared code between pages
             commons: {
               name: 'commons',
               chunks: 'all',
               minChunks: 2,
+            },
+            // Separate vendor chunks for better caching
+            vendor: {
+              test: /[\\/]node_modules[\\/]/,
+              name: 'vendor',
+              chunks: 'all',
+              priority: 10,
             },
           },
         },

@@ -1,8 +1,24 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
+import { Inter } from 'next/font/google';
 import Link from 'next/link';
 import "./globals.css";
 import Navbar from "@/components/Navbar";
 import Providers from "@/components/Providers";
+
+// next/font: Self-hosts Inter, preloads it, eliminates render-blocking requests
+const inter = Inter({
+  subsets: ['latin'],
+  display: 'swap',
+  variable: '--font-inter',
+  preload: true,
+});
+
+// Viewport export (Next.js 16 best practice — separate from metadata)
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  themeColor: '#020617',
+};
 
 export const metadata: Metadata = {
   title: "Data Guardian - Secure Data Protection",
@@ -16,11 +32,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" className={inter.variable}>
       <head>
-        {/* We use Inter from globals.css @import */}
+        {/* DNS prefetch for faster external connections */}
+        <link rel="dns-prefetch" href="//accounts.google.com" />
+        <link rel="preconnect" href="https://accounts.google.com" crossOrigin="anonymous" />
       </head>
-      <body>
+      <body className={inter.className}>
         <Providers>
           <Navbar />
           {children}

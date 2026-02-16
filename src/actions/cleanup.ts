@@ -5,18 +5,24 @@ import { prisma } from '@/lib/prisma';
 export type CleanupResult = {
     success: boolean;
     deletedLinks: number;
-    deletedUsers: number;
+    deletedUserData: number;
+    deletedFiles: number;
+    deletedAuditLogs: number;
     error?: string;
 };
 
 /**
- * Cleanup expired and revoked secure links and their associated encrypted data
+ * Cleanup expired and revoked secure links and ALL associated data
  * 
- * Security features:
- * - Removes all expired encrypted data
- * - Removes revoked data
- * - Creates audit log entries
- * - Should be called via cron job (Vercel Cron, etc.)
+ * COMPLETE DATA PURGE:
+ * - Deletes audit logs (references link)
+ * - Deletes attached files (encrypted)
+ * - Deletes the secure link itself
+ * - Deletes the encrypted user data
+ * 
+ * After cleanup, NOTHING remains — no trace of the data ever existing.
+ * Should be called via cron job (Vercel Cron, etc.) and also triggered
+ * automatically when a link expires during viewing.
  */
 export async function cleanupExpiredData(): Promise<CleanupResult> {
     try {
@@ -41,45 +47,60 @@ export async function cleanupExpiredData(): Promise<CleanupResult> {
             return {
                 success: true,
                 deletedLinks: 0,
-                deletedUsers: 0,
+                deletedUserData: 0,
+                deletedFiles: 0,
+                deletedAuditLogs: 0,
             };
         }
 
-        const userIds = linksToClean.map(link => link.userId);
+        const userDataIds = linksToClean.map(link => link.userId);
         const linkIds = linksToClean.map(link => link.id);
 
-        // Delete in transaction
+        // Delete EVERYTHING in a transaction (order matters for foreign keys)
         const result = await prisma.$transaction(async (tx) => {
-            // Create audit log entries for cleanup
-            await tx.auditLog.createMany({
-                data: linkIds.map(linkId => ({
-                    action: 'CLEANUP',
-                    linkId,
-                })),
+            // 1. Delete audit logs first (they reference SecureLink)
+            const deletedAuditLogs = await tx.auditLog.deleteMany({
+                where: {
+                    linkId: { in: linkIds },
+                },
             });
 
-            // Delete secure links first (due to foreign key)
+            // 2. Delete attached files (they reference SecureLink)
+            const deletedFiles = await tx.userFile.deleteMany({
+                where: {
+                    secureLinkId: { in: linkIds },
+                },
+            });
+
+            // 3. Delete secure links (they reference UserData)
             const deletedLinks = await tx.secureLink.deleteMany({
                 where: {
                     id: { in: linkIds },
                 },
             });
 
-            // Delete associated encrypted user data
-            const deletedUsers = await tx.userData.deleteMany({
+            // 4. Delete encrypted user data (now safe, no references left)
+            const deletedUserData = await tx.userData.deleteMany({
                 where: {
-                    id: { in: userIds },
+                    id: { in: userDataIds },
                 },
             });
 
             return {
                 deletedLinks: deletedLinks.count,
-                deletedUsers: deletedUsers.count,
+                deletedUserData: deletedUserData.count,
+                deletedFiles: deletedFiles.count,
+                deletedAuditLogs: deletedAuditLogs.count,
             };
         });
 
         // SECURITY: Log only counts, never data content
-        console.log(`[CLEANUP] Deleted ${result.deletedLinks} links and ${result.deletedUsers} encrypted records`);
+        console.log(
+            `[CLEANUP] Purged ${result.deletedLinks} links, ` +
+            `${result.deletedUserData} encrypted records, ` +
+            `${result.deletedFiles} files, ` +
+            `${result.deletedAuditLogs} audit logs`
+        );
 
         return {
             success: true,
@@ -90,9 +111,75 @@ export async function cleanupExpiredData(): Promise<CleanupResult> {
         return {
             success: false,
             deletedLinks: 0,
-            deletedUsers: 0,
+            deletedUserData: 0,
+            deletedFiles: 0,
+            deletedAuditLogs: 0,
             error: 'Cleanup failed',
         };
+    }
+}
+
+/**
+ * Delete a SINGLE expired/revoked secure link and all its associated data.
+ * Called automatically when a link is detected as expired during viewing.
+ * 
+ * COMPLETE DATA PURGE for one link:
+ * - Audit logs
+ * - Files
+ * - Link record
+ * - Encrypted user data
+ */
+export async function cleanupSingleLink(token: string): Promise<{ success: boolean; error?: string }> {
+    try {
+        const secureLink = await prisma.secureLink.findUnique({
+            where: { token },
+            select: {
+                id: true,
+                userId: true,
+                expiresAt: true,
+                isRevoked: true,
+            },
+        });
+
+        if (!secureLink) {
+            return { success: true }; // Already cleaned up
+        }
+
+        const now = new Date();
+        const isExpiredOrRevoked = secureLink.expiresAt < now || secureLink.isRevoked;
+
+        if (!isExpiredOrRevoked) {
+            return { success: false, error: 'Link is still active' };
+        }
+
+        // Delete EVERYTHING for this single link
+        await prisma.$transaction(async (tx) => {
+            // 1. Delete audit logs
+            await tx.auditLog.deleteMany({
+                where: { linkId: secureLink.id },
+            });
+
+            // 2. Delete attached files
+            await tx.userFile.deleteMany({
+                where: { secureLinkId: secureLink.id },
+            });
+
+            // 3. Delete the secure link
+            await tx.secureLink.delete({
+                where: { id: secureLink.id },
+            });
+
+            // 4. Delete encrypted user data
+            await tx.userData.delete({
+                where: { id: secureLink.userId },
+            });
+        });
+
+        console.log(`[CLEANUP] Single link purged: ${secureLink.id}`);
+        return { success: true };
+    } catch (error) {
+        console.error('Single link cleanup error:', error instanceof Error ? error.message : 'Unknown');
+        return { success: false, error: 'Cleanup failed' };
     }
 }
 

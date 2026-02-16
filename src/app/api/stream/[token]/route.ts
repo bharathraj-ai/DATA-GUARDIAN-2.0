@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { decryptData } from '@/lib/crypto';
+import { cleanupSingleLink } from '@/actions/cleanup';
 
 export const dynamic = 'force-dynamic'; // Prevent static generation during build
 
@@ -92,22 +93,24 @@ export async function GET(
     // Get secure link and encrypted data
     const secureLink = await prisma.secureLink.findUnique({
         where: { token },
-        include: { userData: true },
+        include: { UserData: true },
     });
 
-    if (!secureLink || !secureLink.userData || !secureLink.isUsed || secureLink.isRevoked) {
+    if (!secureLink || !secureLink.UserData || !secureLink.isUsed || secureLink.isRevoked) {
         return new Response('Not accessible', { status: 404 });
     }
 
     const now = new Date();
     if (secureLink.expiresAt < now) {
+        // AUTO-CLEANUP: Delete all data immediately on expiry detection
+        cleanupSingleLink(token).catch(() => { });
         return new Response('Expired', { status: 410 });
     }
 
     // Decrypt data
     let userData: DecryptedUserData;
     try {
-        userData = decryptData<DecryptedUserData>(secureLink.userData.encryptedData);
+        userData = decryptData<DecryptedUserData>(secureLink.UserData.encryptedData);
     } catch {
         return new Response('Decryption failed', { status: 500 });
     }
@@ -197,6 +200,8 @@ export async function GET(
                         clearInterval(heartbeatInterval);
                         controller.close();
                         logSessionEnd('revoked');
+                        // AUTO-CLEANUP: Purge all data when revoked
+                        cleanupSingleLink(token).catch(() => { });
                         return;
                     }
 
@@ -209,6 +214,8 @@ export async function GET(
                         clearInterval(heartbeatInterval);
                         controller.close();
                         logSessionEnd('expired');
+                        // AUTO-CLEANUP: Purge all data when time expires
+                        cleanupSingleLink(token).catch(() => { });
                         return;
                     }
 

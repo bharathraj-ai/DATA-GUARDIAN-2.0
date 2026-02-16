@@ -68,15 +68,15 @@ export async function getFilePreview(token: string, fileId: string): Promise<Fil
         // 2. Fetch File Metadata
         const fileRecord = await prisma.userFile.findUnique({
             where: { id: fileId },
-            include: { secureLink: true },
+            include: { SecureLink: true },
         });
 
-        if (!fileRecord || fileRecord.secureLink.token !== token) {
+        if (!fileRecord || fileRecord.SecureLink.token !== token) {
             return { success: false, error: 'File not found' };
         }
 
         // Check DB revocation/expiry again
-        if (fileRecord.secureLink.isRevoked || fileRecord.secureLink.expiresAt < new Date()) {
+        if (fileRecord.SecureLink.isRevoked || fileRecord.SecureLink.expiresAt < new Date()) {
             return { success: false, error: 'Access expired or revoked' };
         }
 
@@ -100,7 +100,7 @@ export async function getFilePreview(token: string, fileId: string): Promise<Fil
             await prisma.auditLog.create({
                 data: {
                     action: 'PREVIEW_RESTRICTED',
-                    linkId: fileRecord.secureLink.id,
+                    linkId: fileRecord.SecureLink.id,
                     reason: `Preview restricted: ${fileRecord.fileName}`,
                     metadata: JSON.stringify({
                         fileId: fileRecord.id,
