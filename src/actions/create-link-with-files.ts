@@ -42,6 +42,9 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
         const purposeDetail = formData.get('purposeDetail') as string | null;
         const notificationEmail = formData.get('notificationEmail') as string | null;
 
+        // Zero Trust: Extract vendor email for email binding
+        const vendorEmail = formData.get('vendorEmail') as string | null;
+
         const validatedData = userDataSchema.safeParse(rawData);
         if (!validatedData.success) {
             return {
@@ -151,6 +154,8 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
                     purpose: purpose || undefined,
                     purposeDetail: purposeDetail || undefined,
                     notificationEmail: notificationEmail || undefined,
+                    // Zero Trust: Email binding - only this email can verify OTP
+                    allowedVendorEmail: vendorEmail || undefined,
                     files: {
                         create: encryptedFiles,
                     },
