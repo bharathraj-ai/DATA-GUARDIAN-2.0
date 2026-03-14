@@ -24,6 +24,35 @@ export default function RevokePage({ params }: RevokePageProps) {
     const [revokeResult, setRevokeResult] = useState<RevokeAccessResult | null>(null);
     const [showConfirm, setShowConfirm] = useState(false);
     const [deleteData, setDeleteData] = useState(false);
+    const [timeLeft, setTimeLeft] = useState<string>('');
+
+    // Live countdown timer — updates every second
+    useEffect(() => {
+        if (!status || status.isRevoked || status.isExpired) return;
+
+        const tick = () => {
+            const now = Date.now();
+            const remaining = status.expiresAt.getTime() - now;
+            if (remaining <= 0) {
+                setTimeLeft('Expired');
+                return;
+            }
+            const hours = Math.floor(remaining / (1000 * 60 * 60));
+            const minutes = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
+            const seconds = Math.floor((remaining % (1000 * 60)) / 1000);
+            if (hours > 0) {
+                setTimeLeft(`${hours}h ${minutes}m ${seconds}s`);
+            } else if (minutes > 0) {
+                setTimeLeft(`${minutes}m ${seconds}s`);
+            } else {
+                setTimeLeft(`${seconds}s`);
+            }
+        };
+
+        tick(); // initial call
+        const interval = setInterval(tick, 1000);
+        return () => clearInterval(interval);
+    }, [status]);
 
     useEffect(() => {
         params.then(async (p) => {
@@ -246,7 +275,7 @@ export default function RevokePage({ params }: RevokePageProps) {
                                     </svg>
                                     Time Left
                                 </span>
-                                <span className="detail-value highlight">{getRemainingTime()}</span>
+                                <span className="detail-value highlight">{timeLeft}</span>
                             </div>
                         )}
                         <div className="detail-row">

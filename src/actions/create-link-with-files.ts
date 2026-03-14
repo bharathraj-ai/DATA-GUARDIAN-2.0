@@ -53,6 +53,12 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
         const purposeDetail = formData.get('purposeDetail') as string | null;
         const notificationEmail = formData.get('notificationEmail') as string | null;
 
+        // V2.2: Topic is mandatory — owner must describe what they're sharing
+        const topic = (purpose || '').trim();
+        if (!topic) {
+            return { success: false, error: 'Topic is required. Please describe what data you are sharing.' };
+        }
+
         // Zero Trust: Extract vendor email for email binding
         const vendorEmail = formData.get('vendorEmail') as string | null;
 
@@ -165,7 +171,7 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
                     // OWNER BINDING: Associate link with authenticated user
                     ownerId: session.user.id,
                     // V2.1 Additions
-                    purpose: purpose || undefined,
+                    purpose: topic,
                     purposeDetail: purposeDetail || undefined,
                     notificationEmail: notificationEmail || undefined,
                     // Zero Trust: Email binding - only this email can verify OTP
@@ -173,6 +179,19 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
                     UserFile: {
                         create: encryptedFiles,
                     },
+                },
+            });
+
+            // V2.2: Create a SendRecord that SURVIVES data deletion
+            // Owner can always see WHO they sent data to and WHAT topic
+            await tx.sendRecord.create({
+                data: {
+                    ownerId: session.user.id,
+                    topic,
+                    vendorEmail: vendorEmail || null,
+                    fileCount: files.length,
+                    status: 'active',
+                    expiredAt: expiresAt,
                 },
             });
 
@@ -200,6 +219,15 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
         const ownerUrl = `${baseUrl}/revoke/${ownerToken}`;
 
         console.log(`[SECURE] Link created with ${files.length} files. ID: ${result.id}`);
+
+        // 📧 Send OTP email to vendor (fire-and-forget, non-blocking)
+        if (vendorEmail) {
+            import('@/lib/email').then(({ sendOTPEmail }) => {
+                sendOTPEmail(vendorEmail, token, otp, validityMinutes)
+                    .then(() => console.log(`[EMAIL] OTP sent to ${vendorEmail.substring(0, 3)}***`))
+                    .catch((err) => console.error('[EMAIL] Failed to send OTP:', err.message));
+            });
+        }
 
         return {
             success: true,

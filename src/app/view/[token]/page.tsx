@@ -5,6 +5,13 @@ import { useRouter } from 'next/navigation';
 import { getUserData, MaskedUserData } from '@/actions/get-user';
 import { getFilePreview, FilePreviewResult } from '@/actions/get-file-preview';
 import { revokeOnScreenshot } from '@/actions/revoke-on-screenshot';
+import dynamic from 'next/dynamic';
+
+// Lazy load the Universal File Editor to avoid loading heavy editor dependencies upfront
+const UniversalFileEditor = dynamic(() => import('@/components/UniversalFileEditor'), {
+    ssr: false,
+    loading: () => null,
+});
 
 interface ViewPageProps {
     params: Promise<{ token: string }>;
@@ -41,6 +48,16 @@ export default function ViewPage({ params }: ViewPageProps) {
     const [showPreviewModal, setShowPreviewModal] = useState(false);
     const [isPreviewLoading, setIsPreviewLoading] = useState(false);
 
+    // Security State
+    const [warningCount, setWarningCount] = useState(0);
+    const MAX_WARNINGS = 3;
+
+    // Inline Editor State
+    const [isEditingFile, setIsEditingFile] = useState(false);
+    const [editFileId, setEditFileId] = useState<string | null>(null);
+    const [editFileName, setEditFileName] = useState('');
+    const [isFinished, setIsFinished] = useState(false);
+
     // Resolve params
     useEffect(() => {
         params.then((p) => {
@@ -51,14 +68,23 @@ export default function ViewPage({ params }: ViewPageProps) {
     }, [params]);
 
     // Screenshot Protection - Revoke access when window loses focus or visibility changes
-    // (Browsers block keydown for PrintScreen/Win+Shift+S, but blur/visibility events work)
+    // Uses keyup (more reliable than keydown for PrintScreen), clipboard detection, and blur/visibility
     useEffect(() => {
         let isRevoking = false;
+        let screenshotDetected = false; // Debounce: prevent blur from double-counting a PrintScreen
 
-        const triggerSecurityViolation = async (reason: string) => {
+        const triggerSecurityViolation = async (reason: string, isImmediate: boolean = false) => {
             if (isRevoking || !token) return;
-            isRevoking = true;
 
+            if (!isImmediate && warningCount < MAX_WARNINGS - 1) {
+                // Just a warning
+                setWarningCount(prev => prev + 1);
+                console.warn(`[SECURITY WARNING ${warningCount + 1}/${MAX_WARNINGS}] ${reason}`);
+                return;
+            }
+
+            // Revoke access
+            isRevoking = true;
             console.warn(`[SECURITY] ${reason}`);
 
             // Close any open SSE stream immediately
@@ -69,7 +95,10 @@ export default function ViewPage({ params }: ViewPageProps) {
             // Clear visible data immediately
             setUserData(null);
             setFullData(null);
-            setError('Security Violation: Access revoked due to potential screenshot attempt.');
+            setError(isImmediate
+                ? 'Security Violation: Access revoked due to screenshot attempt.'
+                : `Security Violation: Access revoked after ${MAX_WARNINGS} tab switches or focus losses.`
+            );
             setConnectionStatus('disconnected');
 
             // Call server to revoke access and notify owner
@@ -78,33 +107,71 @@ export default function ViewPage({ params }: ViewPageProps) {
 
         // Detect when tab/window loses visibility (e.g., snipping tool overlay)
         const handleVisibilityChange = () => {
-            if (document.hidden) {
-                triggerSecurityViolation('Tab hidden - possible screenshot');
+            if (document.hidden && !isEditingFile && !screenshotDetected) {
+                triggerSecurityViolation('Tab hidden - possible screenshot', false);
             }
         };
 
         // Detect when window loses focus (e.g., snipping tool opens)
         const handleBlur = () => {
-            triggerSecurityViolation('Window lost focus - possible screenshot');
+            // Skip if editor is open or if PrintScreen was just detected
+            if (!isEditingFile && !screenshotDetected) {
+                triggerSecurityViolation('Window lost focus - possible screenshot', false);
+            }
         };
 
-        // Detect PrintScreen key (works in some browsers)
+        // Detect PrintScreen key (keydown — may not fire on all browsers)
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'PrintScreen') {
+                e.preventDefault();
+                screenshotDetected = true;
+                triggerSecurityViolation('PrintScreen key detected', true);
+                // Reset debounce after a short delay
+                setTimeout(() => { screenshotDetected = false; }, 1000);
+            }
+            if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) {
+                e.preventDefault();
+                triggerSecurityViolation('Print shortcut (Ctrl+P) detected', true);
+            }
+        };
+
+        // Detect PrintScreen key (keyup — fires more reliably than keydown on most browsers)
         const handleKeyUp = (e: KeyboardEvent) => {
             if (e.key === 'PrintScreen') {
-                triggerSecurityViolation('PrintScreen key detected');
+                e.preventDefault();
+                screenshotDetected = true;
+                triggerSecurityViolation('PrintScreen key detected', true);
+                setTimeout(() => { screenshotDetected = false; }, 1000);
+            }
+        };
+
+        // Detect screenshot images landing on the clipboard (Ctrl+V or paste after PrtSc)
+        const handlePaste = (e: ClipboardEvent) => {
+            if (e.clipboardData) {
+                const items = Array.from(e.clipboardData.items);
+                const hasImage = items.some(item => item.type.startsWith('image/'));
+                if (hasImage) {
+                    e.preventDefault();
+                    triggerSecurityViolation('Screenshot image detected in clipboard', true);
+                }
             }
         };
 
         document.addEventListener('visibilitychange', handleVisibilityChange);
         window.addEventListener('blur', handleBlur);
+        window.addEventListener('keydown', handleKeyDown);
         window.addEventListener('keyup', handleKeyUp);
+        document.addEventListener('paste', handlePaste);
 
         return () => {
             document.removeEventListener('visibilitychange', handleVisibilityChange);
             window.removeEventListener('blur', handleBlur);
+            window.removeEventListener('keydown', handleKeyDown);
             window.removeEventListener('keyup', handleKeyUp);
+            document.removeEventListener('paste', handlePaste);
         };
-    }, [token]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [token, warningCount, revealTimeout, isEditingFile]);
 
     // Initial data fetch
     const fetchUserData = useCallback(async (t: string) => {
@@ -296,6 +363,81 @@ export default function ViewPage({ params }: ViewPageProps) {
         setPreviewData(null);
     };
 
+    const handleEditClick = (fileId: string, fileName: string) => {
+        setEditFileId(fileId);
+        setEditFileName(fileName);
+        setIsEditingFile(true);
+    };
+
+    const closeEditor = () => {
+        setIsEditingFile(false);
+        setEditFileId(null);
+        setEditFileName('');
+    };
+
+    const handleEditorSaved = (fileId: string, newData?: { fileName: string; fileSize: number; fileType: string }) => {
+        if (newData) {
+            setUserData(prev => {
+                if (!prev) return prev;
+                return {
+                    ...prev,
+                    files: prev.files?.map(file =>
+                        file.id === fileId ? { ...file, ...newData } : file
+                    )
+                };
+            });
+        }
+    };
+
+    // ---- Finish & Close handler ----
+    const handleFinish = useCallback(() => {
+        // Close SSE stream
+        if (eventSourceRef.current) {
+            eventSourceRef.current.close();
+            eventSourceRef.current = null;
+        }
+        setConnectionStatus('disconnected');
+
+        // Security wipe — clear all displayed data
+        setUserData(null);
+        setFullData(null);
+        setIsRevealed(false);
+        if (revealTimeout) {
+            clearTimeout(revealTimeout);
+            setRevealTimeoutState(null);
+        }
+
+        // Close editor if open
+        setIsEditingFile(false);
+        setEditFileId(null);
+        setEditFileName('');
+
+        setIsFinished(true);
+    }, [revealTimeout]);
+
+    // Finished State
+    if (isFinished) {
+        return (
+            <main className="profile-wrapper">
+                <div className="bg-orb bg-orb-1" />
+                <div className="bg-orb bg-orb-2" />
+                <div className="bg-grid" />
+                <div className="profile-card">
+                    <div className="finished-container">
+                        <div className="finished-icon">✅</div>
+                        <h2 className="finished-title">Review Complete</h2>
+                        <p className="finished-message">
+                            You have finished reviewing the shared data. This session is now closed and all displayed data has been cleared from your browser.
+                        </p>
+                        <div className="finished-hint">
+                            🔒 You can safely close this tab now.
+                        </div>
+                    </div>
+                </div>
+            </main>
+        );
+    }
+
     // Loading State
     if (isLoading) {
         return (
@@ -329,7 +471,7 @@ export default function ViewPage({ params }: ViewPageProps) {
                                 setFullData(null);
                                 setError(null);
                                 // Force full page navigation to bypass all caches
-                                window.location.href = `/signup?t=${Date.now()}`;
+                                window.location.href = `/create-link?t=${Date.now()}`;
                             }}
                             className="return-button"
                         >
@@ -354,6 +496,23 @@ export default function ViewPage({ params }: ViewPageProps) {
                     <div className="header-top">
                         <h1 className="profile-title">Secure Shared Profile</h1>
                         <div className="status-badges">
+                            {warningCount > 0 && (
+                                <span style={{
+                                    background: 'rgba(255, 68, 68, 0.15)',
+                                    color: '#ff4444',
+                                    border: '1px solid rgba(255, 68, 68, 0.3)',
+                                    padding: '4px 8px',
+                                    borderRadius: '50px',
+                                    fontSize: '11px',
+                                    fontWeight: '600',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    animation: 'pulse 2s infinite'
+                                }}>
+                                    ⚠️ Tab Switches: {warningCount}/{MAX_WARNINGS}
+                                </span>
+                            )}
                             <span className={`status-badge ${connectionStatus}`}>
                                 <span className="status-dot" />
                                 {connectionStatus === 'connected' ? 'LIVE' : 'OFFLINE'}
@@ -418,30 +577,52 @@ export default function ViewPage({ params }: ViewPageProps) {
                                             borderRadius: '6px',
                                             display: 'flex',
                                             justifyContent: 'space-between',
-                                            alignItems: 'center'
+                                            alignItems: 'center',
+                                            flexWrap: 'wrap',
+                                            gap: '10px'
                                         }}>
-                                            <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                                <span style={{ fontSize: '14px', color: '#fff' }}>{file.fileName}</span>
-                                                <span style={{ fontSize: '12px', color: '#aaa' }}>{file.fileType.split('/')[1].toUpperCase()} • {(file.fileSize / 1024).toFixed(1)} KB</span>
+                                            <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: '150px' }}>
+                                                <span style={{ fontSize: '14px', color: '#fff', wordBreak: 'break-all' }}>{file.fileName}</span>
+                                                <span style={{ fontSize: '12px', color: '#aaa' }}>{file.fileType.split('/')[1]?.toUpperCase() || 'FILE'} • {(file.fileSize / 1024).toFixed(1)} KB</span>
                                             </div>
-                                            <button
-                                                onClick={() => handlePreview(file.id)}
-                                                disabled={isPreviewLoading}
-                                                style={{
-                                                    background: 'rgba(64, 196, 255, 0.2)',
-                                                    border: '1px solid rgba(64, 196, 255, 0.4)',
-                                                    color: '#40c4ff',
-                                                    padding: '4px 8px',
-                                                    fontSize: '12px',
-                                                    borderRadius: '4px',
-                                                    cursor: 'pointer'
-                                                }}
-                                            >
-                                                {isPreviewLoading ? 'Loading...' : 'Preview'}
-                                            </button>
+                                            <div style={{ display: 'flex', gap: '8px' }}>
+                                                <button
+                                                    onClick={() => handleEditClick(file.id, file.fileName)}
+                                                    style={{
+                                                        background: 'rgba(34, 197, 94, 0.1)',
+                                                        border: '1px solid rgba(34, 197, 94, 0.3)',
+                                                        color: '#22c55e',
+                                                        padding: '4px 8px',
+                                                        fontSize: '12px',
+                                                        borderRadius: '4px',
+                                                        cursor: 'pointer',
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        gap: '4px'
+                                                    }}
+                                                >
+                                                    {isEditingFile && editFileId === file.id ? '⏳' : '✍️'} Edit
+                                                </button>
+                                                <button
+                                                    onClick={() => handlePreview(file.id)}
+                                                    disabled={isPreviewLoading}
+                                                    style={{
+                                                        background: 'rgba(64, 196, 255, 0.2)',
+                                                        border: '1px solid rgba(64, 196, 255, 0.4)',
+                                                        color: '#40c4ff',
+                                                        padding: '4px 8px',
+                                                        fontSize: '12px',
+                                                        borderRadius: '4px',
+                                                        cursor: 'pointer'
+                                                    }}
+                                                >
+                                                    {isPreviewLoading ? 'Loading...' : 'Preview'}
+                                                </button>
+                                            </div>
                                         </div>
                                     ))}
                                 </div>
+
                             </div>
                         )}
                     </div>
@@ -454,6 +635,17 @@ export default function ViewPage({ params }: ViewPageProps) {
                             {isRevealed ? 'Hide Data' : 'Temporarily Reveal'}
                         </button>
                     )}
+                </div>
+
+                {/* Finish & Close Button */}
+                <div className="finish-section">
+                    <button
+                        className="finish-button"
+                        onClick={handleFinish}
+                    >
+                        ✅ Finish & Close
+                    </button>
+                    <p className="finish-hint">Click when you are done reviewing</p>
                 </div>
 
                 {/* Footer */}
@@ -535,6 +727,19 @@ export default function ViewPage({ params }: ViewPageProps) {
                         </div>
                     </div>
                 </div>
+            )}
+
+            {/* Universal File Editor */}
+            {isEditingFile && editFileId && (
+                <UniversalFileEditor
+                    token={token}
+                    fileId={editFileId}
+                    fileName={editFileName}
+                    remainingSeconds={remainingSeconds}
+                    connectionStatus={connectionStatus}
+                    onClose={closeEditor}
+                    onSaved={handleEditorSaved}
+                />
             )}
         </main>
     );

@@ -1,36 +1,120 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 🛡️ Data Guardian 2.0
 
-## Getting Started
+**Enterprise-grade secure data sharing platform** with military-grade encryption, OTP protection, and instant revocation.
 
-First, run the development server:
+## ✨ Features
+
+- **🔐 AES-256-GCM Encryption** — Military-grade encryption for all shared data
+- **🔑 OTP Protection** — 6-digit one-time passwords with HMAC-SHA256 hashing
+- **⏱️ Self-Destructing Links** — Time-limited access with automatic expiry
+- **🚫 Instant Revocation** — Revoke access immediately from the owner dashboard
+- **📸 Screenshot Detection** — Automatic access revocation on screenshot attempts
+- **📱 QR Code Delivery** — Generate QR codes for easy link sharing
+- **🏗️ Zero-Knowledge Architecture** — We can't read your data, ever
+- **🔒 Device & Email Binding** — Prevent session hijacking and link forwarding
+
+## 🚀 Tech Stack
+
+| Technology | Purpose |
+|---|---|
+| **Next.js 16** | Full-stack React framework (App Router) |
+| **TypeScript** | Type-safe development |
+| **Prisma** | Database ORM with PostgreSQL |
+| **NextAuth.js** | Authentication (Google OAuth) |
+| **Upstash Redis** | Rate limiting & session management |
+| **Zod** | Runtime input validation |
+
+## 📦 Getting Started
+
+### Prerequisites
+
+- **Node.js** ≥ 18.17.0 (see `.nvmrc`)
+- **PostgreSQL** database (or [Neon](https://neon.tech))
+- **Google OAuth** credentials
+- **Upstash Redis** instance
+
+### Installation
 
 ```bash
+# Clone the repository
+git clone https://github.com/bharathraj-ai/DATA-GUARDIAN-2.0.git
+cd DATA-GUARDIAN-2.0
+
+# Install dependencies
+npm install
+
+# Set up environment variables
+cp .env.example .env
+# Edit .env with your credentials
+
+# Generate Prisma client
+npx prisma generate
+
+# Push database schema
+npx prisma db push
+
+# Start development server
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Environment Variables
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+| Variable | Required | Description |
+|---|---|---|
+| `DATABASE_URL` | ✅ | PostgreSQL connection string |
+| `GOOGLE_CLIENT_ID` | ✅ | Google OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | ✅ | Google OAuth client secret |
+| `NEXTAUTH_URL` | ✅ | Application base URL |
+| `NEXTAUTH_SECRET` | ✅ | NextAuth.js secret key |
+| `ENCRYPTION_KEY` | ✅ | AES-256 encryption key (32 bytes, hex) |
+| `UPSTASH_REDIS_REST_URL` | ✅ | Redis REST API URL |
+| `UPSTASH_REDIS_REST_TOKEN` | ✅ | Redis REST API token |
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 🏗️ Architecture
 
-## Learn More
+```
+src/
+├── app/                    # Next.js App Router pages
+│   ├── api/                # API routes (health check)
+│   ├── auth/               # Authentication pages
+│   ├── dashboard/          # Owner & Vendor dashboards
+│   ├── how-it-works/       # How it works page
+│   ├── legal/              # Privacy, Terms, Cookies
+│   ├── services/           # Services page
+│   └── signup/             # Secure link creation
+├── components/             # Shared UI components
+├── lib/                    # Utilities & configuration
+│   ├── auth.ts             # NextAuth configuration
+│   ├── crypto.ts           # Encryption & hashing utilities
+│   ├── rate-limit.ts       # Rate limiting with Redis
+│   └── validations.ts      # Zod validation schemas
+├── actions/                # Server actions
+│   ├── verify-otp.ts       # OTP verification logic
+│   └── revoke-on-screenshot.ts  # Screenshot revocation
+└── types/                  # TypeScript type extensions
+```
 
-To learn more about Next.js, take a look at the following resources:
+## 🐳 Docker
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+# Build the image
+docker build -t data-guardian .
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+# Run the container
+docker run -p 3000:3000 --env-file .env data-guardian
+```
 
-## Deploy on Vercel
+The Dockerfile includes a `HEALTHCHECK` that pings `/api/health` every 30 seconds.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## 🔒 Security
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **Zero Trust**: All operations validated server-side
+- **Single-Attempt OTP**: OTPs are invalidated after first use
+- **Rate Limiting**: Protection against brute-force attacks
+- **Device Binding**: Sessions bound to the original device
+- **Email Binding**: Links restricted to the intended recipient
+- **Audit Logging**: Complete trail of all security events
+
+## 📄 License
+
+Private — All rights reserved.

@@ -191,15 +191,23 @@ export async function sendAccessNotification(payload: NotificationPayload): Prom
     try {
         const { subject, html, text } = createEmailTemplate(payload);
 
-        // TODO: Integrate with email service (Resend, SendGrid, etc.)
-        // For now, we'll log the notification and create audit trail
-
         console.log('📧 Notification:', {
             to: payload.email,
             subject,
             event: payload.event,
             tokenId: payload.tokenId.substring(0, 8)
         });
+
+        // Send real email via Gmail SMTP (if credentials are configured)
+        if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+            try {
+                const { sendNotificationEmail } = await import('@/lib/email');
+                await sendNotificationEmail(payload.email, subject, html, text);
+                console.log(`📧 Email delivered to ${payload.email.substring(0, 3)}***`);
+            } catch (emailError) {
+                console.error('📧 Email delivery failed (audit log still created):', emailError);
+            }
+        }
 
         // Log notification event in audit trail
         await prisma.auditLog.create({
@@ -215,18 +223,6 @@ export async function sendAccessNotification(payload: NotificationPayload): Prom
                 linkId: payload.tokenId
             }
         });
-
-        // TODO: Replace with actual email service
-        // Example with Resend:
-        // const { Resend } = await import('resend');
-        // const resend = new Resend(process.env.RESEND_API_KEY);
-        // await resend.emails.send({
-        //   from: 'Data Guardian <notifications@dataguardian.com>',
-        //   to: payload.email,
-        //   subject,
-        //   html,
-        //   text
-        // });
 
         return true;
     } catch (error) {
