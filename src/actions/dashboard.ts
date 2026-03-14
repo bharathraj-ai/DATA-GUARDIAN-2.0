@@ -1,6 +1,7 @@
 'use server';
 
 import { prisma } from '@/lib/prisma';
+import { cleanupExpiredData } from '@/actions/cleanup';
 
 export interface DashboardLink {
     id: string;
@@ -21,7 +22,7 @@ export interface DashboardLink {
     lockedAt: Date | null;
     otpVerifiedAt: Date | null;
     fileCount: number;
-    files: { fileName: string; fileSize: number; fileType: string }[];
+    files: { id: string; fileName: string; fileSize: number; fileType: string }[];
     auditLogs: { action: string; timestamp: Date; reason: string | null }[];
 }
 
@@ -55,6 +56,7 @@ export async function getOwnedLinks(userId: string): Promise<DashboardLink[]> {
                 otpPlain: true,
                 UserFile: {
                     select: {
+                        id: true,
                         fileName: true,
                         fileSize: true,
                         fileType: true,
@@ -74,7 +76,7 @@ export async function getOwnedLinks(userId: string): Promise<DashboardLink[]> {
             },
         });
 
-        return links.map((link) => ({
+        const mappedLinks = links.map((link) => ({
             ...link,
             files: link.UserFile,
             auditLogs: link.AuditLog,
@@ -82,6 +84,14 @@ export async function getOwnedLinks(userId: string): Promise<DashboardLink[]> {
             fileCount: link.UserFile.length,
             otp: link.otpPlain,
         }));
+
+        // AUTO-CLEANUP: If any expired/revoked links exist, trigger background purge
+        const hasExpiredData = mappedLinks.some(l => l.status === 'expired' || l.status === 'revoked');
+        if (hasExpiredData) {
+            cleanupExpiredData().catch(() => { /* non-blocking */ });
+        }
+
+        return mappedLinks;
     } catch (error) {
         console.error('Error fetching owned links:', error);
         return [];
@@ -118,6 +128,7 @@ export async function getReceivedLinks(email: string): Promise<DashboardLink[]> 
                 otpPlain: true,
                 UserFile: {
                     select: {
+                        id: true,
                         fileName: true,
                         fileSize: true,
                         fileType: true,
@@ -137,7 +148,7 @@ export async function getReceivedLinks(email: string): Promise<DashboardLink[]> 
             },
         });
 
-        return links.map((link) => ({
+        const mappedLinks = links.map((link) => ({
             ...link,
             files: link.UserFile,
             auditLogs: link.AuditLog,
@@ -145,6 +156,14 @@ export async function getReceivedLinks(email: string): Promise<DashboardLink[]> 
             fileCount: link.UserFile.length,
             otp: link.otpPlain,
         }));
+
+        // AUTO-CLEANUP: If any expired/revoked links exist, trigger background purge
+        const hasExpiredData = mappedLinks.some(l => l.status === 'expired' || l.status === 'revoked');
+        if (hasExpiredData) {
+            cleanupExpiredData().catch(() => { /* non-blocking */ });
+        }
+
+        return mappedLinks;
     } catch (error) {
         console.error('Error fetching received links:', error);
         return [];
@@ -156,4 +175,46 @@ function getStatus(link: { expiresAt: Date; isUsed: boolean; isRevoked: boolean 
     if (link.isUsed) return 'used';
     if (new Date() > link.expiresAt) return 'expired';
     return 'active';
+}
+
+/**
+ * Send history record — survives data deletion.
+ * Shows WHO was sent data and WHAT topic, even after the actual data is purged.
+ */
+export interface SendHistoryRecord {
+    id: string;
+    topic: string;
+    vendorEmail: string | null;
+    fileCount: number;
+    status: string;         // active | expired | revoked | cleaned
+    createdAt: Date;
+    expiredAt: Date | null;
+}
+
+/**
+ * Get the owner's complete send history.
+ * These records survive data deletion — the owner always knows
+ * WHO they sent data to and WHAT it was about.
+ */
+export async function getSendHistory(userId: string): Promise<SendHistoryRecord[]> {
+    try {
+        const records = await prisma.sendRecord.findMany({
+            where: { ownerId: userId },
+            orderBy: { createdAt: 'desc' },
+            select: {
+                id: true,
+                topic: true,
+                vendorEmail: true,
+                fileCount: true,
+                status: true,
+                createdAt: true,
+                expiredAt: true,
+            },
+        });
+
+        return records;
+    } catch (error) {
+        console.error('Error fetching send history:', error);
+        return [];
+    }
 }

@@ -1,11 +1,14 @@
 'use client';
 
-import { signIn } from 'next-auth/react';
-import { useSearchParams } from 'next/navigation';
-import { Suspense } from 'react';
+import { signIn, useSession } from 'next-auth/react';
+import { useSearchParams, useRouter } from 'next/navigation';
+import { Suspense, useEffect } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 
 function SignInContent() {
+    const router = useRouter();
+    const { data: session, status: sessionStatus } = useSession();
     const searchParams = useSearchParams();
     // Ensure callbackUrl is a valid relative path to prevent OAuth errors
     const rawCallbackUrl = searchParams.get('callbackUrl');
@@ -14,24 +17,40 @@ function SignInContent() {
         : '/auth/role-select';
     const error = searchParams.get('error');
 
+    // If user is already signed in, redirect them away
+    useEffect(() => {
+        if (sessionStatus === 'authenticated') {
+            const userRole = (session?.user as any)?.role;
+            const roleSelected = (session?.user as any)?.roleSelected;
+
+            if (!roleSelected) {
+                // User hasn't selected a role yet
+                router.push('/auth/role-select');
+            } else if (rawCallbackUrl && rawCallbackUrl.startsWith('/')) {
+                // Redirect to intended destination
+                router.push(rawCallbackUrl);
+            } else {
+                // Redirect to dashboard (auto-routes by role)
+                router.push('/dashboard');
+            }
+        }
+    }, [sessionStatus, session, router, rawCallbackUrl]);
+
     return (
-        <main className="signup-page">
-            <section className="signup-section">
+        <main className="app-page">
+            <section className="app-section">
                 <div className="container">
-                    <div className="signup-container" style={{ maxWidth: '480px' }}>
+                    <div className="app-container" style={{ maxWidth: '480px' }}>
                         {/* Header */}
-                        <div className="signup-header">
+                        <div className="app-header">
                             <div className="brand-badge" style={{ marginBottom: '24px', justifyContent: 'center' }}>
-                                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                                    <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-                                </svg>
+                                <Image src="/logo.svg" alt="Data Guardian" width={32} height={32} />
                                 <span className="gradient-text" style={{ fontSize: '1.5rem' }}>Data Guardian</span>
                             </div>
-                            <h1 className="signup-page-title">
+                            <h1 className="app-page-title">
                                 <span className="gradient-text">Sign In</span>
                             </h1>
-                            <p className="signup-page-subtitle">
+                            <p className="app-page-subtitle">
                                 Use your Google account to continue
                             </p>
                         </div>
@@ -51,7 +70,7 @@ function SignInContent() {
                         )}
 
                         {/* Sign In Card */}
-                        <div className="signup-form-card">
+                        <div className="app-form-card">
                             {/* Google Sign In Button */}
                             <button
                                 onClick={() => signIn('google', { callbackUrl })}
@@ -84,7 +103,7 @@ function SignInContent() {
                         </div>
 
                         {/* Footer */}
-                        <div className="signup-footer" style={{ marginTop: '24px' }}>
+                        <div className="app-footer" style={{ marginTop: '24px' }}>
                             <Link href="/" className="btn btn-secondary">
                                 <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
                                     <path fillRule="evenodd" d="M9.707 16.707a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6a1 1 0 011.414 1.414L5.414 9H17a1 1 0 110 2H5.414l4.293 4.293a1 1 0 010 1.414z" clipRule="evenodd" />
@@ -106,10 +125,10 @@ function SignInContent() {
 export default function SignInPage() {
     return (
         <Suspense fallback={
-            <main className="signup-page">
-                <section className="signup-section">
+            <main className="app-page">
+                <section className="app-section">
                     <div className="container">
-                        <div className="signup-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
+                        <div className="app-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
                             <div style={{ textAlign: 'center' }}>
                                 <div className="button-spinner" style={{ width: '48px', height: '48px', margin: '0 auto 16px' }}></div>
                                 <p style={{ color: 'var(--color-text-secondary)' }}>Loading...</p>
