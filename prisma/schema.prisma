@@ -94,6 +94,7 @@ model User {
   Account       Account[]
   SecureLink    SecureLink[]
   Session       Session[]
+  SendRecord    SendRecord[]
 }
 
 model UserData {
@@ -105,7 +106,7 @@ model UserData {
 }
 
 model UserFile {
-  id               String     @id @default(cuid())
+  id               String        @id @default(cuid())
   fileName         String
   fileType         String
   fileSize         Int
@@ -113,10 +114,29 @@ model UserFile {
   iv               String
   authTag          String
   secureLinkId     String
-  createdAt        DateTime   @default(now())
-  SecureLink       SecureLink @relation(fields: [secureLinkId], references: [id], onDelete: Cascade)
+  createdAt        DateTime      @default(now())
+  SecureLink       SecureLink    @relation(fields: [secureLinkId], references: [id], onDelete: Cascade)
+  FileVersion      FileVersion[]
+  Annotation       Annotation[]
 
   @@index([secureLinkId])
+}
+
+model FileVersion {
+  id                String   @id @default(cuid())
+  fileId            String
+  versionNumber     Int
+  encryptedContent  Bytes
+  iv                String
+  authTag           String
+  fileSize          Int
+  changeType        String   // "annotation" | "page_replace" | "restore"
+  changeDescription String?
+  createdAt         DateTime @default(now())
+  UserFile          UserFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@index([fileId])
+  @@index([createdAt])
 }
 
 model VerificationToken {
@@ -125,4 +145,68 @@ model VerificationToken {
   expires    DateTime
 
   @@unique([identifier, token])
+}
+
+/// Preserved record of data sharing — survives data deletion.
+/// Lets the owner see WHO they sent data to and WHAT topic it was about,
+/// even after the actual data has been purged from the database.
+model SendRecord {
+  id              String   @id @default(cuid())
+  ownerId         String
+  topic           String                        // Mandatory: what data was shared
+  vendorEmail     String?                       // Who it was sent to
+  fileCount       Int      @default(0)          // How many files were attached
+  status          String   @default("expired")  // expired | revoked | cleaned
+  createdAt       DateTime @default(now())      // When the link was created
+  expiredAt       DateTime?                     // When it expired/was revoked
+  owner           User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId])
+  @@index([createdAt])
+}
+
+/// Persistent annotation overlay stored separately from the encrypted document.
+model Annotation {
+  id         String   @id @default(cuid())
+  fileId     String
+  pageNumber Int
+  type       String   // "highlight" | "text" | "draw" | "comment" | "signature"
+  data       String   // JSON blob (DocumentAnnotation shape)
+  authorId   String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  UserFile   UserFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@index([fileId])
+  @@index([pageNumber])
+}
+
+/// Active editing session for presence tracking.
+model DocumentSession {
+  id          String   @id @default(cuid())
+  fileId      String
+  userId      String?
+  token       String
+  role        String   @default("VENDOR")
+  displayName String   @default("User")
+  color       String   @default("#6366f1")
+  joinedAt    DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+
+  @@index([fileId])
+  @@index([token])
+}
+
+/// Append-only audit log of collaboration operations.
+model CollabOperation {
+  id        String   @id @default(cuid())
+  fileId    String
+  sessionId String
+  opType    String
+  payload   String   // JSON
+  version   Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([fileId])
+  @@index([createdAt])
 }

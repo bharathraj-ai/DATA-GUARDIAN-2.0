@@ -140,8 +140,8 @@ export const authOptions: NextAuthOptions = {
                     where: { id: user.id },
                     select: { role: true, roleSelected: true },
                 });
-                (session.user as any).role = dbUser?.role || 'VENDOR';
-                (session.user as any).roleSelected = dbUser?.roleSelected ?? false;
+                session.user.role = (dbUser?.role as 'OWNER' | 'VENDOR') || 'VENDOR';
+                session.user.roleSelected = dbUser?.roleSelected ?? false;
             }
             return session;
         },

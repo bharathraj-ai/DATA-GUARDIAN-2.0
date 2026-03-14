@@ -4,34 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { decryptBuffer } from '@/lib/crypto';
 import { cookies } from 'next/headers';
 import * as XLSX from 'xlsx';
-
-// Helper: Check Redis revocation
-async function tryCheckRevoked(token: string): Promise<boolean | null> {
-    try {
-        if (!process.env.UPSTASH_REDIS_REST_URL || !process.env.UPSTASH_REDIS_REST_TOKEN ||
-            process.env.UPSTASH_REDIS_REST_URL.includes('your-redis')) {
-            return null;
-        }
-        const { isTokenRevoked } = await import('@/lib/redis');
-        return await isTokenRevoked(token);
-    } catch {
-        return null;
-    }
-}
-
-// Helper: Validate Session
-async function tryValidateSession(token: string, sessionId: string): Promise<boolean | null> {
-    try {
-        if (!process.env.UPSTASH_REDIS_REST_URL || !process.env.UPSTASH_REDIS_REST_TOKEN ||
-            process.env.UPSTASH_REDIS_REST_URL.includes('your-redis')) {
-            return null;
-        }
-        const { validateSession } = await import('@/lib/redis');
-        return await validateSession(token, sessionId);
-    } catch {
-        return null;
-    }
-}
+import { tryCheckRevoked, tryValidateSession } from '@/lib/redis-helpers';
 
 export type FilePreviewResult = {
     success: boolean;

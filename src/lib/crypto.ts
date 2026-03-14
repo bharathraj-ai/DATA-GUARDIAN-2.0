@@ -33,7 +33,10 @@ export function generateOTP(): string {
  * - HMAC with a secret key provides sufficient security
  */
 export async function hashOTP(otp: string): Promise<string> {
-    const secret = process.env.ENCRYPTION_KEY || 'fallback-secret';
+    const secret = process.env.ENCRYPTION_KEY;
+    if (!secret) {
+        throw new Error('ENCRYPTION_KEY environment variable is required for OTP hashing');
+    }
     return crypto.createHmac('sha256', secret).update(otp).digest('hex');
 }
 
@@ -49,7 +52,10 @@ export async function verifyOTPHash(otp: string, hash: string): Promise<boolean>
     }
 
     // Fast HMAC verification for new OTPs
-    const secret = process.env.ENCRYPTION_KEY || 'fallback-secret';
+    const secret = process.env.ENCRYPTION_KEY;
+    if (!secret) {
+        throw new Error('ENCRYPTION_KEY environment variable is required for OTP verification');
+    }
     const computedHash = crypto.createHmac('sha256', secret).update(otp).digest('hex');
 
     // Constant-time comparison to prevent timing attacks

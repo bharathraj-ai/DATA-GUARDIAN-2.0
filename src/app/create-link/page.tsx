@@ -17,6 +17,7 @@ interface FormDataState {
     age: string;
     validityMinutes: string;
     vendorEmail: string; // Zero Trust: only this email can access the link
+    topic: string; // Mandatory: describe what data is being shared
 }
 
 export default function SignupPage() {
@@ -31,6 +32,7 @@ export default function SignupPage() {
         age: '',
         validityMinutes: '',
         vendorEmail: '',
+        topic: '',
     });
     const [files, setFiles] = useState<FileList | null>(null);
     const [generatedLink, setGeneratedLink] = useState('');
@@ -55,7 +57,7 @@ export default function SignupPage() {
     // Redirect to sign-in if not authenticated
     useEffect(() => {
         if (sessionStatus === 'unauthenticated') {
-            router.push('/auth/signin?callbackUrl=/signup');
+            router.push('/auth/signin?callbackUrl=/create-link');
         }
     }, [sessionStatus, router]);
 
@@ -91,10 +93,12 @@ export default function SignupPage() {
         if (!formData.gender) return 'Gender is required';
         if (!formData.age) return 'Age is required';
         if (!formData.validityMinutes) return 'Time in minutes is required';
+        if (!formData.topic.trim()) return 'Topic is required — describe what data you are sharing';
         const minutes = parseInt(formData.validityMinutes);
         if (isNaN(minutes) || minutes <= 0) return 'Time must be a positive number';
-        // Vendor email is optional but must be valid if provided
-        if (formData.vendorEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.vendorEmail)) {
+        // Vendor email is mandatory — owner must specify who they're sending data to
+        if (!formData.vendorEmail) return 'Vendor email is required — specify who you are sending data to';
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.vendorEmail)) {
             return 'Invalid vendor email format';
         }
         return null;
@@ -117,6 +121,8 @@ export default function SignupPage() {
             Object.entries(formData).forEach(([key, value]) => {
                 data.append(key, value);
             });
+            // Also send topic as 'purpose' for backward compatibility with backend
+            data.append('purpose', formData.topic);
 
             if (files) {
                 for (let i = 0; i < files.length; i++) {
@@ -130,17 +136,10 @@ export default function SignupPage() {
                 // Refresh router cache to ensure fresh data on next navigation
                 router.refresh();
 
-                // Add timestamp to share URL to prevent caching
-                const shareUrlWithTimestamp = `${result.shareUrl}${result.shareUrl.includes('?') ? '&' : '?'}t=${Date.now()}`;
-
-                setGeneratedLink(shareUrlWithTimestamp);
+                setGeneratedLink(result.shareUrl);
                 setOtp(result.otp);
                 setOwnerUrl(result.ownerUrl || '');
-                setStatus({ message: 'Link generated successfully! OTP shown below.', type: 'success' });
-
-                // Generate QR code
-                const qr = await QRCode.toDataURL(result.shareUrl);
-                setQrDataUrl(qr);
+                setStatus({ message: 'Secure link created! OTP sent to vendor\'s email.', type: 'success' });
 
                 // Start countdown
                 if (result.expiresAt) {
@@ -232,23 +231,23 @@ export default function SignupPage() {
     // Auth is required for VENDORS accessing links, not for OWNERS creating them
 
     return (
-        <main className="signup-page">
-            <section className="signup-section">
+        <main className="app-page">
+            <section className="app-section">
                 <div className="container">
-                    <div className="signup-container">
+                    <div className="app-container">
                         {/* Header */}
-                        <div className="signup-header">
-                            <h1 className="signup-page-title">
+                        <div className="app-header">
+                            <h1 className="app-page-title">
                                 Create <span className="gradient-text">Secure Link</span>
                             </h1>
-                            <p className="signup-page-subtitle">
+                            <p className="app-page-subtitle">
                                 Fill in the details below to generate an encrypted, time-limited link
                             </p>
                         </div>
 
                         {/* Form Card */}
-                        <div className="signup-form-card">
-                            <form onSubmit={handleSubmit} className="signup-form">
+                        <div className="app-form-card">
+                            <form onSubmit={handleSubmit} className="app-form">
                                 {/* Personal Information Section */}
                                 <div className="form-section">
                                     <h3 className="form-section-title">
@@ -350,6 +349,23 @@ export default function SignupPage() {
                                     </h3>
 
                                     <div className="form-group">
+                                        <label className="form-label">Topic <span style={{ color: 'var(--danger)' }}>*</span></label>
+                                        <input
+                                            type="text"
+                                            name="topic"
+                                            value={formData.topic}
+                                            onChange={handleChange}
+                                            className="form-input"
+                                            placeholder="e.g., Tax Documents, Medical Records, Contract Draft..."
+                                            required
+                                            maxLength={100}
+                                        />
+                                        <small className="form-hint">
+                                            Describe what data you are sharing. This stays in your history even after data is deleted.
+                                        </small>
+                                    </div>
+
+                                    <div className="form-group">
                                         <label className="form-label">Link Expiration (Minutes)</label>
                                         <input
                                             type="number"
@@ -367,17 +383,15 @@ export default function SignupPage() {
 
                                     {/* Zero Trust: Vendor Email Binding */}
                                     <div className="form-group">
-                                        <label className="form-label">
-                                            Vendor Email (Optional)
-                                            <span className="security-badge">Zero Trust</span>
-                                        </label>
+                                        <label className="form-label">Vendor Email <span style={{ color: 'var(--danger)' }}>*</span></label>
                                         <select
                                             name="vendorEmail"
                                             value={formData.vendorEmail}
                                             onChange={handleChange}
                                             className="form-select"
+                                            required
                                         >
-                                            <option value="">Enter vendor email or leave empty</option>
+                                            <option value="">Select vendor email</option>
                                             {vendors.map((vendor) => (
                                                 <option key={vendor.email} value={vendor.email}>
                                                     {vendor.name ? `${vendor.name} — ${vendor.email}` : vendor.email}
@@ -385,7 +399,7 @@ export default function SignupPage() {
                                             ))}
                                         </select>
                                         <small className="form-hint">
-                                            If specified, only this vendor can verify the OTP. Prevents link forwarding.
+                                            Only this vendor can verify the OTP. Prevents link forwarding.
                                         </small>
                                     </div>
 
@@ -451,67 +465,36 @@ export default function SignupPage() {
                                 </button>
                             </form>
 
-                            {/* Results Section */}
+                            {/* Results Section — Email Sent Confirmation */}
                             {generatedLink && (
                                 <div className="results-section">
-                                    {/* Generated Link */}
-                                    <div className="result-card">
+                                    {/* Email Sent Confirmation */}
+                                    <div className="result-card result-card-success">
                                         <div className="result-header">
                                             <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-                                                <path fillRule="evenodd" d="M12.586 4.586a2 2 0 112.828 2.828l-3 3a2 2 0 01-2.828 0 1 1 0 00-1.414 1.414 4 4 0 005.656 0l3-3a4 4 0 00-5.656-5.656l-1.5 1.5a1 1 0 101.414 1.414l1.5-1.5zm-5 5a2 2 0 012.828 0 1 1 0 101.414-1.414 4 4 0 00-5.656 0l-3 3a4 4 0 105.656 5.656l1.5-1.5a1 1 0 10-1.414-1.414l-1.5 1.5a2 2 0 11-2.828-2.828l3-3z" clipRule="evenodd" />
+                                                <path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z" />
+                                                <path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z" />
                                             </svg>
-                                            <h4>Secure Link</h4>
+                                            <h4>OTP Sent via Email</h4>
                                         </div>
-                                        <div className="link-display">
-                                            <input
-                                                type="text"
-                                                value={generatedLink}
-                                                readOnly
-                                                className="link-input"
-                                            />
-                                            <button onClick={copyToClipboard} className="btn btn-secondary">
-                                                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                                                    <path d="M4 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V2Z" />
-                                                    <path d="M2 5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-1h1v1a3 3 0 0 1-3 3H2a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3h1v1H2Z" />
-                                                </svg>
-                                                Copy
-                                            </button>
-                                        </div>
-                                    </div>
-
-                                    {/* OTP Display */}
-                                    {otp && (
-                                        <div className="result-card result-card-success">
-                                            <div className="result-header">
-                                                <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-                                                    <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
-                                                </svg>
-                                                <h4>One-Time Password (OTP)</h4>
-                                            </div>
-                                            <div className="otp-display">
-                                                {otp}
-                                            </div>
-                                            <p className="result-hint">
-                                                Share this OTP separately with the recipient (not with the link)
+                                        <p style={{ color: 'var(--text-secondary)', fontSize: '15px', lineHeight: '1.6', margin: '0 0 16px' }}>
+                                            The secure link and OTP have been emailed to:
+                                        </p>
+                                        <div style={{
+                                            background: 'var(--bg-tertiary)',
+                                            borderRadius: '8px',
+                                            padding: '16px',
+                                            textAlign: 'center',
+                                            marginBottom: '16px'
+                                        }}>
+                                            <p style={{ color: 'var(--text-primary)', fontSize: '18px', fontWeight: 600, margin: 0 }}>
+                                                📧 {formData.vendorEmail}
                                             </p>
                                         </div>
-                                    )}
-
-                                    {/* QR Code */}
-                                    {qrDataUrl && (
-                                        <div className="result-card">
-                                            <div className="result-header">
-                                                <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-                                                    <path fillRule="evenodd" d="M3 4a1 1 0 011-1h3a1 1 0 011 1v3a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm2 2V5h1v1H5zM3 13a1 1 0 011-1h3a1 1 0 011 1v3a1 1 0 01-1 1H4a1 1 0 01-1-1v-3zm2 2v-1h1v1H5zM13 3a1 1 0 00-1 1v3a1 1 0 001 1h3a1 1 0 001-1V4a1 1 0 00-1-1h-3zm1 2v1h1V5h-1z" clipRule="evenodd" />
-                                                    <path d="M11 4a1 1 0 10-2 0v1a1 1 0 002 0V4zM10 7a1 1 0 011 1v1h2a1 1 0 110 2h-3a1 1 0 01-1-1V8a1 1 0 011-1zM16 9a1 1 0 100 2 1 1 0 000-2zM9 13a1 1 0 011-1h1a1 1 0 110 2v2a1 1 0 11-2 0v-3zM7 11a1 1 0 100-2H4a1 1 0 100 2h3zM17 13a1 1 0 01-1 1h-2a1 1 0 110-2h2a1 1 0 011 1zM16 17a1 1 0 100-2h-3a1 1 0 100 2h3z" />
-                                                </svg>
-                                                <h4>QR Code</h4>
-                                            </div>
-                                            <div className="qr-display">
-                                                <img src={qrDataUrl} alt="QR Code" />
-                                            </div>
-                                        </div>
-                                    )}
+                                        <p className="result-hint">
+                                            The vendor will receive the secure link and OTP in their inbox. You do not need to share them manually.
+                                        </p>
+                                    </div>
 
                                     {/* Countdown Timer */}
                                     {countdown !== null && (
@@ -555,7 +538,7 @@ export default function SignupPage() {
                         </div>
 
                         {/* Back Button */}
-                        <div className="signup-footer">
+                        <div className="app-footer">
                             {generatedLink ? (
                                 <button
                                     onClick={() => {
@@ -575,10 +558,11 @@ export default function SignupPage() {
                                             age: '',
                                             validityMinutes: '',
                                             vendorEmail: '',
+                                            topic: '',
                                         });
                                         setFiles(null);
                                         // Force full page reload to clear all caches
-                                        window.location.href = `/signup?t=${Date.now()}`;
+                                        window.location.href = `/create-link?t=${Date.now()}`;
                                     }}
                                     className="btn btn-primary"
                                 >

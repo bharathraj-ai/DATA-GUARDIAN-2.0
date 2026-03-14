@@ -87,7 +87,7 @@ export function middleware(request: NextRequest) {
     // Disable caching for all dynamic routes
     if (
         isSecureRoute ||
-        pathname.startsWith('/signup') ||
+        pathname.startsWith('/create-link') ||
         pathname.startsWith('/api/') ||
         pathname.startsWith('/auth/')
     ) {
@@ -105,7 +105,7 @@ export const config = {
         '/share/:path*',
         '/view/:path*',
         '/revoke/:path*',
-        '/signup',
+        '/create-link',
         '/api/((?!auth).*)',
         '/auth/:path*',
     ],
