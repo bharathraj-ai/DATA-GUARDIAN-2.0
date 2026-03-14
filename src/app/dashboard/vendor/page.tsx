@@ -42,10 +42,10 @@ export default function VendorDashboardPage() {
 
     if (sessionStatus === 'loading' || sessionStatus === 'unauthenticated') {
         return (
-            <main className="signup-page">
-                <section className="signup-section">
+            <main className="app-page">
+                <section className="app-section">
                     <div className="container">
-                        <div className="signup-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
+                        <div className="app-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
                             <div style={{ textAlign: 'center' }}>
                                 <div className="button-spinner" style={{ width: '48px', height: '48px', margin: '0 auto 16px' }}></div>
                                 <p style={{ color: 'var(--color-text-secondary)' }}>
@@ -106,12 +106,12 @@ export default function VendorDashboardPage() {
     };
 
     return (
-        <main className="signup-page">
-            <section className="signup-section">
+        <main className="app-page">
+            <section className="app-section">
                 <div className="container">
-                    <div className="signup-container" style={{ maxWidth: '960px' }}>
+                    <div className="app-container" style={{ maxWidth: '960px' }}>
                         {/* Header */}
-                        <div className="signup-header">
+                        <div className="app-header">
                             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
                                 <div style={{
                                     width: '48px', height: '48px', borderRadius: '14px',
@@ -121,7 +121,7 @@ export default function VendorDashboardPage() {
                                     📨
                                 </div>
                                 <div>
-                                    <h1 className="signup-page-title" style={{ marginBottom: '0' }}>
+                                    <h1 className="app-page-title" style={{ marginBottom: '0' }}>
                                         <span className="gradient-text">Vendor Dashboard</span>
                                     </h1>
                                     <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
@@ -173,7 +173,7 @@ export default function VendorDashboardPage() {
                         </div>
 
                         {/* Links List */}
-                        <div className="signup-form-card">
+                        <div className="app-form-card">
                             {isLoading ? (
                                 <div style={{ textAlign: 'center', padding: '48px' }}>
                                     <div className="button-spinner" style={{ width: '32px', height: '32px', margin: '0 auto 12px' }}></div>

@@ -40,6 +40,12 @@ export async function cleanupExpiredData(): Promise<CleanupResult> {
                 id: true,
                 userId: true,
                 isRevoked: true,
+                ownerId: true,
+                purpose: true,
+                allowedVendorEmail: true,
+                expiresAt: true,
+                createdAt: true,
+                UserFile: { select: { id: true } },
             },
         });
 
@@ -58,6 +64,26 @@ export async function cleanupExpiredData(): Promise<CleanupResult> {
 
         // Delete EVERYTHING in a transaction (order matters for foreign keys)
         const result = await prisma.$transaction(async (tx) => {
+            // 0. Update SendRecord statuses (these survive deletion)
+            for (const link of linksToClean) {
+                if (link.ownerId) {
+                    const status = link.isRevoked ? 'revoked' : 'expired';
+                    // Update matching SendRecords by owner + topic + vendor
+                    await tx.sendRecord.updateMany({
+                        where: {
+                            ownerId: link.ownerId,
+                            topic: link.purpose || '',
+                            vendorEmail: link.allowedVendorEmail,
+                            status: 'active',
+                        },
+                        data: {
+                            status,
+                            expiredAt: now,
+                        },
+                    });
+                }
+            }
+
             // 1. Delete audit logs first (they reference SecureLink)
             const deletedAuditLogs = await tx.auditLog.deleteMany({
                 where: {

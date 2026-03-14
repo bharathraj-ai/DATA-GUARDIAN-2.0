@@ -10,6 +10,9 @@ export default function Navbar() {
     const { data: session, status } = useSession();
     const [isScrolled, setIsScrolled] = useState(false);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+    const [hasMounted, setHasMounted] = useState(false);
+
+    useEffect(() => { setHasMounted(true); }, []);
 
     useEffect(() => {
         const handleScroll = () => {
@@ -32,10 +35,8 @@ export default function Navbar() {
         <nav className={`navbar ${isScrolled ? 'navbar-scrolled' : ''}`}>
             <div className="container navbar-container">
                 <Link href="/" className="navbar-logo">
-                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                        <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-                    </svg>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src="/logo.svg" alt="Data Guardian" width={32} height={32} suppressHydrationWarning />
                     <span className="gradient-text">Data Guardian</span>
                 </Link>
 
@@ -70,45 +71,27 @@ export default function Navbar() {
                                 </Link>
                             )}
                             {userRole === 'OWNER' && (
-                                <Link href="/signup" className="btn btn-primary btn-sm">
+                                <Link href="/create-link" className="btn btn-primary btn-sm">
                                     Create Link
                                 </Link>
                             )}
 
                             {/* Profile Badge with Role */}
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <div style={{
-                                    display: 'flex', alignItems: 'center', gap: '6px',
-                                    padding: '4px 10px 4px 4px', borderRadius: '20px',
-                                    background: 'rgba(255,255,255,0.06)',
-                                    border: '1px solid rgba(255,255,255,0.1)',
-                                }}>
+                            <div className="navbar-profile-wrapper">
+                                <div className="navbar-profile-badge">
                                     {session?.user?.image ? (
                                         <img
                                             src={session.user.image}
-                                            alt="Profile"
-                                            style={{ width: '28px', height: '28px', borderRadius: '50%' }}
+                                            alt={`${session?.user?.name || 'User'} profile`}
+                                            className="navbar-avatar"
                                             referrerPolicy="no-referrer"
                                         />
                                     ) : (
-                                        <div style={{
-                                            width: '28px', height: '28px', borderRadius: '50%',
-                                            background: 'linear-gradient(135deg, var(--primary-blue), var(--accent-purple))',
-                                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                            fontSize: '0.75rem', fontWeight: '700', color: '#fff',
-                                        }}>
+                                        <div className="navbar-avatar-fallback" aria-hidden="true">
                                             {session?.user?.name?.[0]?.toUpperCase() || '?'}
                                         </div>
                                     )}
-                                    <span style={{
-                                        fontSize: '0.65rem', fontWeight: '700', textTransform: 'uppercase',
-                                        letterSpacing: '0.5px',
-                                        padding: '2px 6px', borderRadius: '6px',
-                                        background: userRole === 'OWNER'
-                                            ? 'linear-gradient(135deg, rgba(99,102,241,0.25), rgba(139,92,246,0.25))'
-                                            : 'rgba(20, 184, 166, 0.2)',
-                                        color: userRole === 'OWNER' ? '#a78bfa' : '#14b8a6',
-                                    }}>
+                                    <span className={`navbar-role-tag ${userRole === 'OWNER' ? 'navbar-role-tag--owner' : 'navbar-role-tag--vendor'}`}>
                                         {userRole === 'OWNER' ? 'Owner' : 'Vendor'}
                                     </span>
                                 </div>
@@ -125,7 +108,7 @@ export default function Navbar() {
                             <Link href="/auth/signin" className="btn btn-secondary btn-sm">
                                 Sign In
                             </Link>
-                            <Link href="/signup" className="btn btn-primary btn-sm">
+                            <Link href="/create-link" className="btn btn-primary btn-sm">
                                 Get Secure Link
                             </Link>
                         </>
@@ -136,8 +119,10 @@ export default function Navbar() {
                 <button
                     className="navbar-mobile-toggle"
                     onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                    aria-label={(hasMounted && isMobileMenuOpen) ? 'Close navigation menu' : 'Open navigation menu'}
+                    aria-expanded={hasMounted && isMobileMenuOpen}
                 >
-                    {isMobileMenuOpen ? (
+                    {(hasMounted && isMobileMenuOpen) ? (
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <line x1="18" y1="6" x2="6" y2="18"></line>
                             <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -237,7 +222,7 @@ export default function Navbar() {
 
                                 {userRole === 'OWNER' && (
                                     <Link
-                                        href="/signup"
+                                        href="/create-link"
                                         className="btn btn-primary btn-full"
                                         onClick={() => setIsMobileMenuOpen(false)}
                                     >
@@ -264,7 +249,7 @@ export default function Navbar() {
                                     Sign In
                                 </Link>
                                 <Link
-                                    href="/signup"
+                                    href="/create-link"
                                     className="btn btn-primary btn-full"
                                     onClick={() => setIsMobileMenuOpen(false)}
                                 >

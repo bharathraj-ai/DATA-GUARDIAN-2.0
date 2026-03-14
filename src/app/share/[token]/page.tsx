@@ -306,7 +306,7 @@ export default function SharePage({ params }: SharePageProps) {
 
                     <button
                         onClick={() => {
-                            window.location.href = `/signup?t=${Date.now()}`;
+                            window.location.href = `/create-link?t=${Date.now()}`;
                         }}
                         className="otp-button idle"
                         style={{ marginTop: '16px' }}
