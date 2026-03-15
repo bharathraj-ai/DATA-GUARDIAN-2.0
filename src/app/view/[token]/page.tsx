@@ -7,10 +7,12 @@ import { getFilePreview, FilePreviewResult } from '@/actions/get-file-preview';
 import { revokeOnScreenshot } from '@/actions/revoke-on-screenshot';
 import dynamic from 'next/dynamic';
 
-// Lazy load the Universal File Editor to avoid loading heavy editor dependencies upfront
-const UniversalFileEditor = dynamic(() => import('@/components/UniversalFileEditor'), {
+import { getRawFileForEdit } from '@/actions/get-raw-file-for-edit';
+
+// Lazy load the Universal File Editor from our unified codebase
+const UniversalEditor = dynamic(() => import('@/components/editors/UniversalEditor'), {
     ssr: false,
-    loading: () => null,
+    loading: () => <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>Loading Editor...</div>,
 });
 
 interface ViewPageProps {
@@ -53,9 +55,9 @@ export default function ViewPage({ params }: ViewPageProps) {
     const MAX_WARNINGS = 3;
 
     // Inline Editor State
-    const [isEditingFile, setIsEditingFile] = useState(false);
-    const [editFileId, setEditFileId] = useState<string | null>(null);
-    const [editFileName, setEditFileName] = useState('');
+    const [isEditLoading, setIsEditLoading] = useState<string | null>(null);
+    const [editingFile, setEditingFile] = useState<File | null>(null);
+    const [editingFileId, setEditingFileId] = useState<string | null>(null);
     const [isFinished, setIsFinished] = useState(false);
 
     // Resolve params
@@ -107,7 +109,7 @@ export default function ViewPage({ params }: ViewPageProps) {
 
         // Detect when tab/window loses visibility (e.g., snipping tool overlay)
         const handleVisibilityChange = () => {
-            if (document.hidden && !isEditingFile && !screenshotDetected) {
+            if (document.hidden && !editingFile && !screenshotDetected) {
                 triggerSecurityViolation('Tab hidden - possible screenshot', false);
             }
         };
@@ -115,7 +117,7 @@ export default function ViewPage({ params }: ViewPageProps) {
         // Detect when window loses focus (e.g., snipping tool opens)
         const handleBlur = () => {
             // Skip if editor is open or if PrintScreen was just detected
-            if (!isEditingFile && !screenshotDetected) {
+            if (!editingFile && !screenshotDetected) {
                 triggerSecurityViolation('Window lost focus - possible screenshot', false);
             }
         };
@@ -171,7 +173,7 @@ export default function ViewPage({ params }: ViewPageProps) {
             document.removeEventListener('paste', handlePaste);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [token, warningCount, revealTimeout, isEditingFile]);
+    }, [token, warningCount, revealTimeout, editingFile]);
 
     // Initial data fetch
     const fetchUserData = useCallback(async (t: string) => {
@@ -363,29 +365,50 @@ export default function ViewPage({ params }: ViewPageProps) {
         setPreviewData(null);
     };
 
-    const handleEditClick = (fileId: string, fileName: string) => {
-        setEditFileId(fileId);
-        setEditFileName(fileName);
-        setIsEditingFile(true);
+    const handleEdit = async (fileId: string) => {
+        setIsEditLoading(fileId);
+        try {
+            const getFileResult = await getRawFileForEdit(token, fileId);
+            if (getFileResult.success && getFileResult.base64Content) {
+                const bstr = atob(getFileResult.base64Content);
+                let n = bstr.length;
+                const u8arr = new Uint8Array(n);
+                while (n--) {
+                    u8arr[n] = bstr.charCodeAt(n);
+                }
+                const newFile = new File([u8arr], getFileResult.fileName || 'document', { type: getFileResult.mimeType });
+                setEditingFileId(fileId);
+                setEditingFile(newFile);
+            } else {
+                alert(getFileResult.error || 'Failed to load file for editing');
+            }
+        } catch (err) {
+            console.error(err);
+            alert('Error loading file for edit');
+        } finally {
+            setIsEditLoading(null);
+        }
     };
 
-    const closeEditor = () => {
-        setIsEditingFile(false);
-        setEditFileId(null);
-        setEditFileName('');
-    };
+    const handleSaveFile = async (editedFile: File) => {
+        if (!editingFile || !editingFileId) return;
+        try {
+            const formData = new FormData();
+            formData.append('file', editedFile);
 
-    const handleEditorSaved = (fileId: string, newData?: { fileName: string; fileSize: number; fileType: string }) => {
-        if (newData) {
-            setUserData(prev => {
-                if (!prev) return prev;
-                return {
-                    ...prev,
-                    files: prev.files?.map(file =>
-                        file.id === fileId ? { ...file, ...newData } : file
-                    )
-                };
-            });
+            const { updateFile } = await import('@/actions/update-file');
+            const res = await updateFile(token, editingFileId, formData);
+
+            if (res.success) {
+                alert('File saved securely.');
+                setEditingFile(null);
+                setEditingFileId(null);
+            } else {
+                alert(res.error || 'Failed to save file.');
+            }
+        } catch (err) {
+            console.error('Save error:', err);
+            alert('An error occurred while saving the file.');
         }
     };
 
@@ -408,9 +431,8 @@ export default function ViewPage({ params }: ViewPageProps) {
         }
 
         // Close editor if open
-        setIsEditingFile(false);
-        setEditFileId(null);
-        setEditFileName('');
+        setEditingFile(null);
+        setEditingFileId(null);
 
         setIsFinished(true);
     }, [revealTimeout]);
@@ -586,23 +608,26 @@ export default function ViewPage({ params }: ViewPageProps) {
                                                 <span style={{ fontSize: '12px', color: '#aaa' }}>{file.fileType.split('/')[1]?.toUpperCase() || 'FILE'} • {(file.fileSize / 1024).toFixed(1)} KB</span>
                                             </div>
                                             <div style={{ display: 'flex', gap: '8px' }}>
-                                                <button
-                                                    onClick={() => handleEditClick(file.id, file.fileName)}
-                                                    style={{
-                                                        background: 'rgba(34, 197, 94, 0.1)',
-                                                        border: '1px solid rgba(34, 197, 94, 0.3)',
-                                                        color: '#22c55e',
-                                                        padding: '4px 8px',
-                                                        fontSize: '12px',
-                                                        borderRadius: '4px',
-                                                        cursor: 'pointer',
-                                                        display: 'flex',
-                                                        alignItems: 'center',
-                                                        gap: '4px'
-                                                    }}
-                                                >
-                                                    {isEditingFile && editFileId === file.id ? '⏳' : '✍️'} Edit
-                                                </button>
+                                                {userData.allowEditing && (
+                                                    <button
+                                                        onClick={() => handleEdit(file.id)}
+                                                        disabled={isEditLoading === file.id}
+                                                        style={{
+                                                            background: 'rgba(59, 124, 244, 0.2)',
+                                                            border: '1px solid rgba(59, 124, 244, 0.4)',
+                                                            color: '#3b7cf4',
+                                                            padding: '4px 8px',
+                                                            fontSize: '12px',
+                                                            borderRadius: '4px',
+                                                            cursor: 'pointer',
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            gap: '4px'
+                                                        }}
+                                                    >
+                                                        {isEditLoading === file.id ? '⏳ Loading...' : '✍️ Edit'}
+                                                    </button>
+                                                )}
                                                 <button
                                                     onClick={() => handlePreview(file.id)}
                                                     disabled={isPreviewLoading}
@@ -729,17 +754,21 @@ export default function ViewPage({ params }: ViewPageProps) {
                 </div>
             )}
 
-            {/* Universal File Editor */}
-            {isEditingFile && editFileId && (
-                <UniversalFileEditor
-                    token={token}
-                    fileId={editFileId}
-                    fileName={editFileName}
-                    remainingSeconds={remainingSeconds}
-                    connectionStatus={connectionStatus}
-                    onClose={closeEditor}
-                    onSaved={handleEditorSaved}
-                />
+            {/* Universal Editor */}
+            {editingFile && (
+                <div style={{
+                    position: 'fixed',
+                    inset: 0,
+                    zIndex: 9999,
+                    background: '#fff',
+                    overflow: 'hidden'
+                }}>
+                    <UniversalEditor
+                        initialFileProp={editingFile}
+                        onClose={() => { setEditingFile(null); setEditingFileId(null); }}
+                        onSave={handleSaveFile}
+                    />
+                </div>
             )}
         </main>
     );

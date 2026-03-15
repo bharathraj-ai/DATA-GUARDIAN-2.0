@@ -36,8 +36,13 @@ export default function Navbar() {
             <div className="container navbar-container">
                 <Link href="/" className="navbar-logo">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src="/logo.svg" alt="Data Guardian" width={32} height={32} suppressHydrationWarning />
-                    <span className="gradient-text">Data Guardian</span>
+                    <img src="/logo.svg" alt="Secure Protocol" width={32} height={32} suppressHydrationWarning />
+                    <span 
+                        className="gradient-text" 
+                        suppressHydrationWarning
+                    >
+                        Secure Protocol
+                    </span>
                 </Link>
 
                 {/* Desktop Menu */}
