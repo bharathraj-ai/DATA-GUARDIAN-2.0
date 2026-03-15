@@ -18,6 +18,9 @@ const nextConfig: NextConfig = {
   },
 
   // Experimental features
+  // ONLYOFFICE JWT uses Node.js crypto — must be external
+  serverExternalPackages: ['jsonwebtoken'],
+
   experimental: {
     serverActions: {
       bodySizeLimit: '150mb',
@@ -90,6 +93,18 @@ const nextConfig: NextConfig = {
         headers: [
           { key: 'Cache-Control', value: 'no-store, no-cache, must-revalidate, max-age=0' },
           { key: 'Pragma', value: 'no-cache' },
+        ],
+      },
+      // ONLYOFFICE editor — no-cache + CSP allowing ONLYOFFICE iframe
+      {
+        source: '/editor/:path*',
+        headers: [
+          { key: 'Cache-Control', value: 'no-store, no-cache, must-revalidate, max-age=0' },
+          { key: 'Pragma', value: 'no-cache' },
+          {
+            key: 'Content-Security-Policy',
+            value: `frame-src 'self' ${process.env.ONLYOFFICE_SERVER_URL || 'http://localhost:8080'}; script-src 'self' 'unsafe-inline' 'unsafe-eval' ${process.env.ONLYOFFICE_SERVER_URL || 'http://localhost:8080'}`,
+          },
         ],
       },
       // AGGRESSIVE CACHE for static assets (1 year, immutable)

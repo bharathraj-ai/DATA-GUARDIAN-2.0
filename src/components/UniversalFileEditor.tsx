@@ -11,7 +11,7 @@ import {
 } from 'react';
 import dynamic from 'next/dynamic';
 import { getFileForEdit, FileEditData } from '@/actions/get-file-edit';
-import { saveEditedText, saveEditedSpreadsheet, saveEditedImage, saveEditedRichText, saveEditedPdf } from '@/actions/save-file-edit';
+import { saveEditedText, saveEditedSpreadsheet, saveEditedImage, saveEditedRichText } from '@/actions/save-file-edit';
 import { updateFile } from '@/actions/update-file';
 import { detectEditorType, getEditorLabel, EditorType } from '@/lib/file-type-utils';
 import './editors/editors.css';
@@ -22,7 +22,7 @@ const SpreadsheetEditor = lazy(() => import('./editors/SpreadsheetEditor'));
 
 const RichTextEditor = lazy(() => import('./editors/RichTextEditor'));
 const ImageEditor = lazy(() => import('./editors/ImageEditor'));
-const PdfViewer = dynamic(() => import('./editors/PdfViewer'), { ssr: false, loading: () => <div className="editor-loading"><div className="loading-spinner" /><p>Loading PDF viewer...</p></div> });
+const OnlyOfficeEditor = dynamic(() => import('./editors/OnlyOfficeEditor'), { ssr: false, loading: () => <div className="editor-loading"><div className="loading-spinner" /><p>Loading ONLYOFFICE editor...</p></div> });
 
 interface UniversalFileEditorProps {
     token: string;
@@ -58,14 +58,13 @@ export default function UniversalFileEditor({
     const [imageDataUrl, setImageDataUrl] = useState(''); // edited image output
 
     const replaceInputRef = useRef<HTMLInputElement>(null);
-    const pdfViewerRef = useRef<{ getModifiedPdf: () => Promise<string> } | null>(null);
 
     // ---- File icon based on type ----
     const fileIcon = useMemo(() => {
         const icons: Record<string, string> = {
             text: '📄', json: '{ }', markdown: '📝', csv: '📊',
             spreadsheet: '📊', richtext: '📘', image: '🖼️', pdf: '📕',
-            unsupported: '❓',
+            onlyoffice: '📎', unsupported: '❓',
         };
         return icons[editorType] || '📄';
     }, [editorType]);
@@ -95,7 +94,11 @@ export default function UniversalFileEditor({
 
                 let detectedType: EditorType;
 
-                if (serverType === 'richtext') {
+                // First check if this is an ONLYOFFICE-compatible file
+                const ooDetect = detectEditorType(mimeType || '', fileName);
+                if (ooDetect === 'onlyoffice') {
+                    detectedType = 'onlyoffice';
+                } else if (serverType === 'richtext') {
                     detectedType = 'richtext';
                 } else if (serverType === 'image') {
                     detectedType = 'image';
@@ -110,7 +113,7 @@ export default function UniversalFileEditor({
                         detectedType = 'text';
                     }
                 } else if (serverType === 'pdf') {
-                    detectedType = 'pdf';
+                    detectedType = 'onlyoffice';
                 } else {
                     detectedType = 'unsupported';
                 }
@@ -126,8 +129,6 @@ export default function UniversalFileEditor({
                     setBinaryContent(data.content || '');
                 } else if (detectedType === 'richtext') {
                     setRichTextHtml(data.content || '');
-                } else if (detectedType === 'pdf') {
-                    setBinaryContent(data.content || '');
                 }
             } catch (err) {
                 if (!cancelled) {
@@ -218,13 +219,9 @@ export default function UniversalFileEditor({
                 }
             } else if (editorType === 'richtext') {
                 result = await saveEditedRichText(token, fileId, richTextHtml);
-            } else if (editorType === 'pdf') {
-                if (pdfViewerRef.current) {
-                    const pdfDataUrl = await pdfViewerRef.current.getModifiedPdf();
-                    result = await saveEditedPdf(token, fileId, pdfDataUrl);
-                } else {
-                    result = { success: true }; // No changes
-                }
+            } else if (editorType === 'onlyoffice') {
+                // ONLYOFFICE handles saving via its own callback mechanism
+                result = { success: true };
             }
 
             if (result?.success) {
@@ -322,11 +319,12 @@ export default function UniversalFileEditor({
                     />
                 )}
 
-                {editorType === 'pdf' && (
-                    <PdfViewer
-                        ref={pdfViewerRef}
-                        content={binaryContent}
-                        onChange={() => {}}
+
+                {editorType === 'onlyoffice' && (
+                    <OnlyOfficeEditor
+                        token={token}
+                        fileId={fileId}
+                        fileName={fileName}
                     />
                 )}
 

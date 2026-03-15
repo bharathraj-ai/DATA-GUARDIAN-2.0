@@ -44,8 +44,8 @@ function SignInContent() {
                         {/* Header */}
                         <div className="app-header">
                             <div className="brand-badge" style={{ marginBottom: '24px', justifyContent: 'center' }}>
-                                <Image src="/logo.svg" alt="Data Guardian" width={32} height={32} />
-                                <span className="gradient-text" style={{ fontSize: '1.5rem' }}>Data Guardian</span>
+                                <Image src="/logo.svg" alt="Secure Protocol" width={32} height={32} />
+                                <span className="gradient-text" style={{ fontSize: '1.5rem' }}>Secure Protocol</span>
                             </div>
                             <h1 className="app-page-title">
                                 <span className="gradient-text">Sign In</span>
