@@ -50,11 +50,6 @@ export function middleware(request: NextRequest) {
         return NextResponse.next();
     }
 
-    // Allow ONLYOFFICE callback and file endpoints — authenticated via JWT, not session
-    if (pathname.startsWith('/api/onlyoffice/callback') || pathname.startsWith('/api/onlyoffice/file')) {
-        return NextResponse.next();
-    }
-
     // Check if this is a secure route (share/view/revoke)
     const isSecureRoute =
         pathname.startsWith('/share/') ||

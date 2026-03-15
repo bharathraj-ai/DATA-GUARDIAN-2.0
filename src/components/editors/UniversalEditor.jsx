@@ -199,7 +199,19 @@ function TableElement({ el, scale, onUpdate, selected, onSelect }) {
           {rows.map((row, r) => (
             <tr key={r}>{row.map((cell, c) => (
               <td key={c} style={{ border: "1px solid #c8ccd6", background: r === 0 ? "#f8f9fc" : "#ffffff", padding: `${2 * scale}px ${4 * scale}px`, minWidth: colW * scale, height: rowH * scale, fontWeight: r === 0 ? 600 : 400, color: "#111" }}>
-                <div contentEditable suppressContentEditableWarning style={{ outline: "none", minWidth: 20 }} onBlur={e => { const newRows = rows.map((ro, ri) => ri === r ? ro.map((cl, ci) => ci === c ? e.target.innerText : cl) : ro); onUpdate({ rows: newRows }); }} dangerouslySetInnerHTML={{ __html: cell }} />
+                <div 
+                  contentEditable 
+                  suppressContentEditableWarning 
+                  style={{ outline: "none", minWidth: 20 }} 
+                  onBlur={e => {
+                    const newContent = e.target.innerHTML;
+                    if (newContent !== cell) {
+                      const newRows = rows.map((ro, ri) => ri === r ? ro.map((cl, ci) => ci === c ? newContent : cl) : ro); 
+                      onUpdate({ rows: newRows }); 
+                    }
+                  }} 
+                  dangerouslySetInnerHTML={{ __html: cell }} 
+                />
               </td>
             ))}</tr>
           ))}
@@ -252,13 +264,29 @@ function DraggableElement({ el, scale, onUpdate, onDelete, children, selected, o
 function TextElement({ el, scale, onUpdate, selected, onSelect }) {
   const ref = useRef(null);
   const [editing, setEditing] = useState(false);
+  const lastUpdateContent = useRef(el.content);
+
+  useEffect(() => {
+    // Only apply external changes if we are not actively in editing mode
+    if (!editing && ref.current && ref.current.innerHTML !== el.content) {
+      ref.current.innerHTML = el.content || "";
+      lastUpdateContent.current = el.content;
+    }
+  }, [el.content, editing]);
+
   return (
     <div ref={ref} style={{ position: "absolute", left: el.x * scale, top: el.y * scale, width: (el.width || 200) * scale, minHeight: (el.height || 20) * scale, fontFamily: el.font || "Georgia", fontSize: (el.size || 12) * scale, fontWeight: el.bold ? "bold" : "normal", fontStyle: el.italic ? "italic" : "normal", textDecoration: el.underline ? "underline" : "none", color: el.color || "#000", border: selected ? "2px solid #3b7cf4" : editing ? "1px dashed #3b7cf4" : "1px solid transparent", borderRadius: 2, padding: 0, cursor: editing ? "text" : "move", outline: "none", background: "#fff", lineHeight: 1, wordBreak: "normal", whiteSpace: "nowrap", boxSizing: "border-box", zIndex: selected ? 100 : 1 }}
       contentEditable={editing} suppressContentEditableWarning
       onClick={e => { e.stopPropagation(); onSelect(); }}
       onDoubleClick={e => { e.stopPropagation(); setEditing(true); ref.current?.focus(); }}
-      onBlur={e => { setEditing(false); onUpdate({ content: e.target.innerText }); }}
-      dangerouslySetInnerHTML={editing ? undefined : { __html: el.content || "" }}
+      onBlur={e => { 
+        setEditing(false); 
+        const newHtml = e.target.innerHTML;
+        if (newHtml !== lastUpdateContent.current) {
+          lastUpdateContent.current = newHtml;
+          onUpdate({ content: newHtml }); 
+        }
+      }}
     />
   );
 }

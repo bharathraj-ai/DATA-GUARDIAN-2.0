@@ -369,6 +369,14 @@ async function buildDocx(blocks, onProgress) {
 function BlockPreview({ block, index, selected, onSelect, onUpdate, onDelete, onMoveUp, onMoveDown }) {
   const [editing, setEditing] = useState(false);
   const ref = useRef(null);
+  const lastUpdateContent = useRef(block.text);
+
+  useEffect(() => {
+    if (!editing && ref.current && ref.current.innerHTML !== (block.text || "")) {
+      ref.current.innerHTML = esc(block.text || "");
+      lastUpdateContent.current = block.text;
+    }
+  }, [block.text, editing]);
 
   const typeStyles = {
     h1: { fontSize: 26, fontWeight: 800, color: "#1a2e5a", marginBottom: 4, fontFamily: "'Playfair Display', serif" },
@@ -417,8 +425,14 @@ function BlockPreview({ block, index, selected, onSelect, onUpdate, onDelete, on
         suppressContentEditableWarning
         style={{ ...baseStyle, flex: 1, outline: "none", minHeight: 18 }}
         onDoubleClick={e => { e.stopPropagation(); setEditing(true); ref.current?.focus(); }}
-        onBlur={e => { setEditing(false); onUpdate(index, { text: e.target.innerText }); }}
-        dangerouslySetInnerHTML={editing ? undefined : { __html: esc(block.text || "") }}
+        onBlur={e => { 
+          setEditing(false); 
+          const newHtml = e.target.innerText;
+          if (newHtml !== lastUpdateContent.current) {
+            lastUpdateContent.current = newHtml;
+            onUpdate(index, { text: newHtml }); 
+          }
+        }}
       />
 
       {/* Controls */}
