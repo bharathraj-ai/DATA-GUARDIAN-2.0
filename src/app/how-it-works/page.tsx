@@ -3,7 +3,7 @@ import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
     title: 'How It Works',
-    description: 'Learn how Data Guardian secures your data in three simple steps: enter information, get encrypted link with OTP, and share securely with time-limited access.',
+    description: 'Learn how Secure Protocol secures your data in three simple steps: enter information, get encrypted link with OTP, and share securely with time-limited access.',
 };
 
 export default function HowItWorksPage() {
@@ -14,7 +14,7 @@ export default function HowItWorksPage() {
                 <div className="container">
                     <div className="how-hero-content">
                         <h1 className="how-hero-title">
-                            How <span className="gradient-text">Data Guardian</span> Works
+                            How <span className="gradient-text">Secure Protocol</span> Works
                         </h1>
                         <p className="how-hero-subtitle">
                             Secure data sharing in three simple steps. No technical expertise required.

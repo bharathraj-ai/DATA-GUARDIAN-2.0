@@ -62,6 +62,7 @@ export type MaskedUserData = {
     age: number;
     expiresAt: Date;
     remainingSeconds: number;
+    allowEditing: boolean;
     files: FileMetadata[];
 };
 
@@ -195,6 +196,7 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
                 age: decryptedData.age,
                 expiresAt: secureLink.expiresAt,
                 remainingSeconds,
+                allowEditing: secureLink.allowEditing,
                 files: secureLink.UserFile || [],
             },
         };

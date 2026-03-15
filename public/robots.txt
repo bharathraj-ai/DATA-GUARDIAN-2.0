@@ -1,4 +1,4 @@
-# Data Guardian - Block all sensitive routes from search engine crawlers
+# Secure Protocol - Block all sensitive routes from search engine crawlers
 User-agent: *
 Disallow: /share/
 Disallow: /view/

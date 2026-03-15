@@ -59,6 +59,7 @@ model SecureLink {
   otpFirstAttemptAt  DateTime?
   otpVerifiedAt      DateTime?
   allowedVendorEmail String?
+  allowEditing       Boolean    @default(false)
   ownerId            String?
   otpPlain           String?
   AuditLog           AuditLog[]
@@ -89,12 +90,13 @@ model User {
   image         String?
   role          String       @default("VENDOR")
   createdAt     DateTime     @default(now())
-  updatedAt     DateTime
+  updatedAt     DateTime     @updatedAt
   roleSelected  Boolean      @default(false)
   Account       Account[]
   SecureLink    SecureLink[]
   Session       Session[]
   SendRecord    SendRecord[]
+  Document      Document[]
 }
 
 model UserData {
@@ -208,5 +210,69 @@ model CollabOperation {
   createdAt DateTime @default(now())
 
   @@index([fileId])
+  @@index([createdAt])
+}
+
+// ============================================
+// ONLYOFFICE DOCUMENT MANAGEMENT
+// ============================================
+
+/// Secure document metadata for ONLYOFFICE-managed files.
+/// Actual files are stored on disk at storagePath — never publicly accessible.
+model Document {
+  id             String             @id @default(cuid())
+  fileName       String
+  fileType       String             // Extension: docx, xlsx, pptx, etc.
+  mimeType       String             @default("application/octet-stream")
+  storagePath    String             // Relative path inside secure-storage
+  fileSize       Int                @default(0)
+  ownerId        String
+  classification String             @default("INTERNAL") // PUBLIC | INTERNAL | CONFIDENTIAL | RESTRICTED
+  currentVersion Int                @default(1)
+  isDeleted      Boolean            @default(false)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  owner          User               @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  versions       DocumentVersion[]
+  auditLogs      DocumentAuditLog[]
+
+  @@index([ownerId])
+  @@index([classification])
+  @@index([createdAt])
+  @@index([isDeleted])
+}
+
+/// Version history entry — stores path to previous version on disk.
+model DocumentVersion {
+  id          String   @id @default(cuid())
+  documentId  String
+  version     Int
+  storagePath String   // e.g. /secure-storage/versions/{docId}/{version}.docx
+  fileSize    Int      @default(0)
+  changeType  String   @default("edit") // "edit" | "autosave" | "force_save" | "restore"
+  changedBy   String?  // userId who triggered the save
+  createdAt   DateTime @default(now())
+  document    Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, version])
+  @@index([documentId])
+  @@index([createdAt])
+}
+
+/// Append-only audit log for every document event.
+model DocumentAuditLog {
+  id         String   @id @default(cuid())
+  documentId String
+  userId     String?
+  action     String   // "upload" | "view" | "edit" | "download" | "delete"
+  ipAddress  String?
+  userAgent  String?
+  metadata   String?  // JSON — extra context
+  createdAt  DateTime @default(now())
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+  @@index([userId])
+  @@index([action])
   @@index([createdAt])
 }

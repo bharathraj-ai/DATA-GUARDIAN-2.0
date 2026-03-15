@@ -120,8 +120,8 @@ const PdfViewer = forwardRef<PdfViewerRef, PdfViewerProps>(function PdfViewer({ 
                 // eslint-disable-next-line @typescript-eslint/no-var-requires
                 const pdfjs = require('pdfjs-dist') as typeof import('pdfjs-dist');
 
-                // Configure worker — disable it to avoid ArrayBuffer detach issues
-                pdfjs.GlobalWorkerOptions.workerSrc = '';
+                // Configure worker — use CDN-hosted worker matching our pdfjs-dist version
+                pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.mjs`;
 
                 // Deep-copy the buffer so each Strict Mode mount gets
                 // its own independent ArrayBuffer.

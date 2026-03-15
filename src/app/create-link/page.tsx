@@ -18,6 +18,7 @@ interface FormDataState {
     validityMinutes: string;
     vendorEmail: string; // Zero Trust: only this email can access the link
     topic: string; // Mandatory: describe what data is being shared
+    allowEditing: boolean;
 }
 
 export default function SignupPage() {
@@ -33,6 +34,7 @@ export default function SignupPage() {
         validityMinutes: '',
         vendorEmail: '',
         topic: '',
+        allowEditing: false,
     });
     const [files, setFiles] = useState<FileList | null>(null);
     const [generatedLink, setGeneratedLink] = useState('');
@@ -76,7 +78,8 @@ export default function SignupPage() {
     }, [router]);
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-        setFormData({ ...formData, [e.target.name]: e.target.value });
+        const value = e.target.type === 'checkbox' ? (e.target as HTMLInputElement).checked : e.target.value;
+        setFormData({ ...formData, [e.target.name]: value });
     };
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -123,6 +126,7 @@ export default function SignupPage() {
             });
             // Also send topic as 'purpose' for backward compatibility with backend
             data.append('purpose', formData.topic);
+            data.append('allowEditing', formData.allowEditing ? 'true' : 'false');
 
             if (files) {
                 for (let i = 0; i < files.length; i++) {
@@ -403,7 +407,21 @@ export default function SignupPage() {
                                         </small>
                                     </div>
 
-                                    <div className="form-group">
+                                    <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '16px' }}>
+                                        <input
+                                            type="checkbox"
+                                            id="allowEditing"
+                                            name="allowEditing"
+                                            checked={formData.allowEditing}
+                                            onChange={handleChange}
+                                            style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                                        />
+                                        <label htmlFor="allowEditing" style={{ cursor: 'pointer', margin: 0, fontSize: '14px', color: 'var(--text-primary)' }}>
+                                            Allow vendor to edit files using Universal Editor
+                                        </label>
+                                    </div>
+
+                                    <div className="form-group" style={{ marginTop: '16px' }}>
                                         <label className="form-label">Attach Files (Optional)</label>
                                         <div className="file-upload-wrapper">
                                             <input
@@ -559,6 +577,7 @@ export default function SignupPage() {
                                             validityMinutes: '',
                                             vendorEmail: '',
                                             topic: '',
+                                            allowEditing: false,
                                         });
                                         setFiles(null);
                                         // Force full page reload to clear all caches
