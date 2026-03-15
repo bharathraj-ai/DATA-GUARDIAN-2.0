@@ -24,13 +24,13 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
   title: {
-    default: "Data Guardian - Secure Data Protection",
-    template: "%s | Data Guardian",
+    default: "Secure Protocol - Secure Data Protection",
+    template: "%s | Secure Protocol",
   },
   description: "Protect your sensitive data with military-grade encryption, ephemeral sessions, and complete access control. Share securely with OTP protection and instant revocation.",
   keywords: ["data protection", "encryption", "secure sharing", "privacy", "cybersecurity", "OTP", "self-destructing links", "zero trust"],
-  authors: [{ name: "Data Guardian" }],
-  creator: "Data Guardian",
+  authors: [{ name: "Secure Protocol" }],
+  creator: "Secure Protocol",
   robots: {
     index: true,
     follow: true,
@@ -38,13 +38,13 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     locale: "en_US",
-    siteName: "Data Guardian",
-    title: "Data Guardian - Enterprise Secure Data Sharing",
+    siteName: "Secure Protocol",
+    title: "Secure Protocol - Enterprise Secure Data Sharing",
     description: "Share sensitive data with military-grade AES-256 encryption, OTP protection, and instant revocation. Zero-knowledge architecture ensures complete privacy.",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Data Guardian - Secure Data Protection",
+    title: "Secure Protocol - Secure Data Protection",
     description: "Military-grade encryption. OTP protection. Instant revocation. Share sensitive data with confidence.",
   },
 };
@@ -70,9 +70,9 @@ export default function RootLayout({
             <div className="container">
               <div className="footer-grid">
                 <div className="footer-brand">
-                  <Link href="/" className="footer-logo">
-                    <Image src="/logo.svg" alt="Data Guardian" width={24} height={24} />
-                    <span className="gradient-text">Data Guardian</span>
+                   <Link href="/" className="footer-logo">
+                    <Image src="/logo.svg" alt="Secure Protocol" width={24} height={24} />
+                    <span className="gradient-text">Secure Protocol</span>
                   </Link>
                   <p className="footer-motto">
                     Protecting your sensitive data with military-grade encryption and self-destructing links.
@@ -96,7 +96,7 @@ export default function RootLayout({
                 </div>
               </div>
               <div className="footer-bottom">
-                <p>&copy; 2026 Data Guardian. All rights reserved.</p>
+                <p>&copy; 2026 Secure Protocol. All rights reserved.</p>
               </div>
             </div>
           </footer>

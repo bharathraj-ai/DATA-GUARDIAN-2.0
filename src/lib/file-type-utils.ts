@@ -12,6 +12,7 @@ export type EditorType =
     | 'richtext'
     | 'image'
     | 'pdf'
+    | 'onlyoffice'
     | 'unsupported';
 
 const TEXT_EXTENSIONS = ['txt', 'log', 'cfg', 'ini', 'env', 'yaml', 'yml', 'xml', 'html', 'css', 'js', 'ts', 'py', 'sh', 'bat'];
@@ -34,23 +35,22 @@ export function detectEditorType(mimeType: string, fileName?: string): EditorTyp
     // CSV
     if (mime === 'text/csv' || ext === 'csv') return 'csv';
 
-    // Spreadsheet (xlsx, xls, ods)
+    // ONLYOFFICE — Office document formats + PDF
+    const ONLYOFFICE_EXTENSIONS = ['docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'odt', 'ods', 'odp', 'pdf'];
     if (
-        mime.includes('spreadsheet') ||
-        mime.includes('excel') ||
-        SPREADSHEET_EXTENSIONS.includes(ext)
-    ) return 'spreadsheet';
-
-    // PDF
-    if (mime === 'application/pdf' || ext === 'pdf') return 'pdf';
-
-    // DOCX
-    if (
-        mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+        ONLYOFFICE_EXTENSIONS.includes(ext) ||
+        mime.includes('wordprocessingml') ||
+        mime.includes('spreadsheetml') ||
+        mime.includes('presentationml') ||
         mime === 'application/msword' ||
-        ext === 'docx' ||
-        ext === 'doc'
-    ) return 'richtext';
+        mime === 'application/pdf' ||
+        mime.includes('excel') ||
+        mime.includes('powerpoint') ||
+        mime.includes('opendocument')
+    ) return 'onlyoffice';
+
+    // Spreadsheet (csv only — xlsx/xls now go to ONLYOFFICE)
+    if (mime === 'text/csv' || ext === 'csv') return 'spreadsheet';
 
     // Images
     if (mime.startsWith('image/') || IMAGE_EXTENSIONS.includes(ext)) return 'image';
@@ -98,6 +98,7 @@ export function getEditorLabel(editorType: EditorType): string {
         richtext: 'Rich Text Editor',
         image: 'Image Editor',
         pdf: 'PDF Viewer',
+        onlyoffice: 'ONLYOFFICE Editor',
         unsupported: 'Unsupported',
     };
     return labels[editorType];
