@@ -44,27 +44,47 @@ export async function updateFile(token: string, fileId: string, formData: FormDa
         }
 
         // 3. Extract the new file from FormData
-        const file = formData.get('file') as File;
-        if (!file || file.size === 0) {
-            return { success: false, error: 'No valid file provided' };
+        const file = formData.get('file');
+        
+        let fileBuffer: Buffer;
+        let fileName = fileRecord.fileName;
+        let fileType = fileRecord.fileType;
+        let fileSize = 0;
+
+        if (!file || typeof file !== 'object' || !('size' in file) || typeof (file as any).arrayBuffer !== 'function') {
+            return { success: false, error: 'No valid file provided in the request' };
         }
 
+        const validFile = file as unknown as import('buffer').Blob & { name?: string, lastModified?: number };
+
+        if (validFile.size === 0) return { success: false, error: 'No valid file provided' };
+        fileSize = validFile.size;
+        
+        if (validFile.name) {
+            fileName = validFile.name;
+        }
+        
+        if (validFile.type) {
+            fileType = validFile.type;
+        }
+        
+        fileBuffer = Buffer.from(await validFile.arrayBuffer());
+
         const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB single file limit for edits
-        if (file.size > MAX_FILE_SIZE) {
+        if (fileSize > MAX_FILE_SIZE) {
             return { success: false, error: `File size exceeds 25MB limit` };
         }
 
         // 4. Encrypt the new file
-        const buffer = Buffer.from(await file.arrayBuffer());
-        const { iv, authTag, encryptedContent } = encryptBuffer(buffer);
+        const { iv, authTag, encryptedContent } = encryptBuffer(fileBuffer);
 
         // 5. Update Database Record
         await prisma.userFile.update({
             where: { id: fileId },
             data: {
-                fileName: file.name,
-                fileType: file.type,
-                fileSize: file.size,
+                fileName: fileName,
+                fileType: fileType,
+                fileSize: fileSize,
                 encryptedContent,
                 iv,
                 authTag,
@@ -76,12 +96,12 @@ export async function updateFile(token: string, fileId: string, formData: FormDa
             data: {
                 action: 'VENDOR_EDITED_FILE',
                 linkId: fileRecord.SecureLink.id,
-                reason: `Vendor uploaded a new version of file: ${fileRecord.fileName} -> ${file.name}`,
+                reason: `Vendor uploaded a new version of file: ${fileRecord.fileName} -> ${fileName}`,
                 metadata: JSON.stringify({
                     fileId,
                     oldSize: fileRecord.fileSize,
-                    newSize: file.size,
-                    newFileName: file.name
+                    newSize: fileSize,
+                    newFileName: fileName
                 }),
             },
         });
