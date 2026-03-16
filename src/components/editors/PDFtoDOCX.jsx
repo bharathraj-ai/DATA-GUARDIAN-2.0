@@ -576,6 +576,7 @@ export default function PDFtoDOCX({ onBack, initialFile, onSave }) {
   /* ── count block types ── */
   const countTypes = (bks) => {
     const c = { h1: 0, h2: 0, h3: 0, paragraph: 0, list: 0, pagebreak: 0 };
+    if (!bks || !Array.isArray(bks)) return c;
     bks.forEach(b => { if (c[b.type] !== undefined) c[b.type]++; });
     return c;
   };
