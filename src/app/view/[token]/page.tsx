@@ -107,18 +107,32 @@ export default function ViewPage({ params }: ViewPageProps) {
             await revokeOnScreenshot(token);
         };
 
+        // Tab Switch Protection - Combine blur and visibilitychange
+        let isHandlingTabSwitch = false;
+
+        const handleTabSwitch = (reason: string) => {
+            if (editingFile || screenshotDetected || isHandlingTabSwitch) return;
+            
+            isHandlingTabSwitch = true;
+            triggerSecurityViolation(reason, false);
+            
+            // Debounce to prevent immediate double-counting
+            setTimeout(() => { isHandlingTabSwitch = false; }, 1500);
+        };
+
         // Detect when tab/window loses visibility (e.g., snipping tool overlay)
         const handleVisibilityChange = () => {
-            if (document.hidden && !editingFile && !screenshotDetected) {
-                triggerSecurityViolation('Tab hidden - possible screenshot', false);
+            if (document.hidden) {
+                handleTabSwitch('Tab hidden - possible screenshot');
             }
         };
 
         // Detect when window loses focus (e.g., snipping tool opens)
         const handleBlur = () => {
-            // Skip if editor is open or if PrintScreen was just detected
-            if (!editingFile && !screenshotDetected) {
-                triggerSecurityViolation('Window lost focus - possible screenshot', false);
+            // Only fire blur if the document is NOT hidden already 
+            // (If it's hidden, visibilitychange handles it. Blur handles cases like floating windows over the active tab)
+            if (!document.hidden) {
+                handleTabSwitch('Window lost focus - possible screenshot');
             }
         };
 
@@ -134,6 +148,10 @@ export default function ViewPage({ params }: ViewPageProps) {
             if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) {
                 e.preventDefault();
                 triggerSecurityViolation('Print shortcut (Ctrl+P) detected', true);
+            }
+            if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'C')) {
+                e.preventDefault();
+                triggerSecurityViolation('Copy shortcut (Ctrl+C) detected', true);
             }
         };
 
@@ -159,11 +177,24 @@ export default function ViewPage({ params }: ViewPageProps) {
             }
         };
 
+        // Detect copy actions
+        const handleCopy = (e: ClipboardEvent) => {
+            e.preventDefault();
+            triggerSecurityViolation('Copy action detected', true);
+        };
+
+        // Prevent right click
+        const handleContextMenu = (e: MouseEvent) => {
+            e.preventDefault();
+        };
+
         document.addEventListener('visibilitychange', handleVisibilityChange);
         window.addEventListener('blur', handleBlur);
         window.addEventListener('keydown', handleKeyDown);
         window.addEventListener('keyup', handleKeyUp);
         document.addEventListener('paste', handlePaste);
+        document.addEventListener('copy', handleCopy);
+        document.addEventListener('contextmenu', handleContextMenu);
 
         return () => {
             document.removeEventListener('visibilitychange', handleVisibilityChange);
@@ -171,6 +202,8 @@ export default function ViewPage({ params }: ViewPageProps) {
             window.removeEventListener('keydown', handleKeyDown);
             window.removeEventListener('keyup', handleKeyUp);
             document.removeEventListener('paste', handlePaste);
+            document.removeEventListener('copy', handleCopy);
+            document.removeEventListener('contextmenu', handleContextMenu);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [token, warningCount, revealTimeout, editingFile]);
