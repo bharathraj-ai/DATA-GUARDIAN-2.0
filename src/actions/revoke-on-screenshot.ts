@@ -38,7 +38,7 @@ export type ScreenshotRevokeResult = {
  * 3. Creates an audit log entry for SCREENSHOT_ATTEMPT
  * 4. Notifies the owner if an email is configured
  */
-export async function revokeOnScreenshot(token: string): Promise<ScreenshotRevokeResult> {
+export async function revokeOnScreenshot(token: string, displayMessage?: string): Promise<ScreenshotRevokeResult> {
     try {
         // Find the secure link by share token
         const secureLink = await prisma.secureLink.findUnique({
@@ -80,7 +80,7 @@ export async function revokeOnScreenshot(token: string): Promise<ScreenshotRevok
                     data: {
                         action: 'SCREENSHOT_ATTEMPT',
                         linkId: secureLink.id,
-                        reason: 'Access revoked due to screenshot attempt',
+                        reason: displayMessage || 'Access revoked due to screenshot attempt',
                     },
                 });
             }),
@@ -95,7 +95,7 @@ export async function revokeOnScreenshot(token: string): Promise<ScreenshotRevok
                 tokenId: secureLink.id,
                 timestamp: new Date(),
                 metadata: {
-                    purpose: 'Screenshot attempt detected. Access permanently revoked.',
+                    purpose: displayMessage || 'Screenshot attempt detected. Access permanently revoked.',
                 },
             }).catch((err) => console.error('[NOTIFY] Failed to send screenshot alert:', err));
         }
