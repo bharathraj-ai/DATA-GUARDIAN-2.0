@@ -75,7 +75,7 @@ export default function ViewPage({ params }: ViewPageProps) {
         let isRevoking = false;
         let screenshotDetected = false; // Debounce: prevent blur from double-counting a PrintScreen
 
-        const triggerSecurityViolation = async (reason: string, isImmediate: boolean = false) => {
+        const triggerSecurityViolation = async (reason: string, isImmediate: boolean = false, displayMessage?: string) => {
             if (isRevoking || !token) return;
 
             if (!isImmediate && warningCount < MAX_WARNINGS - 1) {
@@ -97,14 +97,14 @@ export default function ViewPage({ params }: ViewPageProps) {
             // Clear visible data immediately
             setUserData(null);
             setFullData(null);
-            setError(isImmediate
-                ? 'Security Violation: Access revoked due to screenshot attempt.'
+            setError(displayMessage || (isImmediate
+                ? 'security violation: Access reveoke due to screen attempts'
                 : `Security Violation: Access revoked after ${MAX_WARNINGS} tab switches or focus losses.`
-            );
+            ));
             setConnectionStatus('disconnected');
 
             // Call server to revoke access and notify owner
-            await revokeOnScreenshot(token);
+            await revokeOnScreenshot(token, displayMessage);
         };
 
         // Tab Switch Protection - Combine blur and visibilitychange
@@ -141,17 +141,17 @@ export default function ViewPage({ params }: ViewPageProps) {
             if (e.key === 'PrintScreen') {
                 e.preventDefault();
                 screenshotDetected = true;
-                triggerSecurityViolation('PrintScreen key detected', true);
+                triggerSecurityViolation('PrintScreen key detected', true, 'security violation: Access reveoke due to screen attempts');
                 // Reset debounce after a short delay
                 setTimeout(() => { screenshotDetected = false; }, 1000);
             }
             if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) {
                 e.preventDefault();
-                triggerSecurityViolation('Print shortcut (Ctrl+P) detected', true);
+                triggerSecurityViolation('Print shortcut (Ctrl+P) detected', true, 'security violation: Access reveoke due to try to print');
             }
             if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'C')) {
                 e.preventDefault();
-                triggerSecurityViolation('Copy shortcut (Ctrl+C) detected', true);
+                triggerSecurityViolation('Copy shortcut (Ctrl+C) detected', true, 'security violation: Access reveoke due to copying the content');
             }
         };
 
@@ -160,7 +160,7 @@ export default function ViewPage({ params }: ViewPageProps) {
             if (e.key === 'PrintScreen') {
                 e.preventDefault();
                 screenshotDetected = true;
-                triggerSecurityViolation('PrintScreen key detected', true);
+                triggerSecurityViolation('PrintScreen key detected', true, 'security violation: Access reveoke due to screen attempts');
                 setTimeout(() => { screenshotDetected = false; }, 1000);
             }
         };
@@ -172,7 +172,7 @@ export default function ViewPage({ params }: ViewPageProps) {
                 const hasImage = items.some(item => item.type.startsWith('image/'));
                 if (hasImage) {
                     e.preventDefault();
-                    triggerSecurityViolation('Screenshot image detected in clipboard', true);
+                    triggerSecurityViolation('Screenshot image detected in clipboard', true, 'security violation: Access reveoke due to screen attempts');
                 }
             }
         };
@@ -180,7 +180,7 @@ export default function ViewPage({ params }: ViewPageProps) {
         // Detect copy actions
         const handleCopy = (e: ClipboardEvent) => {
             e.preventDefault();
-            triggerSecurityViolation('Copy action detected', true);
+            triggerSecurityViolation('Copy action detected', true, 'security violation: Access reveoke due to copying the content');
         };
 
         // Prevent right click
@@ -509,8 +509,9 @@ export default function ViewPage({ params }: ViewPageProps) {
 
     // Error State
     if (error) {
-        const isRevoked = error.includes('revoked');
-        const isExpired = error.includes('expired');
+        const errorLower = error.toLowerCase();
+        const isRevoked = errorLower.includes('revoked') || errorLower.includes('reveoke');
+        const isExpired = errorLower.includes('expired');
         return (
             <main className="profile-wrapper">
                 <div className="profile-card">
