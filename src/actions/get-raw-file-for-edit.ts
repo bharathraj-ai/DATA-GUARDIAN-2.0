@@ -1,7 +1,7 @@
 'use server';
 
 import { prisma } from '@/lib/prisma';
-import { decryptBuffer } from '@/lib/crypto';
+import { decryptBuffer, decryptDek } from '@/lib/crypto';
 import { cookies } from 'next/headers';
 import { tryCheckRevoked, tryValidateSession } from '@/lib/redis-helpers';
 
@@ -48,10 +48,12 @@ export async function getRawFileForEdit(token: string, fileId: string): Promise<
 
         let buffer: Buffer;
         try {
+            const dek = (fileRecord as any).encryptedDek ? decryptDek((fileRecord as any).encryptedDek) : undefined;
             buffer = decryptBuffer(
                 fileRecord.encryptedContent,
                 fileRecord.iv,
-                fileRecord.authTag
+                fileRecord.authTag,
+                dek
             );
         } catch (e) {
             return { success: false, error: 'Decryption failed' };

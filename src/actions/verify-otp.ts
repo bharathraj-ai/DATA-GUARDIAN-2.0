@@ -65,7 +65,7 @@ export type VerifyOTPResult = {
  * - ANTI-PHISHING: 3-minute OTP verification window
  * - ANTI-PHISHING: Single-use OTP enforcement
  */
-export async function verifyOTP(input: OTPVerifyInput): Promise<VerifyOTPResult> {
+export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Promise<VerifyOTPResult> {
     try {
         // Server-side validation (Zero Trust)
         const validatedData = otpVerifySchema.safeParse(input);
@@ -79,6 +79,7 @@ export async function verifyOTP(input: OTPVerifyInput): Promise<VerifyOTPResult>
         }
 
         const { token, otp } = validatedData.data;
+        const vendorEmail = input.email?.toLowerCase().trim();
         const _headers = await headers();
         const currentDeviceHash = generateDeviceHash(_headers);
         const clientIP = extractClientIP(_headers);
@@ -144,6 +145,7 @@ export async function verifyOTP(input: OTPVerifyInput): Promise<VerifyOTPResult>
                 // Anti-Phishing fields
                 otpFirstAttemptAt: true,
                 otpVerifiedAt: true,
+                VendorAccess: true,
             }
         });
 
@@ -174,53 +176,29 @@ export async function verifyOTP(input: OTPVerifyInput): Promise<VerifyOTPResult>
             };
         }
 
-        // 3. ZERO TRUST: Email binding validation
-        if (secureLink.allowedVendorEmail) {
-            if (!userEmail) {
-                await prisma.auditLog.create({
-                    data: {
-                        action: 'DENIED',
-                        linkId: secureLink.id,
-                        reason: 'Unauthenticated access attempt to email-bound link',
-                        metadata: JSON.stringify({ type: 'no_auth' }),
-                    }
-                });
-
-                return {
-                    success: false,
-                    error: 'Authentication required. Please sign in with Google.',
-                    errorType: 'DENIED',
-                };
-            }
-
-            if (userEmail.toLowerCase() !== secureLink.allowedVendorEmail.toLowerCase()) {
-                await prisma.auditLog.create({
-                    data: {
-                        action: 'DENIED',
-                        linkId: secureLink.id,
-                        reason: 'Email mismatch - forwarded link attempt blocked',
-                        metadata: JSON.stringify({
-                            type: 'email_mismatch',
-                            attemptedEmail: userEmail.substring(0, 3) + '***'
-                        }),
-                    }
-                });
-
-                // Alert the owner about forwarded link attempt
-                if (secureLink.notificationEmail) {
-                    import('@/lib/notifications').then(({ notifyForwardedLinkAttempt }) => {
-                        notifyForwardedLinkAttempt(
-                            secureLink.notificationEmail!,
-                            secureLink.id,
-                            secureLink.allowedVendorEmail!
-                        ).catch(() => { }); // Silent fail
-                    });
-                }
-
+        // 3. ZERO TRUST: Email binding validation using VendorAccess
+        let vendor = null;
+        if (vendorEmail) {
+            vendor = secureLink.VendorAccess.find(v => v.email === vendorEmail);
+            if (!vendor) {
                 return {
                     success: false,
                     error: `This link was created for a different recipient. Access denied.`,
                     errorType: 'EMAIL_MISMATCH',
+                };
+            }
+            if (vendor.isRevoked) {
+                return {
+                    success: false,
+                    error: `Your access to this session has been revoked.`,
+                    errorType: 'REVOKED',
+                };
+            }
+            if (vendor.loginCount >= vendor.maxLogins) {
+                return {
+                    success: false,
+                    error: `You have reached the maximum number of logins (${vendor.maxLogins}) for this session.`,
+                    errorType: 'DENIED',
                 };
             }
         }
@@ -234,8 +212,10 @@ export async function verifyOTP(input: OTPVerifyInput): Promise<VerifyOTPResult>
             };
         }
 
-        // ANTI-PHISHING: Check if OTP was already verified (single-use enforcement)
-        if (secureLink.otpVerifiedAt) {
+        // ANTI-PHISHING: Check if OTP was already verified 
+        // Note: For hierarchical vendor groups, OTPs are per-vendor and generated dynamically,
+        // so we skip this global `otpVerifiedAt` check if dealing with a vendor record.
+        if (!vendor && secureLink.otpVerifiedAt) {
             await prisma.auditLog.create({
                 data: {
                     action: 'DENIED',
@@ -327,43 +307,33 @@ export async function verifyOTP(input: OTPVerifyInput): Promise<VerifyOTPResult>
             });
         }
 
-        // Verify OTP (constant-time comparison via bcrypt)
-        const isValidOTP = await verifyOTPHash(otp, secureLink.otpHash);
+        // Verify OTP 
+        const targetHash = vendor?.otpHash || secureLink.otpHash;
+        
+        if (!targetHash) {
+             return {
+                 success: false,
+                 error: 'No OTP request found. Please request a new OTP.',
+                 errorType: 'EXPIRED',
+             };
+        }
+
+        const isValidOTP = await verifyOTPHash(otp, targetHash);
 
         if (!isValidOTP) {
-            // ZERO TRUST: SINGLE ATTEMPT - Wrong OTP = Permanent Revocation
-            // This is the strictest security policy for enterprise-grade protection
-            await prisma.$transaction(async (tx) => {
-                await tx.secureLink.update({
-                    where: { id: secureLink.id },
-                    data: {
-                        failedAttempts: 1,
-                        lockedAt: new Date(),
-                        isRevoked: true, // Immediate revocation
-                    },
-                });
-
-                await tx.auditLog.create({
-                    data: {
-                        action: 'LOCKED',
-                        linkId: secureLink.id,
-                        reason: 'Single-attempt OTP policy: Wrong OTP entered',
-                    },
-                });
+            // Log failed attempt
+            await prisma.auditLog.create({
+                data: {
+                    action: 'DENIED',
+                    linkId: secureLink.id,
+                    reason: 'Invalid OTP entered',
+                },
             });
-
-            // Alert owner about link being revoked due to wrong OTP
-            if (secureLink.notificationEmail) {
-                import('@/lib/notifications').then(({ notifyFailedAttempts }) => {
-                    notifyFailedAttempts(secureLink.notificationEmail!, secureLink.id, 1)
-                        .catch(() => { }); // Silent fail
-                });
-            }
 
             return {
                 success: false,
-                error: 'Invalid OTP. This link has been permanently revoked for security.',
-                errorType: 'LOCKED',
+                error: 'Invalid OTP.',
+                errorType: 'INVALID_OTP',
             };
         }
 
@@ -390,6 +360,16 @@ export async function verifyOTP(input: OTPVerifyInput): Promise<VerifyOTPResult>
                 where: { id: secureLink.id },
                 data: updateData,
             });
+
+            if (vendor) {
+                await tx.vendorAccess.update({
+                    where: { id: vendor.id },
+                    data: {
+                        loginCount: { increment: 1 },
+                        otpHash: null, // clear OTP
+                    }
+                });
+            }
 
             await tx.auditLog.create({
                 data: {
@@ -426,6 +406,17 @@ export async function verifyOTP(input: OTPVerifyInput): Promise<VerifyOTPResult>
             maxAge: ttlSeconds,
             path: '/',
         });
+
+        // Set email cookie to identify the specific vendor in the session
+        if (vendor) {
+             cookieStore.set('vendor_email', vendor.email, {
+                httpOnly: true,
+                secure: process.env.NODE_ENV === 'production',
+                sameSite: 'strict',
+                maxAge: ttlSeconds,
+                path: '/',
+             });
+        }
 
         return {
             success: true,
