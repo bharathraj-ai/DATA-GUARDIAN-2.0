@@ -12,6 +12,7 @@ export interface DashboardLink {
     isRevoked: boolean;
     createdAt: Date;
     allowedVendorEmail: string | null;
+    vendorAccess: { email: string; level: number }[];
     status: 'active' | 'expired' | 'revoked' | 'used';
     otp: string | null;
     // Enhanced fields
@@ -54,6 +55,15 @@ export async function getOwnedLinks(userId: string): Promise<DashboardLink[]> {
                 lockedAt: true,
                 otpVerifiedAt: true,
                 otpPlain: true,
+                VendorAccess: {
+                    select: {
+                        email: true,
+                        level: true,
+                    },
+                    orderBy: {
+                        level: 'asc',
+                    },
+                },
                 UserFile: {
                     select: {
                         id: true,
@@ -78,6 +88,7 @@ export async function getOwnedLinks(userId: string): Promise<DashboardLink[]> {
 
         const mappedLinks = links.map((link) => ({
             ...link,
+            vendorAccess: link.VendorAccess,
             files: link.UserFile,
             auditLogs: link.AuditLog,
             status: getStatus(link),
@@ -105,7 +116,10 @@ export async function getReceivedLinks(email: string): Promise<DashboardLink[]> 
     try {
         const links = await prisma.secureLink.findMany({
             where: {
-                allowedVendorEmail: email.toLowerCase(),
+                OR: [
+                    { allowedVendorEmail: email.toLowerCase() },
+                    { VendorAccess: { some: { email: email.toLowerCase() } } }
+                ],
             },
             orderBy: {
                 createdAt: 'desc',
@@ -126,6 +140,15 @@ export async function getReceivedLinks(email: string): Promise<DashboardLink[]> 
                 lockedAt: true,
                 otpVerifiedAt: true,
                 otpPlain: true,
+                VendorAccess: {
+                    select: {
+                        email: true,
+                        level: true,
+                    },
+                    orderBy: {
+                        level: 'asc',
+                    },
+                },
                 UserFile: {
                     select: {
                         id: true,
@@ -150,6 +173,7 @@ export async function getReceivedLinks(email: string): Promise<DashboardLink[]> 
 
         const mappedLinks = links.map((link) => ({
             ...link,
+            vendorAccess: link.VendorAccess,
             files: link.UserFile,
             auditLogs: link.AuditLog,
             status: getStatus(link),

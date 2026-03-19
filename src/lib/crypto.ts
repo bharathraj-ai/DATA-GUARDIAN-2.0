@@ -171,10 +171,79 @@ export function decryptData<T = object>(encryptedString: string): T {
 }
 
 /**
- * Encrypts raw binary data (Buffer) for file storage
+ * Generates a Data Encryption Key (DEK) for envelope encryption
+ * @returns 32-byte secure random Buffer
  */
-export function encryptBuffer(buffer: Buffer): { iv: string; authTag: string; encryptedContent: Buffer } {
-    const key = getEncryptionKey();
+export function generateDek(): Buffer {
+    return crypto.randomBytes(KEY_LENGTH);
+}
+
+/**
+ * Encrypts a Data Encryption Key using the Master KEK
+ * @param dek - The 32-byte Data Encryption Key
+ * @returns Encrypted string in format: iv:authTag:ciphertext
+ */
+export function encryptDek(dek: Buffer): string {
+    const key = getEncryptionKey(); // Master KEK
+    const iv = crypto.randomBytes(IV_LENGTH);
+
+    const cipher = crypto.createCipheriv(ALGORITHM, key, iv, {
+        authTagLength: AUTH_TAG_LENGTH,
+    });
+
+    const encryptedContent = Buffer.concat([
+        cipher.update(dek),
+        cipher.final(),
+    ]);
+
+    const authTag = cipher.getAuthTag();
+
+    return `${iv.toString('hex')}:${authTag.toString('hex')}:${encryptedContent.toString('hex')}`;
+}
+
+/**
+ * Decrypts an encrypted Data Encryption Key string back to the raw key
+ * @param encryptedDekString - format iv:authTag:ciphertext
+ * @returns 32-byte Data Encryption Key
+ */
+export function decryptDek(encryptedDekString: string): Buffer {
+    const key = getEncryptionKey(); // Master KEK
+
+    const parts = encryptedDekString.split(':');
+    if (parts.length !== 3) {
+        throw new Error('Invalid encrypted DEK format');
+    }
+
+    const [ivHex, authTagHex, ciphertextHex] = parts;
+    const iv = Buffer.from(ivHex, 'hex');
+    const authTag = Buffer.from(authTagHex, 'hex');
+    const ciphertext = Buffer.from(ciphertextHex, 'hex');
+
+    if (iv.length !== IV_LENGTH) {
+        throw new Error('Invalid IV length for DEK decryption');
+    }
+    if (authTag.length !== AUTH_TAG_LENGTH) {
+        throw new Error('Invalid auth tag length for DEK decryption');
+    }
+
+    const decipher = crypto.createDecipheriv(ALGORITHM, key, iv, {
+        authTagLength: AUTH_TAG_LENGTH,
+    });
+    decipher.setAuthTag(authTag);
+
+    return Buffer.concat([
+        decipher.update(ciphertext),
+        decipher.final(),
+    ]);
+}
+
+/**
+ * Encrypts raw binary data (Buffer) for file storage
+ * @param buffer - The raw data to encrypt
+ * @param explicitKey - Optional per-file DEK. If omitted, falls back to Master KEK (for backwards compatibility).
+ */
+export function encryptBuffer(buffer: Buffer, explicitKey?: Buffer): { iv: string; authTag: string; encryptedContent: Buffer } {
+    const key = explicitKey || getEncryptionKey();
     const iv = crypto.randomBytes(IV_LENGTH);
 
     const cipher = crypto.createCipheriv(ALGORITHM, key, iv, {
@@ -197,9 +266,13 @@ export function encryptBuffer(buffer: Buffer): { iv: string; authTag: string; en
 
 /**
  * Decrypts raw binary data
+ * @param encryptedContent - The encrypted buffer
+ * @param ivHex - Hex string of the IV
+ * @param authTagHex - Hex string of the Auth Tag
+ * @param explicitKey - Optional per-file DEK. If omitted, falls back to Master KEK (for backwards compatibility).
  */
-export function decryptBuffer(encryptedContent: Buffer, ivHex: string, authTagHex: string): Buffer {
-    const key = getEncryptionKey();
+export function decryptBuffer(encryptedContent: Buffer, ivHex: string, authTagHex: string, explicitKey?: Buffer): Buffer {
+    const key = explicitKey || getEncryptionKey();
     const iv = Buffer.from(ivHex, 'hex');
     const authTag = Buffer.from(authTagHex, 'hex');
 

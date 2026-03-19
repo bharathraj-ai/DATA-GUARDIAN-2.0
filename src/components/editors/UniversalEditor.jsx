@@ -141,12 +141,27 @@ async function parseZIP(file) {
   return { type: "zip", name: file.name, pages: [{ id: uid(), width: 794, height: Math.max(1122, 80 + Math.ceil(items.length / 4) * 200 + 80), elements, bgImage: null }] };
 }
 
+async function parseExcel(file) {
+  const XLSX = await import("xlsx");
+  const ab = await file.arrayBuffer();
+  const workbook = XLSX.read(ab, { type: "array" });
+  const firstSheetName = workbook.SheetNames[0];
+  const worksheet = workbook.Sheets[firstSheetName];
+  const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+  const strRows = rows.map(r => (r || []).map(c => c !== undefined && c !== null ? String(c) : ""));
+  const cols = Math.max(...strRows.map(r => r.length), 1);
+  strRows.forEach(r => { while(r.length < cols) r.push(""); });
+  const colW = Math.max(60, Math.min(120, Math.floor(680 / cols)));
+  return { type: file.name.endsWith(".csv") ? "csv" : "xlsx", name: file.name, pages: [{ id: uid(), width: 794, height: Math.max(1122, strRows.length * 28 + 120), elements: [{ id: uid(), type: "table", x: 57, y: 60, width: cols * colW, height: strRows.length * 28 + 2, rows: strRows, colW, rowH: 28, selected: false }], bgImage: null }] };
+}
+
 async function parseFile(file) {
   const ext = file.name.split(".").pop().toLowerCase();
   if (ext === "pdf") return parsePDF(file);
   if (ext === "txt") return parseTXT(file);
   if (["png", "jpg", "jpeg", "gif", "webp"].includes(ext)) return parseImage(file);
-  if (["csv", "xlsx", "xls"].includes(ext)) return parseCSV(file);
+  if (["csv"].includes(ext)) return parseCSV(file);
+  if (["xlsx", "xls"].includes(ext)) return parseExcel(file);
   if (ext === "zip") return parseZIP(file);
   return parseTXT(file);
 }
@@ -190,29 +205,52 @@ async function exportToPDF(doc) {
   const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
   a.download = (doc.name || "document").replace(/\.[^.]+$/, "") + "_edited.pdf"; a.click();
 }
+function TableCell({ cell, r, c, scale, rowH, colW, onCellChange }) {
+  const ref = useRef(null);
+  const [editing, setEditing] = useState(false);
+  const lastVal = useRef(cell);
+
+  useEffect(() => {
+    if (!editing && ref.current && ref.current.innerHTML !== String(cell)) {
+      ref.current.innerHTML = String(cell);
+      lastVal.current = String(cell);
+    }
+  }, [cell, editing]);
+
+  return (
+    <td style={{ border: "1px solid #c8ccd6", background: r === 0 ? "#f8f9fc" : "#ffffff", padding: `${2 * scale}px ${4 * scale}px`, minWidth: colW * scale, height: rowH * scale, fontWeight: r === 0 ? 600 : 400, color: "#111", verticalAlign: "top" }}>
+      <div 
+        ref={ref}
+        contentEditable 
+        suppressContentEditableWarning 
+        style={{ outline: "none", minWidth: 20, minHeight: 14, wordBreak: "break-word" }}
+        onFocus={() => setEditing(true)}
+        onBlur={e => {
+          setEditing(false);
+          const newContent = e.target.innerHTML;
+          if (newContent !== lastVal.current) {
+             lastVal.current = newContent;
+             onCellChange(r, c, newContent);
+          }
+        }}
+      />
+    </td>
+  );
+}
+
 function TableElement({ el, scale, onUpdate, selected, onSelect }) {
   const { rows = [], colW = 100, rowH = 28 } = el;
+  const handleCellChange = (r, c, newContent) => {
+    const newRows = rows.map((ro, ri) => ri === r ? ro.map((cl, ci) => ci === c ? newContent : cl) : ro); 
+    onUpdate({ rows: newRows }); 
+  };
   return (
     <div style={{ position: "absolute", left: el.x * scale, top: el.y * scale, width: el.width * scale, height: el.height * scale, border: selected ? "2px solid #3b7cf4" : "1px solid transparent", cursor: "pointer", overflow: "auto" }} onClick={e => { e.stopPropagation(); onSelect(); }}>
       <table style={{ borderCollapse: "collapse", fontSize: 11 * scale, width: "100%" }}>
         <tbody>
           {rows.map((row, r) => (
             <tr key={r}>{row.map((cell, c) => (
-              <td key={c} style={{ border: "1px solid #c8ccd6", background: r === 0 ? "#f8f9fc" : "#ffffff", padding: `${2 * scale}px ${4 * scale}px`, minWidth: colW * scale, height: rowH * scale, fontWeight: r === 0 ? 600 : 400, color: "#111" }}>
-                <div 
-                  contentEditable 
-                  suppressContentEditableWarning 
-                  style={{ outline: "none", minWidth: 20 }} 
-                  onBlur={e => {
-                    const newContent = e.target.innerHTML;
-                    if (newContent !== cell) {
-                      const newRows = rows.map((ro, ri) => ri === r ? ro.map((cl, ci) => ci === c ? newContent : cl) : ro); 
-                      onUpdate({ rows: newRows }); 
-                    }
-                  }} 
-                  dangerouslySetInnerHTML={{ __html: cell }} 
-                />
-              </td>
+              <TableCell key={c} cell={cell || ""} r={r} c={c} scale={scale} rowH={rowH} colW={colW} onCellChange={handleCellChange} />
             ))}</tr>
           ))}
         </tbody>
@@ -329,7 +367,8 @@ function Page({ page, scale, selectedId, onSelect, onUpdate, onDelete, showBg })
   );
 }
 
-export default function UniversalEditor({ initialFileProp, onClose, onSave }) {
+export default function UniversalEditor({ initialFileProp, onClose, onSave, token, fileId, currentUserLevel = 2, highestAuthorityLevel = 2 }) {
+  const isReadOnly = currentUserLevel > highestAuthorityLevel;
   const [view, setView] = useState("editor");
   const [doc, setDoc] = useState(null);
   const [initialPdfFile, setInitialPdfFile] = useState(null);
@@ -341,9 +380,58 @@ export default function UniversalEditor({ initialFileProp, onClose, onSave }) {
   const [showBg, setShowBg] = useState(true);
   const [history, setHistory] = useState([]);
   const [historyIdx, setHistoryIdx] = useState(-1);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatTab, setChatTab] = useState('group');
+  const [messages, setMessages] = useState([]);
+  const [newMessage, setNewMessage] = useState("");
+  const chatEndRef = useRef(null);
   const fileRef = useRef(null);
   const imageRef = useRef(null);
   const replaceFileRef = useRef(null);
+
+  // Chat Polling
+  useEffect(() => {
+    if (!chatOpen || !token || !fileId) return;
+    const fetchChat = async () => {
+      try {
+        const res = await fetch(`/api/documents/${fileId}/chat?token=${token}`);
+        if(res.ok) {
+           const data = await res.json();
+           if (data.success) {
+             setMessages(data.messages);
+           }
+        }
+      } catch (e) {}
+    };
+    fetchChat();
+    const inv = setInterval(fetchChat, 3000);
+    return () => clearInterval(inv);
+  }, [chatOpen, token, fileId]);
+
+  useEffect(() => {
+     if(chatOpen) chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, chatOpen]);
+
+  const handleSendMessage = async () => {
+    if (!newMessage.trim() || !token || !fileId) return;
+    const msg = newMessage;
+    setNewMessage("");
+    try {
+       await fetch(`/api/documents/${fileId}/chat`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+             token,
+             message: msg,
+             isPrivate: chatTab === 'private',
+             targetUser: chatTab === 'private' ? "Leader" : null // simplify for MVP
+          })
+       });
+       // fetchChat will pick it up on next poll, or we could optimistically update
+    } catch(e) {
+       console.error("Chat error", e);
+    }
+  };
 
   const handleUploadReplace = async (e) => {
     const file = e.target.files?.[0];
@@ -385,6 +473,7 @@ export default function UniversalEditor({ initialFileProp, onClose, onSave }) {
   const redo = () => { if (historyIdx < history.length - 1) { setDoc(JSON.parse(JSON.stringify(history[historyIdx + 1]))); setHistoryIdx(i => i + 1); } };
 
   const handleFile = async (file) => {
+    if (isReadOnly) return;
     if (file.name.toLowerCase().endsWith(".pdf")) {
       setInitialPdfFile(file);
       setView("pdf2docx");
@@ -397,14 +486,16 @@ export default function UniversalEditor({ initialFileProp, onClose, onSave }) {
   };
 
   const updatePage = (pageId, elements) => {
+    if (isReadOnly) return;
     setDoc(d => { const nd = { ...d, pages: d.pages.map(p => p.id === pageId ? { ...p, elements } : p) }; pushHistory(nd); return nd; });
   };
   const deleteElement = (pageId, elId) => {
+    if (isReadOnly) return;
     setDoc(d => { const nd = { ...d, pages: d.pages.map(p => p.id === pageId ? { ...p, elements: p.elements.filter(e => e.id !== elId) } : p) }; pushHistory(nd); return nd; });
     setSelectedId(null);
   };
   const updateSelected = (patch) => {
-    if (!selectedId) return;
+    if (isReadOnly || !selectedId) return;
     setDoc(d => { const nd = { ...d, pages: d.pages.map(p => ({ ...p, elements: p.elements.map(e => e.id === selectedId ? { ...e, ...patch } : e) })) }; pushHistory(nd); return nd; });
   };
   const addText = () => {
@@ -453,6 +544,23 @@ export default function UniversalEditor({ initialFileProp, onClose, onSave }) {
         }
         const pdfBytes = await pdfDoc.save();
         savedFile = new File([pdfBytes], doc.name + ".pdf", { type: "application/pdf" });
+      } else if (doc.type === "csv" || doc.type === "xlsx" || doc.type === "xls") {
+        const table = doc.pages[0]?.elements.find(e => e.type === "table");
+        if (table && table.rows) {
+          const XLSX = await import("xlsx");
+          const worksheet = XLSX.utils.aoa_to_sheet(table.rows);
+          if (doc.type === "csv") {
+            const csvStr = XLSX.utils.sheet_to_csv(worksheet);
+            savedFile = new File([csvStr], doc.name || "edited.csv", { type: "text/csv" });
+          } else {
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "Sheet1");
+            const buf = XLSX.write(workbook, { type: "array", bookType: "xlsx" });
+            savedFile = new File([buf], doc.name || "edited.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+          }
+        } else {
+          savedFile = new File([""], doc.name || "edited.txt", { type: "text/plain" });
+        }
       } else {
         const text = doc?.pages.flatMap(p => p.elements.filter(e => e.type === "text").map(e => e.content)).join("\n");
         savedFile = new File([text], doc.name || "edited.txt", { type: "text/plain" });
@@ -469,7 +577,7 @@ export default function UniversalEditor({ initialFileProp, onClose, onSave }) {
       if ((e.ctrlKey || e.metaKey) && e.key === "z") { e.preventDefault(); undo(); }
       if ((e.ctrlKey || e.metaKey) && e.key === "y") { e.preventDefault(); redo(); }
       if ((e.ctrlKey || e.metaKey) && (e.key === "c" || e.key === "C" || e.key === "x" || e.key === "X")) { e.preventDefault(); }
-      if ((e.key === "Delete" || e.key === "Backspace") && selectedId && document.activeElement.tagName === "BODY") { const p = doc?.pages[activePage]; if (p) deleteElement(p.id, selectedId); }
+      if ((e.key === "Delete" || e.key === "Backspace") && selectedId && document.activeElement.tagName === "BODY" && !isReadOnly) { const p = doc?.pages[activePage]; if (p) deleteElement(p.id, selectedId); }
     };
     const preventCopy = (e) => e.preventDefault();
     window.addEventListener("keydown", h);
@@ -494,8 +602,8 @@ export default function UniversalEditor({ initialFileProp, onClose, onSave }) {
     
     .btn{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:8px;border:none;cursor:pointer;font-size:13px;font-weight:500;transition:all .2s;white-space:nowrap;font-family:inherit;}
     .btn-ghost{background:transparent;color:#5a6a8a;}
-    .btn-ghost:hover{background:#edf2ff;color:#2347a0;}
-    .btn-ghost:disabled{opacity:0.35;cursor:default;}
+    .btn-ghost:hover:not(:disabled){background:#edf2ff;color:#2347a0;}
+    .btn-ghost:disabled{opacity:0.35;cursor:not-allowed;}
     .btn-primary{background:linear-gradient(135deg, #2347a0, #3b7cf4);color:#fff;box-shadow:0 4px 12px rgba(35,71,160,0.25);}
     .btn-primary:hover{transform:translateY(-1px);box-shadow:0 6px 16px rgba(35,71,160,0.35);}
     .btn-danger{background:#fee2e2;color:#dc2626;border:1px solid #fecaca;}
@@ -560,28 +668,42 @@ export default function UniversalEditor({ initialFileProp, onClose, onSave }) {
 
           {doc && view === "editor" && <>
             <div style={{ display: "flex", gap: 4 }}>
-              <button className="btn btn-ghost" onClick={undo} disabled={historyIdx <= 0} title="Undo (Ctrl+Z)">↩ Undo</button>
-              <button className="btn btn-ghost" onClick={redo} disabled={historyIdx >= history.length - 1} title="Redo (Ctrl+Y)">↪ Redo</button>
+              <button className="btn btn-ghost" onClick={undo} disabled={isReadOnly || historyIdx <= 0} title="Undo (Ctrl+Z)">↩ Undo</button>
+              <button className="btn btn-ghost" onClick={redo} disabled={isReadOnly || historyIdx >= history.length - 1} title="Redo (Ctrl+Y)">↪ Redo</button>
             </div>
             <div className="sep" />
             {onSave && (
               <div style={{ display: "flex", gap: "8px" }}>
-                <button className="btn btn-outline" style={{ background: "#fff", borderColor: "#a0b4d4", color: "#2347a0", gap: "6px" }} onClick={() => replaceFileRef.current?.click()}>
+                <button className="btn btn-outline" disabled={isReadOnly} style={{ background: "#fff", borderColor: "#a0b4d4", color: "#2347a0", gap: "6px", opacity: isReadOnly ? 0.5 : 1, cursor: isReadOnly ? "not-allowed" : "pointer" }} onClick={() => replaceFileRef.current?.click()}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
                   Upload Replace
                 </button>
                 <input ref={replaceFileRef} type="file" accept=".pdf,.txt,.png,.jpg,.jpeg,.gif,.webp,.csv,.xlsx,.xls,.zip" style={{ display: "none" }} onChange={(e) => { handleUploadReplace(e); e.target.value = ""; }} />
-                <button className="btn btn-primary" style={{ background: "linear-gradient(135deg, #10b981, #059669)", boxShadow: "0 4px 12px rgba(16, 185, 129, 0.25)" }} onClick={handleSaveToLink}>
+                <button className="btn btn-primary" disabled={isReadOnly} style={{ opacity: isReadOnly ? 0.5 : 1, cursor: isReadOnly ? "not-allowed" : "pointer", background: "linear-gradient(135deg, #10b981, #059669)", boxShadow: "0 4px 12px rgba(16, 185, 129, 0.25)" }} onClick={handleSaveToLink}>
                   💾 Save Replace
                 </button>
               </div>
             )}
+            {token && fileId && (
+               <>
+                 <div className="sep" />
+                 <button className={`btn ${chatOpen ? 'btn-primary' : 'btn-outline'}`} onClick={() => setChatOpen(!chatOpen)}>
+                    💬 Chat
+                 </button>
+               </>
+            )}
           </>}
         </div>
 
+        {isReadOnly && doc && view === "editor" && (
+            <div className="fup" style={{ padding: "10px 16px", background: "#fee2e2", borderBottom: "1px solid #fecaca", color: "#dc2626", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, zIndex: 99, flexShrink: 0 }}>
+                ⚠️ Editing is disabled. A higher authority Team Leader (Level {highestAuthorityLevel}) is currently active in this session.
+            </div>
+        )}
+
         {doc && view === "editor" && <div style={{ height: 48, background: "#fff", borderBottom: "1px solid #e4e9f5", display: "flex", alignItems: "center", padding: "0 16px", gap: 6, flexShrink: 0, overflowX: "auto" }}>
           <button className="btn btn-ghost" onClick={() => fileRef.current?.click()}>📂 Open File</button>
-          <input ref={fileRef} type="file" accept=".pdf,.txt,.png,.jpg,.jpeg,.gif,.webp,.csv,.xlsx,.xls,.zip" style={{ display: "none" }} onChange={e => {
+          <input ref={fileRef} type="file" disabled={isReadOnly} accept=".pdf,.txt,.png,.jpg,.jpeg,.gif,.webp,.csv,.xlsx,.xls,.zip" style={{ display: "none" }} onChange={e => {
             const f = e.target.files?.[0];
             if (f) handleFile(f);
             e.target.value = "";
@@ -589,11 +711,11 @@ export default function UniversalEditor({ initialFileProp, onClose, onSave }) {
           <div className="sep" />
           <button className="btn btn-ghost" style={{ background: showBg ? "#edf2ff" : "transparent", color: showBg ? "#2347a0" : "#5a6a8a" }} onClick={() => setShowBg(!showBg)}>{showBg ? "👁 Background: On" : "👁 Background: Off" } </button>
           <div className="sep" />
-          <button className="btn btn-ghost" onClick={addText}>＋ Text</button>
-          <button className="btn btn-ghost" onClick={() => imageRef.current?.click()}>🖼 Image</button>
-          <input ref={imageRef} type="file" accept="image/*" style={{ display: "none" }} onChange={addImage} />
-          <button className="btn btn-ghost" onClick={addTable}>⊞ Table</button>
-          <button className="btn btn-ghost" onClick={addPage}>＋ Page</button>
+          <button className="btn btn-ghost" disabled={isReadOnly} onClick={addText}>＋ Text</button>
+          <button className="btn btn-ghost" disabled={isReadOnly} onClick={() => imageRef.current?.click()}>🖼 Image</button>
+          <input ref={imageRef} type="file" accept="image/*" style={{ display: "none" }} onChange={addImage} disabled={isReadOnly} />
+          <button className="btn btn-ghost" disabled={isReadOnly} onClick={addTable}>⊞ Table</button>
+          <button className="btn btn-ghost" disabled={isReadOnly} onClick={addPage}>＋ Page</button>
           <div className="sep" />
           {selectedEl?.type === "text" && <>
             <select className="tsel" value={selectedEl.font || "Georgia"} onChange={e => updateSelected({ font: e.target.value })} style={{ width: 130 }}>{FONTS.map(f => <option key={f} value={f}>{f}</option>)}</select>
@@ -628,7 +750,7 @@ export default function UniversalEditor({ initialFileProp, onClose, onSave }) {
                     <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, textAlign: "center", fontSize: 10, color: "#fff", background: "linear-gradient(transparent, rgba(26,37,64,0.6))", padding: "8px 0", fontWeight: 600 }}>{idx + 1}</div>
                   </div>
                 ))}
-                <button className="btn btn-outline" style={{ borderStyle: "dashed", width: "100%", fontSize: 12, padding: "8px" }} onClick={addPage}>＋ Add Page</button>
+                <button className="btn btn-outline" disabled={isReadOnly} style={{ borderStyle: "dashed", width: "100%", fontSize: 12, padding: "8px", cursor: isReadOnly ? "not-allowed" : "pointer" }} onClick={addPage}>＋ Add Page</button>
               </div>}
 
               <div style={{ flex: 1, overflowY: "auto", overflowX: "auto", display: "flex", flexDirection: "column", alignItems: "center", padding: "48px 24px", background: "linear-gradient(135deg, #f8faff 0%, #edf2ff 100%)", position: "relative" }}>
@@ -681,9 +803,9 @@ export default function UniversalEditor({ initialFileProp, onClose, onSave }) {
               {doc && selectedEl && <div style={{ width: 260, background: "#fff", borderLeft: "1px solid #e4e9f5", overflowY: "auto", flexShrink: 0 }}>
                 <div style={{ padding: "16px 18px", borderBottom: "1px solid #e4e9f5", display: "flex", justifyContent: "space-between", alignItems: "center", background: "#f8faff" }}>
                   <span style={{ fontSize: 11, fontWeight: 700, color: "#8896b0", textTransform: "uppercase", letterSpacing: "0.08em" }}>Properties</span>
-                  <button className="btn btn-danger" style={{ fontSize: 10, padding: "3px 10px" }} onClick={() => { const p = doc.pages[activePage]; if (p) deleteElement(p.id, selectedId); }}>Delete</button>
+                  {!isReadOnly && <button className="btn btn-danger" style={{ fontSize: 10, padding: "3px 10px" }} onClick={() => { const p = doc.pages[activePage]; if (p) deleteElement(p.id, selectedId); }}>Delete</button>}
                 </div>
-                <div style={{ padding: 18 }}>
+                <div style={{ padding: 18, pointerEvents: isReadOnly ? "none" : "auto", opacity: isReadOnly ? 0.7 : 1 }}>
                   <div className="psec"><div className="plabel">Element Type</div><div style={{ fontSize: 14, color: "#1a2540", fontWeight: 600 }}>{selectedEl.type.toUpperCase()}</div></div>
                   <div className="psec"><div className="plabel">Position & Size</div>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
@@ -719,6 +841,49 @@ export default function UniversalEditor({ initialFileProp, onClose, onSave }) {
           )}
 
           {view === "pdf2docx" && <PDFtoDOCX onBack={() => { setView("editor"); setInitialPdfFile(null); }} initialFile={initialPdfFile} onSave={onSave} />}
+
+          {/* Chat Sidebar */}
+          {chatOpen && (
+             <div style={{ width: 320, background: "#fff", borderLeft: "1px solid #e4e9f5", display: "flex", flexDirection: "column", flexShrink: 0, boxShadow: "-4px 0 24px rgba(35,71,160,0.05)" }}>
+                <div style={{ padding: "16px", borderBottom: "1px solid #e4e9f5", display: "flex", alignItems: "center", justifyContent: "space-between", background: "#f8faff" }}>
+                   <div style={{ fontWeight: 700, color: "#1a2540", fontSize: 14 }}>Session Chat</div>
+                   <button className="btn btn-ghost" style={{ padding: 4 }} onClick={() => setChatOpen(false)}>✕</button>
+                </div>
+                
+                <div style={{ display: "flex", borderBottom: "1px solid #e4e9f5" }}>
+                   <div style={{ flex: 1, textAlign: "center", padding: "10px", fontSize: 12, cursor: "pointer", fontWeight: 600, borderBottom: chatTab === 'group' ? "2px solid #3b7cf4" : "2px solid transparent", color: chatTab === 'group' ? "#3b7cf4" : "#8896b0" }} onClick={() => setChatTab('group')}>Group Chat</div>
+                   <div style={{ flex: 1, textAlign: "center", padding: "10px", fontSize: 12, cursor: "pointer", fontWeight: 600, borderBottom: chatTab === 'private' ? "2px solid #3b7cf4" : "2px solid transparent", color: chatTab === 'private' ? "#3b7cf4" : "#8896b0" }} onClick={() => setChatTab('private')}>Private (Leader)</div>
+                </div>
+
+                <div style={{ flex: 1, overflowY: "auto", padding: "16px", background: "#f8faff", display: "flex", flexDirection: "column", gap: 12 }}>
+                   {messages.filter(m => chatTab === 'group' ? !m.isPrivate : m.isPrivate).map(m => (
+                      <div key={m.id} style={{ alignSelf: m.level === currentUserLevel ? "flex-end" : "flex-start", maxWidth: "85%" }}>
+                         <div style={{ fontSize: 10, color: "#8896b0", marginBottom: 2, textAlign: m.level === currentUserLevel ? "right" : "left", fontWeight: 600 }}>
+                            {m.sender.split('@')[0]} {m.level === 1 ? '👑' : ''}
+                         </div>
+                         <div style={{ background: m.level === currentUserLevel ? "linear-gradient(135deg, #2347a0, #3b7cf4)" : "#fff", color: m.level === currentUserLevel ? "#fff" : "#1a2540", padding: "10px 14px", borderRadius: 16, borderTopRightRadius: m.level === currentUserLevel ? 4 : 16, borderTopLeftRadius: m.level === currentUserLevel ? 16 : 4, fontSize: 13, lineHeight: 1.4, boxShadow: "0 2px 8px rgba(0,0,0,0.05)", border: m.level === currentUserLevel ? "none" : "1px solid #e4e9f5" }}>
+                            {m.message}
+                         </div>
+                      </div>
+                   ))}
+                   <div ref={chatEndRef} />
+                </div>
+
+                <div style={{ padding: "16px", borderTop: "1px solid #e4e9f5", background: "#fff", display: "flex", gap: 8 }}>
+                   <input 
+                     className="pinput" 
+                     placeholder={chatTab === 'group' ? "Message group..." : "Message leader..."} 
+                     value={newMessage} 
+                     onChange={e => setNewMessage(e.target.value)} 
+                     onKeyDown={e => { if(e.key === 'Enter') handleSendMessage(); }} 
+                     style={{ flex: 1, borderRadius: 20, padding: "10px 16px" }}
+                   />
+                   <button className="btn btn-primary" style={{ borderRadius: "50%", width: 36, height: 36, padding: 0, justifyContent: "center" }} onClick={handleSendMessage}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                   </button>
+                </div>
+             </div>
+          )}
         </div>
       </div>
     </>

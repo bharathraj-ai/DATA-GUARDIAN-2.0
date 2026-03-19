@@ -93,11 +93,19 @@ export async function GET(
     // Get secure link and encrypted data
     const secureLink = await prisma.secureLink.findUnique({
         where: { token },
-        include: { UserData: true },
+        include: { UserData: true, VendorAccess: true },
     });
 
     if (!secureLink || !secureLink.UserData || !secureLink.isUsed || secureLink.isRevoked) {
         return new Response('Not accessible', { status: 404 });
+    }
+
+    // Determine current user's level
+    let userLevel = 2;
+    const vendorEmail = request.cookies.get('vendor_email')?.value;
+    if (vendorEmail && secureLink.VendorAccess) {
+        const vendor = secureLink.VendorAccess.find(v => v.email === vendorEmail.toLowerCase());
+        if (vendor) userLevel = vendor.level;
     }
 
     const now = new Date();
@@ -120,6 +128,28 @@ export async function GET(
 
     const stream = new ReadableStream({
         async start(controller) {
+            let isStreamClosed = false;
+
+            const safeClose = () => {
+                if (isStreamClosed) return;
+                isStreamClosed = true;
+                try {
+                    controller.close();
+                } catch (e) {
+                    // Ignore error if it's already closed
+                }
+            };
+
+            const safeEnqueue = (data: Uint8Array) => {
+                if (isStreamClosed) return;
+                try {
+                    controller.enqueue(data);
+                } catch (e) {
+                    isStreamClosed = true;
+                    throw e;
+                }
+            };
+
             // Send initial data
             const initialSeconds = Math.max(0, Math.floor((secureLink.expiresAt.getTime() - Date.now()) / 1000));
             const initialData = {
@@ -128,11 +158,36 @@ export async function GET(
                 expiresAt: secureLink.expiresAt.toISOString(),
                 remainingSeconds: initialSeconds,
             };
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify(initialData)}\n\n`));
+            
+            try {
+                safeEnqueue(encoder.encode(`data: ${JSON.stringify(initialData)}\n\n`));
+            } catch (e) {
+                safeClose();
+                return;
+            }
 
             const startTime = Date.now();
+            
+            // Track active session presence
+            try {
+                await prisma.documentSession.create({
+                    data: {
+                        fileId: sessionId, // Use fileId to store sessionId for global presence
+                        token: token,
+                        level: userLevel
+                    }
+                });
+            } catch (e) {
+                console.error("Failed to create presence session:", e);
+            }
+
             const logSessionEnd = async (reason: string) => {
                 try {
+                    // Remove presence session
+                    await prisma.documentSession.deleteMany({
+                        where: { fileId: sessionId, token: token }
+                    });
+
                     const duration = Math.floor((Date.now() - startTime) / 1000);
 
                     // Check if the link still exists before creating audit log
@@ -168,13 +223,18 @@ export async function GET(
             // Heartbeat interval - 3 seconds for near-instant kill switch (<100ms after revocation)
             // This frequent polling ensures revocation is detected within 3 seconds maximum
             const heartbeatInterval = setInterval(async () => {
+                if (isStreamClosed) {
+                    clearInterval(heartbeatInterval);
+                    return;
+                }
+
                 try {
                     // KILL SWITCH: Check Redis first (faster ~10-50ms) before DB
                     const revokedInRedis = await tryIsTokenRevoked(token);
                     if (revokedInRedis === true) {
-                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'revoked' })}\n\n`));
+                        safeEnqueue(encoder.encode(`data: ${JSON.stringify({ type: 'revoked' })}\n\n`));
                         clearInterval(heartbeatInterval);
-                        controller.close();
+                        safeClose();
                         logSessionEnd('revoked');
                         return;
                     }
@@ -182,9 +242,9 @@ export async function GET(
                     // Validate session still exists in Redis
                     const sessionValid = await tryValidateSession(token, sessionId);
                     if (sessionValid === false) {
-                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'session_invalid' })}\n\n`));
+                        safeEnqueue(encoder.encode(`data: ${JSON.stringify({ type: 'session_invalid' })}\n\n`));
                         clearInterval(heartbeatInterval);
-                        controller.close();
+                        safeClose();
                         logSessionEnd('session_invalidated');
                         return;
                     }
@@ -196,9 +256,9 @@ export async function GET(
                     });
 
                     if (!link || link.isRevoked) {
-                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'revoked' })}\n\n`));
+                        safeEnqueue(encoder.encode(`data: ${JSON.stringify({ type: 'revoked' })}\n\n`));
                         clearInterval(heartbeatInterval);
-                        controller.close();
+                        safeClose();
                         logSessionEnd('revoked');
                         // AUTO-CLEANUP: Purge all data when revoked
                         cleanupSingleLink(token).catch(() => { });
@@ -210,26 +270,36 @@ export async function GET(
                     const ttl = await tryGetSessionTTL(token, sessionId, dbRemainingSeconds);
 
                     if (ttl <= 0 || dbRemainingSeconds <= 0) {
-                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'expired' })}\n\n`));
+                        safeEnqueue(encoder.encode(`data: ${JSON.stringify({ type: 'expired' })}\n\n`));
                         clearInterval(heartbeatInterval);
-                        controller.close();
+                        safeClose();
                         logSessionEnd('expired');
                         // AUTO-CLEANUP: Purge all data when time expires
                         cleanupSingleLink(token).catch(() => { });
                         return;
                     }
 
-                    // Send heartbeat with countdown
+                    // Get highest active authority level for real-time locks
+                    const activeSessions = await prisma.documentSession.findMany({
+                        where: { token: token },
+                        select: { level: true }
+                    });
+                    const highestAuthorityLevel = activeSessions.length > 0 
+                         ? Math.min(...activeSessions.map(s => s.level))
+                         : userLevel;
+
+                    // Send heartbeat with countdown and hierarchy status
                     const heartbeat = {
                         type: 'heartbeat',
                         remainingSeconds: Math.min(ttl, dbRemainingSeconds),
+                        highestAuthorityLevel,
                         timestamp: Date.now(),
                     };
-                    controller.enqueue(encoder.encode(`data: ${JSON.stringify(heartbeat)}\n\n`));
+                    safeEnqueue(encoder.encode(`data: ${JSON.stringify(heartbeat)}\n\n`));
                 } catch (error) {
                     console.error('Heartbeat error:', error instanceof Error ? error.message : 'Unknown');
                     clearInterval(heartbeatInterval);
-                    controller.close();
+                    safeClose();
                     logSessionEnd('error');
                 }
             }, 3000); // 3 second heartbeat for near-instant kill switch
@@ -237,7 +307,7 @@ export async function GET(
             // Cleanup on abort
             request.signal.addEventListener('abort', () => {
                 clearInterval(heartbeatInterval);
-                controller.close();
+                safeClose();
                 logSessionEnd('client_disconnect');
             });
         },

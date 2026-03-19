@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { encryptBytes, dataUrlToBytes } from '@/lib/encryptionService';
+import { authorizeApiRequest } from '@/lib/api-auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -27,16 +28,12 @@ export async function POST(
     const { token, dataUrl, changeDescription, changeType = 'collaborative_edit' } = body;
     if (!token || !dataUrl) return NextResponse.json({ error: 'Missing fields' }, { status: 400 });
 
-    // Auth
-    const link = await prisma.secureLink.findUnique({ where: { token } });
-    if (!link || link.isRevoked || new Date() > link.expiresAt) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+    // Auth (Zero-Trust Session + API Security)
+    const authResult = await authorizeApiRequest(fileId, token);
+    if (authResult.errorResponse) {
+      return authResult.errorResponse;
     }
-
-    const file = await prisma.userFile.findUnique({ where: { id: fileId } });
-    if (!file || file.secureLinkId !== link.id) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-    }
+    const { file } = authResult;
 
     // Get current version count for numbering
     const versionCount = await prisma.fileVersion.count({ where: { fileId } });

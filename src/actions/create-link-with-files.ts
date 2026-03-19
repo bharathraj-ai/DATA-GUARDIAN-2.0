@@ -9,7 +9,9 @@ import {
     encryptData,
     generateDataHash,
     generateOwnerToken,
-    encryptBuffer
+    encryptBuffer,
+    generateDek,
+    encryptDek
 } from '@/lib/crypto';
 import { userDataSchema, fileSchema, ACCEPTED_FILE_TYPES } from '@/lib/validations';
 import { z } from 'zod';
@@ -59,8 +61,23 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
             return { success: false, error: 'Topic is required. Please describe what data you are sharing.' };
         }
 
-        // Zero Trust: Extract vendor email for email binding
+        // Zero Trust: Extract vendor email for email binding (Legacy/Fallback)
         const vendorEmail = formData.get('vendorEmail') as string | null;
+        const vendorsStr = formData.get('vendors') as string | null;
+        
+        // Parse hierarchical vendors
+        let vendorsList: { email: string; level: number }[] = [];
+        if (vendorsStr) {
+            try {
+                vendorsList = JSON.parse(vendorsStr);
+            } catch (e) {
+                return { success: false, error: 'Invalid vendors JSON format' };
+            }
+        } else if (vendorEmail) {
+            // Fallback: Make them a standard Level 2 user
+            vendorsList = [{ email: vendorEmail.toLowerCase(), level: 2 }];
+        }
+
         const allowEditing = formData.get('allowEditing') === 'true';
 
         const validatedData = userDataSchema.safeParse(rawData);
@@ -137,7 +154,9 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
             Promise.all(
                 files.map(async (file) => {
                     const buffer = Buffer.from(await file.arrayBuffer());
-                    const { iv, authTag, encryptedContent } = encryptBuffer(buffer);
+                    const dek = generateDek();
+                    const { iv, authTag, encryptedContent } = encryptBuffer(buffer, dek);
+                    const encryptedDek = encryptDek(dek);
                     return {
                         fileName: file.name,
                         fileType: file.type,
@@ -145,6 +164,7 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
                         encryptedContent,
                         iv,
                         authTag,
+                        encryptedDek,
                     };
                 })
             ),
@@ -181,6 +201,13 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
                     UserFile: {
                         create: encryptedFiles,
                     },
+                    VendorAccess: {
+                        create: vendorsList.map(v => ({
+                            email: v.email.toLowerCase(),
+                            level: v.level,
+                            maxLogins: 3
+                        }))
+                    }
                 },
             });
 
@@ -222,14 +249,10 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
 
         console.log(`[SECURE] Link created with ${files.length} files. ID: ${result.id}`);
 
-        // 📧 Send OTP email to vendor (fire-and-forget, non-blocking)
-        if (vendorEmail) {
-            import('@/lib/email').then(({ sendOTPEmail }) => {
-                sendOTPEmail(vendorEmail, token, otp, validityMinutes)
-                    .then(() => console.log(`[EMAIL] OTP sent to ${vendorEmail.substring(0, 3)}***`))
-                    .catch((err) => console.error('[EMAIL] Failed to send OTP:', err.message));
-            });
-        }
+        // Note: For hierarchical vendor links, OTPs are generated on-demand when the vendor 
+        // accesses the share page, so we no longer send an upfront email here.
+        // If it's a legacy single-email request, we could send an intro email, but we'll 
+        // delegate all OTP logic to the on-demand auth flow for consistency.
 
         return {
             success: true,
