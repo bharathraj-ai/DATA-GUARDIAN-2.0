@@ -63,6 +63,7 @@ export type MaskedUserData = {
     expiresAt: Date;
     remainingSeconds: number;
     allowEditing: boolean;
+    level: number;
     files: FileMetadata[];
 };
 
@@ -124,7 +125,8 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
                         fileType: true,
                         fileSize: true,
                     }
-                }
+                },
+                VendorAccess: true
             },
         });
 
@@ -184,6 +186,16 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
             };
         }
 
+        // Determine hierarchy level
+        let currentUserLevel = 2;
+        const vendorEmail = cookieStore.get('vendor_email')?.value;
+        if (vendorEmail && secureLink.VendorAccess) {
+             const vendor = secureLink.VendorAccess.find(v => v.email === vendorEmail.toLowerCase());
+             if (vendor) {
+                 currentUserLevel = vendor.level;
+             }
+        }
+
         // Return masked user data (never expose full PII to frontend)
         return {
             success: true,
@@ -197,6 +209,7 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
                 expiresAt: secureLink.expiresAt,
                 remainingSeconds,
                 allowEditing: secureLink.allowEditing,
+                level: currentUserLevel,
                 files: secureLink.UserFile || [],
             },
         };

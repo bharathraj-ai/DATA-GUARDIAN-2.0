@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { authorizeApiRequest } from '@/lib/api-auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -22,15 +23,11 @@ export async function GET(
     const token = req.nextUrl.searchParams.get('token');
     if (!token) return NextResponse.json({ error: 'Missing token' }, { status: 401 });
 
-    const link = await prisma.secureLink.findUnique({ where: { token } });
-    if (!link || link.isRevoked || new Date() > link.expiresAt) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+    const authResult = await authorizeApiRequest(fileId, token);
+    if (authResult.errorResponse) {
+      return authResult.errorResponse;
     }
-
-    const file = await prisma.userFile.findUnique({ where: { id: fileId } });
-    if (!file || file.secureLinkId !== link.id) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-    }
+    const { file } = authResult;
 
     const versions = await prisma.fileVersion.findMany({
       where: { fileId },
@@ -62,15 +59,11 @@ export async function POST(
 
     if (!token || !versionId) return NextResponse.json({ error: 'Missing fields' }, { status: 400 });
 
-    const link = await prisma.secureLink.findUnique({ where: { token } });
-    if (!link || link.isRevoked || new Date() > link.expiresAt) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+    const authResult = await authorizeApiRequest(fileId, token);
+    if (authResult.errorResponse) {
+      return authResult.errorResponse;
     }
-
-    const file = await prisma.userFile.findUnique({ where: { id: fileId } });
-    if (!file || file.secureLinkId !== link.id) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-    }
+    const { file } = authResult;
 
     const version = await prisma.fileVersion.findUnique({ where: { id: versionId } });
     if (!version || version.fileId !== fileId) {

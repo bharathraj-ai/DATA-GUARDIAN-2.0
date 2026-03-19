@@ -30,6 +30,7 @@ interface SSEData {
         age: number;
     };
     remainingSeconds?: number;
+    highestAuthorityLevel?: number;
 }
 
 export default function ViewPage({ params }: ViewPageProps) {
@@ -40,6 +41,7 @@ export default function ViewPage({ params }: ViewPageProps) {
     const [error, setError] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [remainingSeconds, setRemainingSeconds] = useState(0);
+    const [highestAuthorityLevel, setHighestAuthorityLevel] = useState(2);
     const [isRevealed, setIsRevealed] = useState(false);
     const [revealTimeout, setRevealTimeoutState] = useState<NodeJS.Timeout | null>(null);
     const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
@@ -51,8 +53,6 @@ export default function ViewPage({ params }: ViewPageProps) {
     const [isPreviewLoading, setIsPreviewLoading] = useState(false);
 
     // Security State
-    const [warningCount, setWarningCount] = useState(0);
-    const MAX_WARNINGS = 3;
 
     // Inline Editor State
     const [isEditLoading, setIsEditLoading] = useState<string | null>(null);
@@ -75,15 +75,8 @@ export default function ViewPage({ params }: ViewPageProps) {
         let isRevoking = false;
         let screenshotDetected = false; // Debounce: prevent blur from double-counting a PrintScreen
 
-        const triggerSecurityViolation = async (reason: string, isImmediate: boolean = false, displayMessage?: string) => {
+        const triggerSecurityViolation = async (reason: string, displayMessage?: string) => {
             if (isRevoking || !token) return;
-
-            if (!isImmediate && warningCount < MAX_WARNINGS - 1) {
-                // Just a warning
-                setWarningCount(prev => prev + 1);
-                console.warn(`[SECURITY WARNING ${warningCount + 1}/${MAX_WARNINGS}] ${reason}`);
-                return;
-            }
 
             // Revoke access
             isRevoking = true;
@@ -97,10 +90,7 @@ export default function ViewPage({ params }: ViewPageProps) {
             // Clear visible data immediately
             setUserData(null);
             setFullData(null);
-            setError(displayMessage || (isImmediate
-                ? 'security violation: Access reveoke due to screen attempts'
-                : `Security Violation: Access revoked after ${MAX_WARNINGS} tab switches or focus losses.`
-            ));
+            setError(displayMessage || 'security violation: Access revoked due to tab switch or focus loss');
             setConnectionStatus('disconnected');
 
             // Call server to revoke access and notify owner
@@ -114,7 +104,7 @@ export default function ViewPage({ params }: ViewPageProps) {
             if (editingFile || screenshotDetected || isHandlingTabSwitch) return;
             
             isHandlingTabSwitch = true;
-            triggerSecurityViolation(reason, false);
+            triggerSecurityViolation(reason, 'security violation: Access revoked due to tab switch');
             
             // Debounce to prevent immediate double-counting
             setTimeout(() => { isHandlingTabSwitch = false; }, 1500);
@@ -141,17 +131,17 @@ export default function ViewPage({ params }: ViewPageProps) {
             if (e.key === 'PrintScreen') {
                 e.preventDefault();
                 screenshotDetected = true;
-                triggerSecurityViolation('PrintScreen key detected', true, 'security violation: Access reveoke due to screen attempts');
+                triggerSecurityViolation('PrintScreen key detected', 'security violation: Access reveoke due to screen attempts');
                 // Reset debounce after a short delay
                 setTimeout(() => { screenshotDetected = false; }, 1000);
             }
             if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) {
                 e.preventDefault();
-                triggerSecurityViolation('Print shortcut (Ctrl+P) detected', true, 'security violation: Access reveoke due to try to print');
+                triggerSecurityViolation('Print shortcut (Ctrl+P) detected', 'security violation: Access reveoke due to try to print');
             }
             if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'C')) {
                 e.preventDefault();
-                triggerSecurityViolation('Copy shortcut (Ctrl+C) detected', true, 'security violation: Access reveoke due to copying the content');
+                triggerSecurityViolation('Copy shortcut (Ctrl+C) detected', 'security violation: Access reveoke due to copying the content');
             }
         };
 
@@ -160,7 +150,7 @@ export default function ViewPage({ params }: ViewPageProps) {
             if (e.key === 'PrintScreen') {
                 e.preventDefault();
                 screenshotDetected = true;
-                triggerSecurityViolation('PrintScreen key detected', true, 'security violation: Access reveoke due to screen attempts');
+                triggerSecurityViolation('PrintScreen key detected', 'security violation: Access reveoke due to screen attempts');
                 setTimeout(() => { screenshotDetected = false; }, 1000);
             }
         };
@@ -172,7 +162,7 @@ export default function ViewPage({ params }: ViewPageProps) {
                 const hasImage = items.some(item => item.type.startsWith('image/'));
                 if (hasImage) {
                     e.preventDefault();
-                    triggerSecurityViolation('Screenshot image detected in clipboard', true, 'security violation: Access reveoke due to screen attempts');
+                    triggerSecurityViolation('Screenshot image detected in clipboard', 'security violation: Access reveoke due to screen attempts');
                 }
             }
         };
@@ -180,7 +170,7 @@ export default function ViewPage({ params }: ViewPageProps) {
         // Detect copy actions
         const handleCopy = (e: ClipboardEvent) => {
             e.preventDefault();
-            triggerSecurityViolation('Copy action detected', true, 'security violation: Access reveoke due to copying the content');
+            triggerSecurityViolation('Copy action detected', 'security violation: Access reveoke due to copying the content');
         };
 
         // Prevent right click
@@ -206,7 +196,7 @@ export default function ViewPage({ params }: ViewPageProps) {
             document.removeEventListener('contextmenu', handleContextMenu);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [token, warningCount, revealTimeout, editingFile]);
+    }, [token, revealTimeout, editingFile]);
 
     // Initial data fetch
     const fetchUserData = useCallback(async (t: string) => {
@@ -258,6 +248,9 @@ export default function ViewPage({ params }: ViewPageProps) {
                     case 'heartbeat':
                         if (data.remainingSeconds !== undefined) {
                             setRemainingSeconds(data.remainingSeconds);
+                        }
+                        if (data.highestAuthorityLevel !== undefined) {
+                            setHighestAuthorityLevel(data.highestAuthorityLevel);
                         }
                         break;
 
@@ -520,19 +513,6 @@ export default function ViewPage({ params }: ViewPageProps) {
                             {isRevoked ? 'Access Revoked' : isExpired ? 'Session Expired' : 'Access Denied'}
                         </h2>
                         <p className="error-message">{error}</p>
-                        <button
-                            onClick={() => {
-                                // Clear any cached data
-                                setUserData(null);
-                                setFullData(null);
-                                setError(null);
-                                // Force full page navigation to bypass all caches
-                                window.location.href = `/create-link?t=${Date.now()}`;
-                            }}
-                            className="return-button"
-                        >
-                            Create New Link
-                        </button>
                     </div>
                 </div>
             </main>
@@ -552,23 +532,6 @@ export default function ViewPage({ params }: ViewPageProps) {
                     <div className="header-top">
                         <h1 className="profile-title">Secure Shared Profile</h1>
                         <div className="status-badges">
-                            {warningCount > 0 && (
-                                <span style={{
-                                    background: 'rgba(255, 68, 68, 0.15)',
-                                    color: '#ff4444',
-                                    border: '1px solid rgba(255, 68, 68, 0.3)',
-                                    padding: '4px 8px',
-                                    borderRadius: '50px',
-                                    fontSize: '11px',
-                                    fontWeight: '600',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '4px',
-                                    animation: 'pulse 2s infinite'
-                                }}>
-                                    ⚠️ Tab Switches: {warningCount}/{MAX_WARNINGS}
-                                </span>
-                            )}
                             <span className={`status-badge ${connectionStatus}`}>
                                 <span className="status-dot" />
                                 {connectionStatus === 'connected' ? 'LIVE' : 'OFFLINE'}
@@ -801,6 +764,10 @@ export default function ViewPage({ params }: ViewPageProps) {
                         initialFileProp={editingFile}
                         onClose={() => { setEditingFile(null); setEditingFileId(null); }}
                         onSave={handleSaveFile}
+                        token={token}
+                        fileId={editingFileId}
+                        currentUserLevel={userData?.level || 2}
+                        highestAuthorityLevel={highestAuthorityLevel}
                     />
                 </div>
             )}
