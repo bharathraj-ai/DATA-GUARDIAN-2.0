@@ -66,12 +66,48 @@ model SecureLink {
   User               User?      @relation(fields: [ownerId], references: [id])
   UserData           UserData   @relation(fields: [userId], references: [id], onDelete: Cascade)
   UserFile           UserFile[]
+  VendorAccess       VendorAccess[]
 
   @@index([allowedVendorEmail])
   @@index([expiresAt])
   @@index([ownerId])
   @@index([ownerToken])
   @@index([token])
+}
+
+model VendorAccess {
+  id             String     @id @default(cuid())
+  secureLinkId   String
+  email          String
+  level          Int        @default(2) // 1 = Team leader
+  otpHash        String?
+  otpPlain       String?
+  loginCount     Int        @default(0)
+  maxLogins      Int        @default(3)
+  failedAttempts Int        @default(0)
+  isRevoked      Boolean    @default(false)
+  createdAt      DateTime   @default(now())
+
+  SecureLink     SecureLink @relation(fields: [secureLinkId], references: [id], onDelete: Cascade)
+
+  @@unique([secureLinkId, email])
+  @@index([secureLinkId])
+  @@index([email])
+}
+
+model ChatMessage {
+  id         String   @id @default(cuid())
+  fileId     String
+  sender     String
+  level      Int      @default(2)
+  message    String
+  isPrivate  Boolean  @default(false)
+  targetUser String?
+  isSystem   Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([fileId])
+  @@index([createdAt])
 }
 
 model Session {
@@ -115,6 +151,7 @@ model UserFile {
   encryptedContent Bytes
   iv               String
   authTag          String
+  encryptedDek     String?
   secureLinkId     String
   createdAt        DateTime      @default(now())
   SecureLink       SecureLink    @relation(fields: [secureLinkId], references: [id], onDelete: Cascade)
@@ -131,6 +168,7 @@ model FileVersion {
   encryptedContent  Bytes
   iv                String
   authTag           String
+  encryptedDek      String?
   fileSize          Int
   changeType        String   // "annotation" | "page_replace" | "restore"
   changeDescription String?
@@ -192,6 +230,7 @@ model DocumentSession {
   role        String   @default("VENDOR")
   displayName String   @default("User")
   color       String   @default("#6366f1")
+  level       Int      @default(2) // Hierarchy Level (1=Highest)
   joinedAt    DateTime @default(now())
   lastSeenAt  DateTime @default(now())
 

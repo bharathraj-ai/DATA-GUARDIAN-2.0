@@ -1,7 +1,7 @@
 'use server';
 
 import { prisma } from '@/lib/prisma';
-import { decryptBuffer } from '@/lib/crypto';
+import { decryptBuffer, decryptDek } from '@/lib/crypto';
 import { auth } from '@/lib/auth';
 
 export type DownloadFileResult = {
@@ -39,10 +39,12 @@ export async function downloadFile(fileId: string): Promise<DownloadFileResult> 
         // 3. Decrypt Content
         let buffer: Buffer;
         try {
+            const dek = (fileRecord as any).encryptedDek ? decryptDek((fileRecord as any).encryptedDek) : undefined;
             buffer = decryptBuffer(
                 fileRecord.encryptedContent,
                 fileRecord.iv,
-                fileRecord.authTag
+                fileRecord.authTag,
+                dek
             );
         } catch (e) {
             return { success: false, error: 'Decryption failed. The file may be corrupted.' };

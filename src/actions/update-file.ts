@@ -1,7 +1,7 @@
 'use server';
 
 import { prisma } from '@/lib/prisma';
-import { encryptBuffer } from '@/lib/crypto';
+import { encryptBuffer, generateDek, encryptDek } from '@/lib/crypto';
 import { cookies } from 'next/headers';
 import { tryCheckRevoked, tryValidateSession } from '@/lib/redis-helpers';
 
@@ -76,7 +76,9 @@ export async function updateFile(token: string, fileId: string, formData: FormDa
         }
 
         // 4. Encrypt the new file
-        const { iv, authTag, encryptedContent } = encryptBuffer(fileBuffer);
+        const dek = generateDek();
+        const { iv, authTag, encryptedContent } = encryptBuffer(fileBuffer, dek);
+        const encryptedDek = encryptDek(dek);
 
         // 5. Update Database Record
         await prisma.userFile.update({
@@ -88,6 +90,7 @@ export async function updateFile(token: string, fileId: string, formData: FormDa
                 encryptedContent,
                 iv,
                 authTag,
+                encryptedDek,
             }
         });
 
