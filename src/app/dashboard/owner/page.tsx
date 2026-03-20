@@ -600,24 +600,24 @@ export default function OwnerDashboardPage() {
                                                 }}>
                                                     <div style={{
                                                         width: '36px', height: '36px', borderRadius: '10px',
-                                                        background: link.allowedVendorEmail
+                                                        background: (link.allowedVendorEmail || (link.vendorAccess && link.vendorAccess.length > 0))
                                                             ? 'linear-gradient(135deg, rgba(14, 165, 233, 0.3), rgba(139, 92, 246, 0.3))'
                                                             : 'rgba(255,255,255,0.06)',
                                                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                                                         fontSize: '1rem', flexShrink: 0,
                                                     }}>
-                                                        {link.allowedVendorEmail ? '👤' : '🌐'}
+                                                        {(link.allowedVendorEmail || (link.vendorAccess && link.vendorAccess.length > 0)) ? '👤' : '🌐'}
                                                     </div>
                                                     <div style={{ flex: 1, minWidth: 0 }}>
                                                         <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '2px' }}>
-                                                            {link.allowedVendorEmail ? 'SENT TO VENDOR' : 'PUBLIC LINK'}
+                                                            {link.allowedVendorEmail ? 'SENT TO VENDOR' : (link.vendorAccess && link.vendorAccess.length > 0) ? 'SENT TO GROUP' : 'PUBLIC LINK'}
                                                         </p>
                                                         <p style={{
                                                             fontSize: '0.9rem', fontWeight: '600',
-                                                            color: link.allowedVendorEmail ? 'var(--primary-blue)' : 'var(--text-secondary)',
+                                                            color: (link.allowedVendorEmail || (link.vendorAccess && link.vendorAccess.length > 0)) ? 'var(--primary-blue)' : 'var(--text-secondary)',
                                                             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                                                         }}>
-                                                            {link.allowedVendorEmail || 'Anyone with the link'}
+                                                            {link.allowedVendorEmail || ((link.vendorAccess && link.vendorAccess.length > 0) ? `${link.vendorAccess.length} Vendors (Group)` : 'Anyone with the link')}
                                                         </p>
                                                     </div>
                                                     {/* Quick info badges */}

@@ -1,7 +1,7 @@
 'use server';
 
 import { prisma } from '@/lib/prisma';
-import { encryptBuffer } from '@/lib/crypto';
+import { encryptBuffer, generateDek, encryptDek } from '@/lib/crypto';
 import { cookies } from 'next/headers';
 import * as XLSX from 'xlsx';
 import { tryCheckRevoked, tryValidateSession } from '@/lib/redis-helpers';
@@ -45,7 +45,9 @@ export async function saveEditedText(
         }
 
         const buffer = Buffer.from(content, 'utf-8');
-        const { iv, authTag, encryptedContent } = encryptBuffer(buffer);
+        const dek = generateDek();
+        const { iv, authTag, encryptedContent } = encryptBuffer(buffer, dek);
+        const encryptedDek = encryptDek(dek);
 
         await prisma.userFile.update({
             where: { id: fileId },
@@ -53,6 +55,7 @@ export async function saveEditedText(
                 encryptedContent,
                 iv,
                 authTag,
+                encryptedDek,
                 fileSize: buffer.length,
             },
         });
@@ -112,7 +115,9 @@ export async function saveEditedSpreadsheet(
         XLSX.utils.book_append_sheet(workbook, worksheet, 'Sheet1');
         const xlsxBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
 
-        const { iv, authTag, encryptedContent } = encryptBuffer(Buffer.from(xlsxBuffer));
+        const dek = generateDek();
+        const { iv, authTag, encryptedContent } = encryptBuffer(Buffer.from(xlsxBuffer), dek);
+        const encryptedDek = encryptDek(dek);
 
         await prisma.userFile.update({
             where: { id: fileId },
@@ -120,6 +125,7 @@ export async function saveEditedSpreadsheet(
                 encryptedContent,
                 iv,
                 authTag,
+                encryptedDek,
                 fileSize: xlsxBuffer.length,
                 fileType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             },
@@ -184,7 +190,9 @@ export async function saveEditedImage(
         const base64Data = matches[2];
         const buffer = Buffer.from(base64Data, 'base64');
 
-        const { iv, authTag, encryptedContent } = encryptBuffer(buffer);
+        const dek = generateDek();
+        const { iv, authTag, encryptedContent } = encryptBuffer(buffer, dek);
+        const encryptedDek = encryptDek(dek);
 
         await prisma.userFile.update({
             where: { id: fileId },
@@ -192,6 +200,7 @@ export async function saveEditedImage(
                 encryptedContent,
                 iv,
                 authTag,
+                encryptedDek,
                 fileSize: buffer.length,
                 fileType: mimeType,
             },
@@ -247,7 +256,10 @@ export async function saveEditedRichText(
         }
 
         const buffer = Buffer.from(htmlContent, 'utf-8');
-        const { iv, authTag, encryptedContent } = encryptBuffer(buffer);
+
+        const dek = generateDek();
+        const { iv, authTag, encryptedContent } = encryptBuffer(buffer, dek);
+        const encryptedDek = encryptDek(dek);
 
         await prisma.userFile.update({
             where: { id: fileId },
@@ -255,6 +267,7 @@ export async function saveEditedRichText(
                 encryptedContent,
                 iv,
                 authTag,
+                encryptedDek,
                 fileSize: buffer.length,
             },
         });
@@ -331,13 +344,16 @@ export async function saveEditedPdf(
                 encryptedContent: fileRecord.encryptedContent,
                 iv: fileRecord.iv,
                 authTag: fileRecord.authTag,
+                encryptedDek: fileRecord.encryptedDek,
                 fileSize: fileRecord.fileSize,
                 changeType: 'annotation',
                 changeDescription: 'Pre-save snapshot (PDF annotation)',
             },
         });
 
-        const { iv, authTag, encryptedContent } = encryptBuffer(buffer);
+        const dek = generateDek();
+        const { iv, authTag, encryptedContent } = encryptBuffer(buffer, dek);
+        const encryptedDek = encryptDek(dek);
 
         await prisma.userFile.update({
             where: { id: fileId },
@@ -345,6 +361,7 @@ export async function saveEditedPdf(
                 encryptedContent,
                 iv,
                 authTag,
+                encryptedDek,
                 fileSize: buffer.length,
             },
         });

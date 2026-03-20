@@ -9,7 +9,9 @@ import {
     encryptData,
     generateDataHash,
     generateOwnerToken,
-    encryptBuffer
+    encryptBuffer,
+    generateDek,
+    encryptDek
 } from '@/lib/crypto';
 import { userDataSchema, fileSchema, ACCEPTED_FILE_TYPES } from '@/lib/validations';
 import { z } from 'zod';
@@ -59,12 +61,28 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
             return { success: false, error: 'Topic is required. Please describe what data you are sharing.' };
         }
 
-        // Zero Trust: Extract vendors array for email binding and level assignment
-        const vendorsJson = formData.get('vendors') as string | null;
-        const vendors: { email: string; level: number }[] = vendorsJson ? JSON.parse(vendorsJson) : [];
+        // Zero Trust: Extract vendor email for email binding (Legacy/Fallback)
+        const vendorEmail = formData.get('vendorEmail') as string | null;
+        const vendorsStr = formData.get('vendors') as string | null;
+        
+        // Parse hierarchical vendors
+        let vendors: { email: string; level: number }[] = [];
+        if (vendorsStr) {
+            try {
+                vendors = JSON.parse(vendorsStr);
+            } catch (e) {
+                return { success: false, error: 'Invalid vendors JSON format' };
+            }
+        } else if (vendorEmail) {
+            // Fallback: Make them a standard Level 2 user
+            vendors = [{ email: vendorEmail.toLowerCase(), level: 2 }];
+        }
+
         if (vendors.length === 0) {
             return { success: false, error: 'At least one vendor is required. Specify who you are sending data to.' };
         }
+
+        const allowEditing = formData.get('allowEditing') === 'true';
         const validatedData = userDataSchema.safeParse(rawData);
         if (!validatedData.success) {
             return {
@@ -153,7 +171,9 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
             Promise.all(
                 files.map(async (file) => {
                     const buffer = Buffer.from(await file.arrayBuffer());
-                    const { iv, authTag, encryptedContent } = encryptBuffer(buffer);
+                    const dek = generateDek();
+                    const { iv, authTag, encryptedContent } = encryptBuffer(buffer, dek);
+                    const encryptedDek = encryptDek(dek);
                     return {
                         fileName: file.name,
                         fileType: file.type,
@@ -161,6 +181,7 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
                         encryptedContent,
                         iv,
                         authTag,
+                        encryptedDek,
                     };
                 })
             ),
@@ -190,6 +211,9 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
                     purpose: topic,
                     purposeDetail: purposeDetail || undefined,
                     notificationEmail: notificationEmail || undefined,
+                    // Zero Trust: Email binding - only this email can verify OTP
+                    allowedVendorEmail: vendorEmail || undefined,
+                    allowEditing,
                     LinkAccess: {
                         create: vendorAcessData.map(v => ({ 
                             vendorEmail: v.email, 
@@ -201,6 +225,13 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
                     UserFile: {
                         create: encryptedFiles,
                     },
+                    VendorAccess: {
+                        create: vendors.map(v => ({
+                            email: v.email.toLowerCase(),
+                            level: v.level,
+                            maxLogins: 3
+                        }))
+                    }
                 },
             });
 

@@ -12,6 +12,7 @@ export interface DashboardLink {
     isRevoked: boolean;
     createdAt: Date;
     allowedVendorEmail: string | null;
+    vendorAccess: { email: string; level: number }[];
     status: 'active' | 'expired' | 'revoked' | 'used';
     otp: string | null;
     // Enhanced fields
@@ -61,6 +62,15 @@ export async function getOwnedLinks(userId: string): Promise<DashboardLink[]> {
                         isUsed: true,
                     }
                 },
+                VendorAccess: {
+                    select: {
+                        email: true,
+                        level: true,
+                    },
+                    orderBy: {
+                        level: 'asc',
+                    },
+                },
                 UserFile: {
                     select: {
                         id: true,
@@ -84,7 +94,7 @@ export async function getOwnedLinks(userId: string): Promise<DashboardLink[]> {
         });
 
         const mappedLinks = links.map((link) => {
-            const primaryVendor = link.LinkAccess?.[0]?.vendorEmail || null;
+            const primaryVendor = link.LinkAccess?.[0]?.vendorEmail || (link as any).allowedVendorEmail || null;
             
             // For the owner, the link is "Used" if any vendor has viewed it, or if it was globally used.
             const anyVendorUsed = link.LinkAccess?.some(a => a.isUsed) || false;
@@ -93,6 +103,7 @@ export async function getOwnedLinks(userId: string): Promise<DashboardLink[]> {
             return {
                 ...link,
                 allowedVendorEmail: primaryVendor,
+                vendorAccess: link.VendorAccess || [],
                 vendors: link.LinkAccess || [],
                 files: link.UserFile,
                 auditLogs: link.AuditLog,
@@ -122,11 +133,11 @@ export async function getReceivedLinks(email: string): Promise<DashboardLink[]> 
     try {
         const links = await prisma.secureLink.findMany({
             where: {
-                LinkAccess: {
-                    some: {
-                        vendorEmail: email.toLowerCase(),
-                    }
-                }
+                OR: [
+                    { allowedVendorEmail: email.toLowerCase() },
+                    { VendorAccess: { some: { email: email.toLowerCase() } } },
+                    { LinkAccess: { some: { vendorEmail: email.toLowerCase() } } }
+                ],
             },
             orderBy: {
                 createdAt: 'desc',
@@ -153,6 +164,15 @@ export async function getReceivedLinks(email: string): Promise<DashboardLink[]> 
                         isUsed: true,
                     }
                 },
+                VendorAccess: {
+                    select: {
+                        email: true,
+                        level: true,
+                    },
+                    orderBy: {
+                        level: 'asc',
+                    },
+                },
                 UserFile: {
                     select: {
                         id: true,
@@ -176,7 +196,7 @@ export async function getReceivedLinks(email: string): Promise<DashboardLink[]> 
         });
 
         const mappedLinks = links.map((link) => {
-            const primaryVendor = link.LinkAccess?.[0]?.vendorEmail || null;
+            const primaryVendor = link.LinkAccess?.[0]?.vendorEmail || (link as any).allowedVendorEmail || null;
             
             // For the vendor, the link is "Used" ONLY if THEIR specific LinkAccess record is marked as used.
             // (Since the query filters by their email, LinkAccess[0] is guaranteed to be theirs if it exists).
@@ -186,6 +206,7 @@ export async function getReceivedLinks(email: string): Promise<DashboardLink[]> 
                 ...link,
                 allowedVendorEmail: primaryVendor,
                 vendors: link.LinkAccess || [],
+                vendorAccess: link.VendorAccess || [],
                 files: link.UserFile,
                 auditLogs: link.AuditLog,
                 status: getStatus({ ...link, isUsed: vendorIsUsed }),

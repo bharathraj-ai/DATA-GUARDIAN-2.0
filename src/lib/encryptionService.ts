@@ -15,11 +15,11 @@ export interface EncryptedBlob {
 
 /**
  * Encrypt arbitrary bytes (file content, snapshots, etc.)
- * Uses AES-256-GCM with a random IV per call (key sourced from ENCRYPTION_KEY env).
+ * Uses AES-256-GCM with a random IV per call (key sourced from ENCRYPTION_KEY env or explicit DEK).
  */
-export function encryptBytes(data: Buffer | Uint8Array): EncryptedBlob {
+export function encryptBytes(data: Buffer | Uint8Array, dek?: Buffer): EncryptedBlob {
   const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
-  return _encryptBuffer(buf);
+  return _encryptBuffer(buf, dek);
 }
 
 /**
@@ -29,11 +29,11 @@ export function decryptBytes(blob: {
   encryptedContent: Buffer | Uint8Array;
   iv: string;
   authTag: string;
-}): Buffer {
+}, dek?: Buffer): Buffer {
   const content = Buffer.isBuffer(blob.encryptedContent)
     ? blob.encryptedContent
     : Buffer.from(blob.encryptedContent);
-  return _decryptBuffer(content, blob.iv, blob.authTag);
+  return _decryptBuffer(content, blob.iv, blob.authTag, dek);
 }
 
 /**

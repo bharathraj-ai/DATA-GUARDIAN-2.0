@@ -559,7 +559,7 @@ body {
 /* Features Grid */
 .features-section {
   padding: 120px 20px;
-  background: transparent;
+  background: linear-gradient(180deg, var(--darker-bg) 0%, var(--dark-bg) 100%);
   /* Performance optimization: skip rendering until scrolled into view */
   content-visibility: auto;
   contain-intrinsic-size: 1000px;

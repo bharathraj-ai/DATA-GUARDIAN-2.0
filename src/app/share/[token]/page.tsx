@@ -16,6 +16,8 @@ type AccessState = 'checking' | 'allowed' | 'denied' | 'requires_auth';
 export default function SharePage({ params }: SharePageProps) {
     const router = useRouter();
     const [token, setToken] = useState<string>('');
+    const [step, setStep] = useState<'email' | 'otp'>('email');
+    const [email, setEmail] = useState<string>('');
     const [otp, setOtp] = useState<string[]>(['', '', '', '', '', '']);
     const [state, setState] = useState<VerificationState>('idle');
     const [error, setError] = useState<string>('');
@@ -140,6 +142,38 @@ export default function SharePage({ params }: SharePageProps) {
         setTimeout(() => setShake(false), 500);
     };
 
+    const handleEmailSubmit = async () => {
+        if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            setError('Please enter a valid email address');
+            triggerShake();
+            return;
+        }
+
+        setState('loading');
+        setError('');
+
+        try {
+            const { sendVendorOTP } = await import('@/actions/send-vendor-otp');
+            const result = await sendVendorOTP({ token, email });
+
+            if (result.success) {
+                setState('idle');
+                setStep('otp');
+                setCountdown(300); // 5 minutes fresh timer
+            } else {
+                setState('error');
+                setError(result.error || 'Failed to request OTP');
+                triggerShake();
+                setTimeout(() => setState('idle'), 2000);
+            }
+        } catch {
+            setState('error');
+            setError('Connection error. Please try again.');
+            triggerShake();
+            setTimeout(() => setState('idle'), 2000);
+        }
+    };
+
     const handleSubmit = useCallback(async () => {
         const otpString = otp.join('');
 
@@ -158,7 +192,7 @@ export default function SharePage({ params }: SharePageProps) {
         setError('');
 
         try {
-            const result = await verifyOTP({ token, otp: otpString });
+            const result = await verifyOTP({ token, otp: otpString, email });
 
             if (result.success) {
                 setState('success');
@@ -191,10 +225,10 @@ export default function SharePage({ params }: SharePageProps) {
 
     // Auto-submit when all 6 digits entered
     useEffect(() => {
-        if (otp.every((digit) => digit !== '') && state === 'idle' && accessState === 'allowed') {
+        if (step === 'otp' && otp.every((digit) => digit !== '') && state === 'idle' && accessState === 'allowed') {
             handleSubmit();
         }
-    }, [otp, state, handleSubmit, accessState]);
+    }, [otp, state, handleSubmit, accessState, step]);
 
     // Loading state
     if (isLoading || accessState === 'checking') {
@@ -319,7 +353,7 @@ export default function SharePage({ params }: SharePageProps) {
                             <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
                             <path d="M7 11V7a5 5 0 0 1 10 0v4" />
                         </svg>
-                        <span>Protected by Data Guardian V2</span>
+                        <span>Protected by Secure Protocol V2</span>
                     </div>
                 </div>
             </main>
@@ -377,10 +411,54 @@ export default function SharePage({ params }: SharePageProps) {
                     </div>
                 )}
 
-                {/* OTP Input */}
-                {state !== 'success' && (
+                {/* Step 1: Email Input */}
+                {step === 'email' && state !== 'success' && (
                     <div className={`otp-input-container ${shake ? 'shake' : ''}`}>
-                        <label className="otp-label">Enter OTP</label>
+                        <label className="otp-label">Email Address</label>
+                        <input
+                            type="email"
+                            value={email}
+                            onChange={(e) => {
+                                setEmail(e.target.value);
+                                setError('');
+                            }}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleEmailSubmit();
+                            }}
+                            className={`otp-box filled ${error ? 'error' : ''}`}
+                            style={{ width: '100%', marginBottom: '16px', fontSize: '16px', padding: '12px' }}
+                            placeholder="Enter your email to receive OTP"
+                            disabled={state === 'loading'}
+                            autoFocus
+                        />
+                        <button
+                            onClick={handleEmailSubmit}
+                            disabled={state === 'loading' || !email}
+                            className={`otp-button ${state}`}
+                            style={{ margin: 0 }}
+                        >
+                            {state === 'loading' ? (
+                                <>
+                                    <span className="button-spinner" />
+                                    Sending...
+                                </>
+                            ) : (
+                                <>
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+                                        <polyline points="22,6 12,13 2,6" />
+                                    </svg>
+                                    Send Verification Code
+                                </>
+                            )}
+                        </button>
+                    </div>
+                )}
+
+                {/* Step 2: OTP Input */}
+                {step === 'otp' && state !== 'success' && (
+                    <div className={`otp-input-container ${shake ? 'shake' : ''}`}>
+                        <label className="otp-label">Enter OTP sent to {email}</label>
                         <div className="otp-boxes">
                             {otp.map((digit, index) => (
                                 <input
@@ -399,62 +477,31 @@ export default function SharePage({ params }: SharePageProps) {
                                 />
                             ))}
                         </div>
+                        
+                        <button
+                            onClick={handleSubmit}
+                            disabled={state === 'loading' || countdown <= 0 || otp.some((d) => !d)}
+                            className={`otp-button ${state}`}
+                            style={{ marginTop: '24px' }}
+                        >
+                            {state === 'loading' ? (
+                                <>
+                                    <span className="button-spinner" />
+                                    Verifying...
+                                </>
+                            ) : state === 'error' ? (
+                                'Try Again'
+                            ) : (
+                                <>
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <path d="M9 12l2 2 4-4" />
+                                        <circle cx="12" cy="12" r="10" />
+                                    </svg>
+                                    Verify Access
+                                </>
+                            )}
+                        </button>
                     </div>
-                )}
-
-                {/* Error Message */}
-                {error && (
-                    <div className="otp-error">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <circle cx="12" cy="12" r="10" />
-                            <line x1="12" y1="8" x2="12" y2="12" />
-                            <line x1="12" y1="16" x2="12.01" y2="16" />
-                        </svg>
-                        <span>{error}</span>
-                        {remainingAttempts > 0 && remainingAttempts < 1 && (
-                            <span className="attempts-left">
-                                {remainingAttempts} attempt{remainingAttempts !== 1 ? 's' : ''} remaining
-                            </span>
-                        )}
-                    </div>
-                )}
-
-                {/* Success Animation */}
-                {state === 'success' && (
-                    <div className="success-animation">
-                        <div className="success-circle">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                                <path d="M5 13l4 4L19 7" className="checkmark" />
-                            </svg>
-                        </div>
-                        <p className="success-text">Verification Successful</p>
-                    </div>
-                )}
-
-                {/* Submit Button */}
-                {state !== 'success' && (
-                    <button
-                        onClick={handleSubmit}
-                        disabled={state === 'loading' || countdown <= 0 || otp.some((d) => !d)}
-                        className={`otp-button ${state}`}
-                    >
-                        {state === 'loading' ? (
-                            <>
-                                <span className="button-spinner" />
-                                Verifying...
-                            </>
-                        ) : state === 'error' ? (
-                            'Try Again'
-                        ) : (
-                            <>
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                    <path d="M9 12l2 2 4-4" />
-                                    <circle cx="12" cy="12" r="10" />
-                                </svg>
-                                Verify Access
-                            </>
-                        )}
-                    </button>
                 )}
 
                 {/* Trust Indicators */}

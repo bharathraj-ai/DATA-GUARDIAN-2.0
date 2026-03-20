@@ -73,7 +73,7 @@ export default function RootLayout({
                 <div className="footer-brand">
                   <Link href="/" className="footer-logo">
                     <Image src="/logo.svg" alt="Secure Protocol" width={24} height={24} style={{ opacity: 0.9 }}/>
-                    <span style={{ fontWeight: 600, letterSpacing: '-0.02em', fontSize: '18px' }}>Secure Protocol</span>
+                    <span className="gradient-text" style={{ fontWeight: 600, letterSpacing: '-0.02em', fontSize: '18px' }}>Secure Protocol</span>
                   </Link>
                   <p className="footer-motto">
                     Protecting your sensitive data with military-grade encryption and self-destructing links.

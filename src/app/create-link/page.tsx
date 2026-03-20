@@ -19,6 +19,7 @@ interface FormDataState {
     vendors: { email: string; level: number }[]; // Multi-vendor with levels
     vendorEmail: string; 
     topic: string; // Mandatory: describe what data is being shared
+    allowEditing: boolean;
 }
 
 export default function SignupPage() {
@@ -35,12 +36,14 @@ export default function SignupPage() {
         vendors: [{ email: '', level: 1 }],
         vendorEmail: '',
         topic: '',
+        allowEditing: false,
     });
     const [files, setFiles] = useState<FileList | null>(null);
     const [generatedLink, setGeneratedLink] = useState('');
     const [otp, setOtp] = useState('');
     const [ownerUrl, setOwnerUrl] = useState('');
     const [status, setStatus] = useState({ message: '', type: '' });
+    const [vendorError, setVendorError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [qrDataUrl, setQrDataUrl] = useState('');
     const [countdown, setCountdown] = useState<number | null>(null);
@@ -48,6 +51,7 @@ export default function SignupPage() {
     const [vendors, setVendors] = useState<VendorOption[]>([]);
     const [sharingMode, setSharingMode] = useState<'individual' | 'group'>('individual');
     const [selectedVendors, setSelectedVendors] = useState<{email: string, level: number}[]>([]);
+    const [tempVendorEmail, setTempVendorEmail] = useState('');
 
     // Fetch available vendors on mount
     useEffect(() => {
@@ -80,7 +84,8 @@ export default function SignupPage() {
     }, [router]);
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-        setFormData({ ...formData, [e.target.name]: e.target.value });
+        const value = e.target.type === 'checkbox' ? (e.target as HTMLInputElement).checked : e.target.value;
+        setFormData({ ...formData, [e.target.name]: value });
     };
 
     const handleVendorChange = (index: number, field: string, value: string | number) => {
@@ -110,7 +115,6 @@ export default function SignupPage() {
         if (!formData.topic.trim()) return 'Topic is required — describe what data you are sharing';
         const minutes = parseInt(formData.validityMinutes);
         if (isNaN(minutes) || minutes <= 0) return 'Time must be a positive number';
-
         if (sharingMode === 'individual') {
             if (!formData.vendorEmail) return 'Vendor email is required — specify who you are sending data to';
             if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.vendorEmail)) {
@@ -146,6 +150,9 @@ export default function SignupPage() {
             });
             // Also send topic as 'purpose' for backward compatibility with backend
             data.append('purpose', formData.topic);
+            data.append('allowEditing', formData.allowEditing ? 'true' : 'false');
+            
+
 
             // Backend requires a 'vendors' JSON array
             if (sharingMode === 'individual' && formData.vendorEmail) {
@@ -164,12 +171,12 @@ export default function SignupPage() {
 
             const result = await createSecureLinkWithFiles(data);
 
-            if (result.success && result.shareUrl && result.otp) {
+            if (result.success && result.shareUrl) {
                 // Refresh router cache to ensure fresh data on next navigation
                 router.refresh();
 
                 setGeneratedLink(result.shareUrl);
-                setOtp(result.otp);
+                setOtp(result.otp || '');
                 setOwnerUrl(result.ownerUrl || '');
                 setStatus({ message: 'Secure link created! OTP sent to vendor\'s email.', type: 'success' });
 
@@ -439,22 +446,25 @@ export default function SignupPage() {
                                     {sharingMode === 'individual' ? (
                                         <div className="form-group">
                                             <label className="form-label">Vendor Email <span style={{ color: 'var(--danger)' }}>*</span></label>
-                                            <select
+                                            <input
+                                                type="email"
                                                 name="vendorEmail"
                                                 value={formData.vendorEmail}
                                                 onChange={handleChange}
-                                                className="form-select"
+                                                className="form-input"
+                                                placeholder="vendor@example.com"
                                                 required={sharingMode === 'individual'}
-                                            >
-                                                <option value="">Select vendor email</option>
+                                                list="vendor-emails"
+                                            />
+                                            <datalist id="vendor-emails">
                                                 {vendors.map((vendor) => (
                                                     <option key={vendor.email} value={vendor.email}>
-                                                        {vendor.name ? `${vendor.name} — ${vendor.email}` : vendor.email}
+                                                        {vendor.name || ''}
                                                     </option>
                                                 ))}
-                                            </select>
+                                            </datalist>
                                             <small className="form-hint">
-                                                Only this vendor can verify the OTP. Prevents link forwarding.
+                                                Only this email will be able to access the shared data.
                                             </small>
                                         </div>
                                     ) : (
@@ -470,7 +480,6 @@ export default function SignupPage() {
                                                     <p style={{ color: 'var(--text-secondary)', textAlign: 'center', margin: '10px 0' }}>No vendors available</p>
                                                 ) : vendors.map((vendor) => {
                                                     const isSelected = selectedVendors.some(v => v.email === vendor.email);
-                                                    const currentLevel = selectedVendors.find(v => v.email === vendor.email)?.level || 2;
                                                     
                                                     return (
                                                         <div key={vendor.email} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px', borderBottom: '1px solid var(--border)', background: isSelected ? 'rgba(99, 102, 241, 0.05)' : 'transparent', borderRadius: '4px' }}>
@@ -553,7 +562,21 @@ export default function SignupPage() {
                                         </div>
                                     )}
 
-                                    <div className="form-group">
+                                    <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '16px' }}>
+                                        <input
+                                            type="checkbox"
+                                            id="allowEditing"
+                                            name="allowEditing"
+                                            checked={formData.allowEditing}
+                                            onChange={handleChange}
+                                            style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                                        />
+                                        <label htmlFor="allowEditing" style={{ cursor: 'pointer', margin: 0, fontSize: '14px', color: 'var(--text-primary)' }}>
+                                            Allow vendor to edit files using Universal Editor
+                                        </label>
+                                    </div>
+
+                                    <div className="form-group" style={{ marginTop: '16px' }}>
                                         <label className="form-label">Attach Files (Optional)</label>
                                         <div className="file-upload-wrapper">
                                             <input
@@ -615,18 +638,18 @@ export default function SignupPage() {
                                 </button>
                             </form>
 
-                            {/* Results Section — Email Sent Confirmation */}
+                            {/* Results Section */}
                             {generatedLink && (
                                 <div className="results-section">
-                                    {/* Email Sent Confirmation */}
                                     <div className="result-card result-card-success">
                                         <div className="result-header">
                                             <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
                                                 <path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z" />
                                                 <path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z" />
                                             </svg>
-                                            <h4>OTP Sent via Email</h4>
+                                            <h4>Link Generated and OTP Sent</h4>
                                         </div>
+                                        
                                         <p style={{ color: 'var(--text-secondary)', fontSize: '15px', lineHeight: '1.6', margin: '0 0 16px' }}>
                                             The secure link and OTP have been emailed to:
                                         </p>
@@ -640,16 +663,39 @@ export default function SignupPage() {
                                             flexDirection: 'column',
                                             gap: '8px'
                                         }}>
-                                            {formData.vendors.map((v, idx) => (
-                                                <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', borderBottom: idx < formData.vendors.length - 1 ? '1px solid #E5E7EB' : 'none', paddingBottom: idx < formData.vendors.length - 1 ? '8px' : '0' }}>
+                                            {selectedVendors.length > 0 ? selectedVendors.map((v, idx) => (
+                                                <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', borderBottom: idx < selectedVendors.length - 1 ? '1px solid #E5E7EB' : 'none', paddingBottom: idx < selectedVendors.length - 1 ? '8px' : '0' }}>
                                                     <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>📧 {v.email}</span>
                                                     <span style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>Level {v.level}</span>
                                                 </div>
-                                            ))}
+                                            )) : (
+                                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                                    <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>📧 {formData.vendorEmail}</span>
+                                                    <span style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>Level 1</span>
+                                                </div>
+                                            )}
                                         </div>
-                                        <p className="result-hint">
-                                            The vendor will receive the secure link and OTP in their inbox. You do not need to share them manually.
+
+                                        <p style={{ color: 'var(--text-secondary)', fontSize: '15px', lineHeight: '1.6', margin: '0 0 16px' }}>
+                                            Share this link with your vendors manually if needed:
                                         </p>
+                                        
+                                        <div className="link-display-box" style={{ 
+                                            background: 'rgba(0,0,0,0.3)', 
+                                            padding: '12px', 
+                                            borderRadius: '8px',
+                                            display: 'flex',
+                                            justifyContent: 'space-between',
+                                            alignItems: 'center',
+                                            marginBottom: '16px'
+                                        }}>
+                                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '14px', color: 'var(--primary)' }}>
+                                                {generatedLink}
+                                            </span>
+                                            <button type="button" onClick={copyToClipboard} className="btn-icon" style={{ padding: '6px', background: 'var(--primary)', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+                                                Copy
+                                            </button>
+                                        </div>
                                     </div>
 
                                     {/* Countdown Timer */}
@@ -704,6 +750,7 @@ export default function SignupPage() {
                                         setOwnerUrl('');
                                         setQrDataUrl('');
                                         setCountdown(null);
+                                        setSelectedVendors([]);
                                         setStatus({ message: '', type: '' });
                                         setSharingMode('individual');
                                         setSelectedVendors([]);
@@ -718,6 +765,7 @@ export default function SignupPage() {
                                             vendors: [{ email: '', level: 1 }],
                                             vendorEmail: '',
                                             topic: '',
+                                            allowEditing: false,
                                         });
                                         setFiles(null);
                                         // Force full page reload to clear all caches
