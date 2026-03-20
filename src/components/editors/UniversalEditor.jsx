@@ -166,45 +166,8 @@ async function parseFile(file) {
   return parseTXT(file);
 }
 
-async function exportToPDF(doc) {
-  await new Promise((res, rej) => { if (window.PDFLib) return res(); const s = document.createElement("script"); s.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"; s.onload = res; s.onerror = rej; document.head.appendChild(s); });
-  const { PDFDocument, rgb, StandardFonts } = window.PDFLib;
-  const pdfDoc = await PDFDocument.create();
-  for (const page of doc.pages) {
-    const pdfPage = pdfDoc.addPage([page.width, page.height]);
-    pdfPage.drawRectangle({ x: 0, y: 0, width: page.width, height: page.height, color: rgb(1, 1, 1) });
-    for (const el of page.elements) {
-      if (el.type === "text") {
-        try {
-          const font = await pdfDoc.embedFont(el.bold ? StandardFonts.HelveticaBold : StandardFonts.Helvetica);
-          const fs = el.size || 12;
-          pdfPage.drawText(el.content || "", { x: el.x, y: Math.max(0, page.height - el.y - fs), size: fs, font, color: rgb(0, 0, 0) });
-        } catch { }
-      } else if (el.type === "image" && el.src) {
-        try {
-          const b64 = el.src.split(",")[1];
-          const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
-          const img = el.src.includes("image/png") ? await pdfDoc.embedPng(bytes) : await pdfDoc.embedJpg(bytes);
-          pdfPage.drawImage(img, { x: el.x, y: page.height - el.y - el.height, width: el.width, height: el.height });
-        } catch { }
-      } else if (el.type === "table") {
-        try {
-          const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-          const { rows = [], colW = 100, rowH = 24 } = el;
-          for (let r = 0; r < rows.length; r++) for (let c = 0; c < (rows[r] || []).length; c++) {
-            const cx = el.x + c * colW, cy = page.height - el.y - (r + 1) * rowH;
-            pdfPage.drawRectangle({ x: cx, y: cy, width: colW, height: rowH, borderColor: rgb(0.7, 0.7, 0.7), borderWidth: 0.5, color: r === 0 ? rgb(0.88, 0.88, 0.95) : rgb(1, 1, 1) });
-            pdfPage.drawText(String(rows[r][c] || ""), { x: cx + 4, y: cy + 6, size: 9, font, color: rgb(0, 0, 0) });
-          }
-        } catch { }
-      }
-    }
-  }
-  const pdfBytes = await pdfDoc.save();
-  const blob = new Blob([pdfBytes], { type: "application/pdf" });
-  const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
-  a.download = (doc.name || "document").replace(/\.[^.]+$/, "") + "_edited.pdf"; a.click();
-}
+
+
 function TableCell({ cell, r, c, scale, rowH, colW, onCellChange }) {
   const ref = useRef(null);
   const [editing, setEditing] = useState(false);
@@ -367,7 +330,7 @@ function Page({ page, scale, selectedId, onSelect, onUpdate, onDelete, showBg })
   );
 }
 
-export default function UniversalEditor({ initialFileProp, onClose, onSave, token, fileId, currentUserLevel = 2, highestAuthorityLevel = 2 }) {
+export default function UniversalEditor({ initialFileProp, onClose, onSave, token, fileId, currentUserLevel = 2, highestAuthorityLevel = 2, forceAutoSave = false, onAutoSaveComplete }) {
   const isReadOnly = currentUserLevel > highestAuthorityLevel;
   const [view, setView] = useState("editor");
   const [doc, setDoc] = useState(null);
@@ -527,7 +490,7 @@ export default function UniversalEditor({ initialFileProp, onClose, onSave, toke
     try {
       let savedFile;
       if (doc.type === 'pdf') {
-        const { PDFDocument, rgb, StandardFonts } = window.PDFLib;
+        const { PDFDocument, rgb, StandardFonts } = await import("pdf-lib");
         const pdfDoc = await PDFDocument.create();
         for (const page of doc.pages) {
           const pdfPage = pdfDoc.addPage([page.width, page.height]);
@@ -571,6 +534,14 @@ export default function UniversalEditor({ initialFileProp, onClose, onSave, toke
     }
     setLoading(false);
   };
+
+  useEffect(() => {
+    if (forceAutoSave && doc && !isReadOnly && !loading) {
+      handleSaveToLink().then(() => {
+        if (onAutoSaveComplete) onAutoSaveComplete();
+      });
+    }
+  }, [forceAutoSave]);
 
   useEffect(() => {
     const h = (e) => {
@@ -840,7 +811,7 @@ export default function UniversalEditor({ initialFileProp, onClose, onSave, toke
             </>
           )}
 
-          {view === "pdf2docx" && <PDFtoDOCX onBack={() => { setView("editor"); setInitialPdfFile(null); }} initialFile={initialPdfFile} onSave={onSave} />}
+          {view === "pdf2docx" && <PDFtoDOCX onBack={() => { setView("editor"); setInitialPdfFile(null); }} initialFile={initialPdfFile} onSave={onSave} forceAutoSave={forceAutoSave} onAutoSaveComplete={onAutoSaveComplete} />}
 
           {/* Chat Sidebar */}
           {chatOpen && (
