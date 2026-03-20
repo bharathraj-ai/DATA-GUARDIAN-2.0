@@ -36,6 +36,23 @@ function SignInContent() {
         }
     }, [sessionStatus, session, router, rawCallbackUrl]);
 
+    if (sessionStatus === 'loading' || sessionStatus === 'authenticated') {
+        return (
+            <main className="app-page">
+                <section className="app-section">
+                    <div className="container">
+                        <div className="app-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
+                            <div style={{ textAlign: 'center' }}>
+                                <div className="button-spinner" style={{ width: '48px', height: '48px', margin: '0 auto 16px' }}></div>
+                                <p style={{ color: 'var(--color-text-secondary)' }}>Completing sign in...</p>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </main>
+        );
+    }
+
     return (
         <main className="app-page">
             <section className="app-section">
