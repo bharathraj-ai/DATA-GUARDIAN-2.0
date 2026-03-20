@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { getOwnedLinks, DashboardLink, getSendHistory, SendHistoryRecord } from '@/actions/dashboard';
+import { getUnifiedAuditLogs, UnifiedAuditLog } from '@/actions/audit-logs';
 import { revokeAccess } from '@/actions/revoke-access';
 import { downloadFile } from '@/actions/download-file';
 import dynamic from 'next/dynamic';
@@ -26,8 +27,10 @@ export default function OwnerDashboardPage() {
     const [expandedId, setExpandedId] = useState<string | null>(null);
     const [downloadingId, setDownloadingId] = useState<string | null>(null);
     const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
-    const [activeTab, setActiveTab] = useState<'links' | 'history'>('links');
+    const [activeTab, setActiveTab] = useState<'links' | 'history' | 'audit'>('links');
     const [liveActivityLink, setLiveActivityLink] = useState<{token: string, topic: string} | null>(null);
+    const [auditLogs, setAuditLogs] = useState<UnifiedAuditLog[]>([]);
+    const [auditFilter, setAuditFilter] = useState({ search: '', type: 'ALL', severity: 'ALL' });
 
     // Redirect to sign-in if not authenticated
     useEffect(() => {
@@ -44,12 +47,14 @@ export default function OwnerDashboardPage() {
             if (session?.user?.id) {
                 setIsLoading(true);
                 try {
-                    const [owned, history] = await Promise.all([
+                    const [owned, history, audits] = await Promise.all([
                         getOwnedLinks(session.user.id),
                         getSendHistory(session.user.id),
+                        getUnifiedAuditLogs(),
                     ]);
                     setLinks(owned);
                     setSendHistory(history);
+                    setAuditLogs(audits);
                 } catch (error) {
                     console.error('Error fetching data:', error);
                 } finally {
@@ -222,6 +227,37 @@ export default function OwnerDashboardPage() {
         }
     };
 
+    const exportAuditCSV = () => {
+        const headers = ['Timestamp', 'Type', 'Action', 'Severity', 'Actor', 'IP', 'Description'];
+        const rows = filteredAuditLogs.map(log => [
+            new Date(log.timestamp).toISOString(),
+            log.type,
+            log.action,
+            log.severity,
+            log.actor,
+            log.ipAddress || 'Unknown',
+            `"${log.description.replace(/"/g, '""')}"`
+        ]);
+        const csvContent = "data:text/csv;charset=utf-8," + [headers.join(','), ...rows.map(e => e.join(','))].join("\n");
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement("a");
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", `audit_logs_${new Date().toISOString().slice(0,10)}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+
+    const filteredAuditLogs = auditLogs.filter(log => {
+        if (auditFilter.type !== 'ALL' && log.type !== auditFilter.type) return false;
+        if (auditFilter.severity !== 'ALL' && log.severity !== auditFilter.severity) return false;
+        if (auditFilter.search) {
+            const term = auditFilter.search.toLowerCase();
+            return log.actor.toLowerCase().includes(term) || log.action.toLowerCase().includes(term) || log.description.toLowerCase().includes(term);
+        }
+        return true;
+    });
+
     const filteredLinks = filter === 'all' ? links : links.filter(l => l.status === filter);
 
     // Combined stats: links (active data) + sendHistory (preserved records)
@@ -393,7 +429,111 @@ export default function OwnerDashboardPage() {
                             >
                                 📋 Send History ({sendHistory.length})
                             </button>
+                            <button
+                                onClick={() => setActiveTab('audit')}
+                                style={{
+                                    flex: 1, padding: '10px 16px', borderRadius: '10px',
+                                    fontSize: '0.85rem', fontWeight: '600', border: 'none', cursor: 'pointer',
+                                    background: activeTab === 'audit' ? 'var(--primary-blue)' : 'transparent',
+                                    color: activeTab === 'audit' ? '#fff' : 'var(--text-muted)',
+                                    transition: 'all 0.2s ease',
+                                }}
+                            >
+                                🛡️ Audit Trails
+                            </button>
                         </div>
+
+                        {/* Audit Logs Tab */}
+                        {activeTab === 'audit' && (
+                            <div className="app-form-card">
+                                {isLoading ? (
+                                    <div style={{ textAlign: 'center', padding: '48px' }}>
+                                        <div className="button-spinner" style={{ width: '32px', height: '32px', margin: '0 auto 12px' }}></div>
+                                        <p style={{ color: 'var(--color-text-secondary)' }}>Loading audit trails...</p>
+                                    </div>
+                                ) : (
+                                    <div>
+                                        <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '20px', background: 'rgba(255,255,255,0.02)', padding: '16px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                                            <input
+                                                type="text"
+                                                placeholder="Search logs..."
+                                                value={auditFilter.search}
+                                                onChange={(e) => setAuditFilter({ ...auditFilter, search: e.target.value })}
+                                                style={{ flex: 1, minWidth: '200px', padding: '8px 12px', borderRadius: '8px', background: 'rgba(0,0,0,0.2)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)' }}
+                                            />
+                                            <select
+                                                value={auditFilter.type}
+                                                onChange={(e) => setAuditFilter({ ...auditFilter, type: e.target.value })}
+                                                style={{ padding: '8px 12px', borderRadius: '8px', background: 'rgba(0,0,0,0.2)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)' }}
+                                            >
+                                                <option value="ALL">All Types</option>
+                                                <option value="SECURITY">Security</option>
+                                                <option value="DOCUMENT">Document</option>
+                                            </select>
+                                            <select
+                                                value={auditFilter.severity}
+                                                onChange={(e) => setAuditFilter({ ...auditFilter, severity: e.target.value })}
+                                                style={{ padding: '8px 12px', borderRadius: '8px', background: 'rgba(0,0,0,0.2)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)' }}
+                                            >
+                                                <option value="ALL">All Severities</option>
+                                                <option value="INFO">Info</option>
+                                                <option value="WARNING">Warning</option>
+                                                <option value="CRITICAL">Critical</option>
+                                            </select>
+                                            <button onClick={exportAuditCSV} className="btn btn-secondary btn-sm" style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                <span>📥</span> Export CSV
+                                            </button>
+                                        </div>
+
+                                        {filteredAuditLogs.length === 0 ? (
+                                            <div style={{ textAlign: 'center', padding: '48px' }}>
+                                                <p style={{ fontSize: '2rem', marginBottom: '12px' }}>📜</p>
+                                                <p style={{ color: 'var(--text-muted)' }}>No audit logs matching criteria.</p>
+                                            </div>
+                                        ) : (
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                                {filteredAuditLogs.map(log => {
+                                                    const isCritical = log.severity === 'CRITICAL';
+                                                    const isWarning = log.severity === 'WARNING';
+                                                    return (
+                                                        <div key={log.id} style={{
+                                                            display: 'flex', alignItems: 'center', gap: '12px', padding: '16px', borderRadius: '10px',
+                                                            background: isCritical ? 'rgba(239, 68, 68, 0.05)' : isWarning ? 'rgba(245, 158, 11, 0.05)' : 'rgba(255,255,255,0.02)',
+                                                            borderLeft: `4px solid ${isCritical ? '#ef4444' : isWarning ? '#f59e0b' : '#3b82f6'}`,
+                                                            borderTop: '1px solid rgba(255,255,255,0.03)', borderRight: '1px solid rgba(255,255,255,0.03)', borderBottom: '1px solid rgba(255,255,255,0.03)'
+                                                        }}>
+                                                            <div style={{ fontSize: '1.5rem', flexShrink: 0 }}>
+                                                                {isCritical ? '🛑' : isWarning ? '⚠️' : 'ℹ️'}
+                                                            </div>
+                                                            <div style={{ flex: 1, minWidth: 0 }}>
+                                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '4px' }}>
+                                                                    <span style={{ fontWeight: '600', fontSize: '0.9rem', color: isCritical ? '#ef4444' : isWarning ? '#f59e0b' : 'var(--color-text)' }}>
+                                                                        {log.action}
+                                                                        <span style={{ marginLeft: '8px', fontSize: '0.7rem', padding: '2px 6px', background: 'rgba(255,255,255,0.1)', borderRadius: '4px', color: 'var(--text-muted)' }}>
+                                                                            {log.type}
+                                                                        </span>
+                                                                    </span>
+                                                                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                                                                        {formatDate(log.timestamp)}
+                                                                    </span>
+                                                                </div>
+                                                                <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '6px' }}>
+                                                                    {log.description}
+                                                                </p>
+                                                                <div style={{ display: 'flex', gap: '12px', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                                                    <span>👤 {log.actor}</span>
+                                                                    {log.ipAddress && <span>🌐 {log.ipAddress}</span>}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        )}
 
                         {/* Send History Tab */}
                         {activeTab === 'history' && (
