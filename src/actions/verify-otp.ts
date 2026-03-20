@@ -56,7 +56,7 @@ export type VerifyOTPResult = {
  * 
  * ZERO TRUST Security Features:
  * - Email Binding (allowedVendorEmail must match authenticated user)
- * - SINGLE-ATTEMPT OTP (wrong OTP = permanent link revocation)
+ * - 3-ATTEMPTS OTP (wrong OTP 3 times = permanent link revocation)
  * - Device Binding (User-Agent/Platform hash)
  * - Server-side OTP validation (Zero Trust)
  * - Redis session with TTL (auto-expire)
@@ -191,11 +191,11 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
             };
         }
 
-        // 2. ZERO TRUST: Check max attempts (SINGLE ATTEMPT POLICY)
-        if (failedAttempts >= 1) {
+        // 2. ZERO TRUST: Check max attempts (3 ATTEMPTS POLICY)
+        if (failedAttempts >= 3) {
             return {
                 success: false,
-                error: 'This link has been permanently revoked due to an invalid OTP attempt.',
+                error: 'This link has been permanently revoked due to invalid OTP attempts.',
                 errorType: 'LOCKED',
             };
         }
@@ -402,53 +402,70 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
         const isValidOTP = await verifyOTPHash(otp, targetHash);
 
         if (!isValidOTP) {
-            // ZERO TRUST: SINGLE ATTEMPT - Wrong OTP = Permanent Revocation
-            // This is the strictest security policy for enterprise-grade protection
+            // ZERO TRUST: 3 ATTEMPTS - Wrong OTP = Increment Failed Attempts
+            // After 3 failed attempts, permanent revocation
+            let attemptsRemaining = 0;
             await prisma.$transaction(async (tx) => {
+                let shouldLock = false;
+
                 if (vendorAccess) {
-                    await tx.linkAccess.update({
+                    const updated = await tx.linkAccess.update({
                         where: { id: vendorAccess.id },
-                        data: {
-                            failedAttempts: 1,
-                            lockedAt: new Date(),
-                        },
+                        data: { failedAttempts: { increment: 1 } },
                     });
+                    attemptsRemaining = 3 - updated.failedAttempts;
+                    if (updated.failedAttempts >= 3) {
+                        await tx.linkAccess.update({
+                            where: { id: vendorAccess.id },
+                            data: { lockedAt: new Date() },
+                        });
+                        shouldLock = true;
+                    }
                 } else if (vendor) {
-                    await tx.vendorAccess.update({
+                    const updated = await tx.vendorAccess.update({
                         where: { id: vendor.id },
-                        data: {
-                            failedAttempts: { increment: 1 },
-                        }
+                        data: { failedAttempts: { increment: 1 } },
                     });
-                    if (vendor.failedAttempts + 1 >= 3) {
+                    attemptsRemaining = 3 - updated.failedAttempts;
+                    if (updated.failedAttempts >= 3) {
                          await tx.vendorAccess.update({
                             where: { id: vendor.id },
                             data: { isRevoked: true },
                         });
+                        shouldLock = true;
                     }
                 } else {
-                    await tx.secureLink.update({
+                    const updated = await tx.secureLink.update({
                         where: { id: secureLink.id },
-                        data: {
-                            failedAttempts: 1,
-                            lockedAt: new Date(),
-                            isRevoked: true, // Immediate revocation for individual links
-                        },
+                        data: { failedAttempts: { increment: 1 } },
                     });
+                    attemptsRemaining = 3 - updated.failedAttempts;
+                    if (updated.failedAttempts >= 3) {
+                        await tx.secureLink.update({
+                            where: { id: secureLink.id },
+                            data: {
+                                lockedAt: new Date(),
+                                isRevoked: true, // Immediate revocation for individual links
+                            },
+                        });
+                        shouldLock = true;
+                    }
                 }
 
                 await tx.auditLog.create({
                     data: {
-                        action: 'LOCKED',
+                        action: shouldLock ? 'LOCKED' : 'DENIED',
                         linkId: secureLink.id,
-                        reason: 'Single-attempt OTP policy: Wrong OTP entered',
+                        reason: shouldLock ? 'Max OTP attempts reached: Locked' : 'Invalid OTP entered',
                     },
                 });
             });
 
             return {
                 success: false,
-                error: 'Invalid OTP.',
+                error: attemptsRemaining > 0 
+                    ? `Invalid OTP. You have ${attemptsRemaining} attempt${attemptsRemaining === 1 ? '' : 's'} remaining.`
+                    : 'Invalid OTP. Maximum attempts reached.',
                 errorType: 'INVALID_OTP',
             };
         }
