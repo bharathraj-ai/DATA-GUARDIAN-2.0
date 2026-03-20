@@ -150,6 +150,17 @@ export const authOptions: NextAuthOptions = {
     },
     // Disable debug mode in production to avoid leaking secrets
     debug: process.env.NODE_ENV === 'development',
+    logger: {
+        error(code, metadata) {
+            console.error(`[NEXTAUTH ERROR] ${code}`, metadata);
+        },
+        warn(code) {
+            console.warn(`[NEXTAUTH WARN] ${code}`);
+        },
+        debug(code, metadata) {
+            console.debug(`[NEXTAUTH DEBUG] ${code}`, metadata);
+        }
+    },
     events: {
         /**
          * Auto-create new users as VENDOR role by default

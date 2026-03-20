@@ -60,12 +60,12 @@ function SignInContent() {
                     <div className="app-container" style={{ maxWidth: '480px' }}>
                         {/* Header */}
                         <div className="app-header">
-                            <div className="brand-badge" style={{ marginBottom: '24px', justifyContent: 'center' }}>
-                                <Image src="/logo.svg" alt="Data Guardian" width={32} height={32} />
-                                <span className="gradient-text" style={{ fontSize: '1.5rem' }}>Data Guardian</span>
+                            <div className="brand-badge" style={{ marginBottom: '24px', justifyContent: 'center', background: 'transparent' }}>
+                                <Image src="/logo.svg" alt="Secure Protocol" width={32} height={32} style={{ opacity: 0.9 }}/>
+                                <span style={{ fontSize: '1.5rem', fontWeight: 600 }}>Secure Protocol</span>
                             </div>
                             <h1 className="app-page-title">
-                                <span className="gradient-text">Sign In</span>
+                                <span>Sign In</span>
                             </h1>
                             <p className="app-page-subtitle">
                                 Use your Google account to continue
@@ -106,12 +106,12 @@ function SignInContent() {
                             {/* Security Notice */}
                             <div className="form-section" style={{ marginTop: '32px', paddingTop: '24px', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
                                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
-                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" strokeWidth="2" style={{ flexShrink: 0 }}>
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#111111" strokeWidth="2" style={{ flexShrink: 0 }}>
                                         <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
                                     </svg>
                                     <div>
-                                        <p style={{ color: 'var(--color-text)', fontWeight: '500', marginBottom: '4px' }}>Zero Trust Security</p>
-                                        <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}>
+                                        <p style={{ color: '#111111', fontWeight: '500', marginBottom: '4px' }}>Zero Trust Security</p>
+                                        <p style={{ color: '#6B7280', fontSize: '0.875rem' }}>
                                             Your identity is verified server-side. We never store passwords.
                                         </p>
                                     </div>

@@ -64,11 +64,12 @@ model SecureLink {
   otpPlain           String?
   AuditLog           AuditLog[]
   User               User?      @relation(fields: [ownerId], references: [id])
-  UserData           UserData   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  UserData           UserData      @relation(fields: [userId], references: [id], onDelete: Cascade)
   UserFile           UserFile[]
+  LinkAccess         LinkAccess[]
+  ChatMessage        ChatMessage[]
   VendorAccess       VendorAccess[]
 
-  @@index([allowedVendorEmail])
   @@index([expiresAt])
   @@index([ownerId])
   @@index([ownerToken])
@@ -95,20 +96,6 @@ model VendorAccess {
   @@index([email])
 }
 
-model ChatMessage {
-  id         String   @id @default(cuid())
-  fileId     String
-  sender     String
-  level      Int      @default(2)
-  message    String
-  isPrivate  Boolean  @default(false)
-  targetUser String?
-  isSystem   Boolean  @default(false)
-  createdAt  DateTime @default(now())
-
-  @@index([fileId])
-  @@index([createdAt])
-}
 
 model Session {
   id           String   @id @default(cuid())
@@ -228,9 +215,9 @@ model DocumentSession {
   userId      String?
   token       String
   role        String   @default("VENDOR")
+  level       Int      @default(2) // 1 = Team Leader, 2+ = Members
   displayName String   @default("User")
   color       String   @default("#6366f1")
-  level       Int      @default(2) // Hierarchy Level (1=Highest)
   joinedAt    DateTime @default(now())
   lastSeenAt  DateTime @default(now())
 
@@ -250,6 +237,40 @@ model CollabOperation {
 
   @@index([fileId])
   @@index([createdAt])
+}
+
+/// Link access mapping for multiple vendors with hierarchy levels.
+model LinkAccess {
+  id           String     @id @default(cuid())
+  secureLinkId String
+  vendorEmail  String
+  level            Int        @default(2) // 1 = Team Leader, 2+ = Member
+  otpHash          String?    // Per-vendor unique OTP hash
+  otpPlain         String?    // Per-vendor plain OTP (for email sending)
+  isUsed           Boolean    @default(false)
+  otpVerifiedAt    DateTime?
+  deviceHash       String?
+  failedAttempts   Int        @default(0)
+  lockedAt         DateTime?
+  otpFirstAttemptAt DateTime?
+  SecureLink       SecureLink @relation(fields: [secureLinkId], references: [id], onDelete: Cascade)
+
+  @@unique([secureLinkId, vendorEmail])
+  @@index([vendorEmail])
+}
+
+/// Real-time collaboration chat messages.
+model ChatMessage {
+  id            String     @id @default(cuid())
+  secureLinkId  String
+  senderEmail   String
+  receiverEmail String?    // null = Group Chat, string = Direct Message
+  content       String
+  timestamp     DateTime   @default(now())
+  SecureLink    SecureLink @relation(fields: [secureLinkId], references: [id], onDelete: Cascade)
+
+  @@index([secureLinkId])
+  @@index([timestamp])
 }
 
 // ============================================
@@ -313,5 +334,21 @@ model DocumentAuditLog {
   @@index([documentId])
   @@index([userId])
   @@index([action])
+  @@index([createdAt])
+}
+
+/// Real-time collaboration chat messages per document.
+model DocumentChatMessage {
+  id         String   @id @default(cuid())
+  fileId     String
+  sender     String
+  level      Int      @default(2)
+  message    String
+  isPrivate  Boolean  @default(false)
+  targetUser String?
+  isSystem   Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([fileId])
   @@index([createdAt])
 }

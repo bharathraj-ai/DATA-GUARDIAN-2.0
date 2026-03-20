@@ -56,7 +56,7 @@ export async function GET(req: NextRequest) {
           // DB fallback check
           const link = await prisma.secureLink.findUnique({
             where: { token },
-            select: { isRevoked: true, expiresAt: true },
+            select: { isRevoked: true, expiresAt: true, id: true },
           });
 
           if (!link || link.isRevoked) {
@@ -74,8 +74,43 @@ export async function GET(req: NextRequest) {
             return;
           }
 
-          // Heartbeat
-          send({ type: 'heartbeat', timestamp: new Date().toISOString() });
+          // Presence check (who is currently active within last 15s)
+          const threshold = new Date(Date.now() - 15000);
+          const activeSessions = await prisma.documentSession.findMany({
+            where: {
+              token,
+              lastSeenAt: { gte: threshold }
+            },
+            select: {
+              userId: true,
+              displayName: true,
+              level: true,
+              color: true
+            }
+          });
+
+          // Compute highest authority (lowest level number)
+          let highestActiveLevel = 99;
+          activeSessions.forEach(session => {
+             if (session.level < highestActiveLevel) highestActiveLevel = session.level;
+          });
+
+          // Fetch recent chat messages
+          const recentChats = await prisma.chatMessage.findMany({
+            where: { secureLinkId: link.id },
+            orderBy: { timestamp: 'asc' },
+            take: 100,
+            select: { id: true, senderEmail: true, receiverEmail: true, content: true, timestamp: true }
+          });
+
+          // Push down state
+          send({ 
+              type: 'heartbeat', 
+              timestamp: new Date().toISOString(),
+              highestActiveLevel: highestActiveLevel === 99 ? null : highestActiveLevel,
+              activeParticipants: activeSessions.map(s => ({ email: s.userId, name: s.displayName, level: s.level, color: s.color })),
+              chats: recentChats
+          });
         } catch {
           // Network hiccup — keep polling
           send({ type: 'heartbeat', timestamp: new Date().toISOString() });

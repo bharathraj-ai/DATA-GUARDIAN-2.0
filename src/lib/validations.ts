@@ -1,14 +1,12 @@
 import { z } from 'zod';
 
 export const userDataSchema = z.object({
-    firstName: z.string().min(1, 'First name is required').max(50, 'First name too long'),
-    lastName: z.string().min(1, 'Last name is required').max(50, 'Last name too long'),
-    email: z.string().email('Invalid email address'),
-    phone: z.string().min(10, 'Phone number must be at least 10 digits').max(15, 'Phone number too long'),
-    gender: z.enum(['male', 'female', 'other', 'prefer-not-to-say'], {
-        message: 'Please select a valid gender option',
-    }),
-    age: z.number().int().min(1, 'Age must be at least 1').max(150, 'Invalid age'),
+    firstName: z.string().max(50, 'First name too long').optional().or(z.literal('')),
+    lastName: z.string().max(50, 'Last name too long').optional().or(z.literal('')),
+    email: z.string().email('Invalid email address').optional().or(z.literal('')),
+    phone: z.string().max(15, 'Phone number too long').optional().or(z.literal('')),
+    gender: z.string().optional().or(z.literal('')),
+    age: z.number().int().max(150, 'Invalid age').optional().or(z.literal(0)),
     validityMinutes: z.number().int().min(1, 'Validity must be at least 1 minute').max(1440, 'Validity cannot exceed 24 hours'),
 });
 
@@ -17,6 +15,7 @@ export type UserDataInput = z.infer<typeof userDataSchema>;
 export const otpVerifySchema = z.object({
     token: z.string().uuid('Invalid link token'),
     otp: z.string().length(6, 'OTP must be 6 digits').regex(/^\d+$/, 'OTP must contain only digits'),
+    vendorEmail: z.string().email('Invalid email address').optional(),
 });
 
 export type OTPVerifyInput = z.infer<typeof otpVerifySchema>;

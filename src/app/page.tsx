@@ -37,23 +37,21 @@ export default function LandingPage() {
       <section className="hero-section">
         <div className="hero-background">
           <div className="hero-grid"></div>
-          <div className="hero-glow hero-glow-1"></div>
-          <div className="hero-glow hero-glow-2"></div>
         </div>
 
         <div className="container">
           <div className="hero-content">
             {/* Logo/Brand */}
             <div className="brand-badge">
-              <Image src="/logo.svg" alt="Secure Protocol" width={24} height={24} />
-              <span>Secure Protocol</span>
+              <Image src="/logo.svg" alt="Data Guardian" width={24} height={24} />
+              <span>Data Guardian</span>
             </div>
 
             {/* Main Heading */}
             <h1 className="hero-title">
               Secure Data Sharing
               <br />
-              <span className="gradient-text">Made Simple</span>
+              <span>Made Simple</span>
             </h1>
 
             <p className="hero-subtitle">
