@@ -11,6 +11,7 @@
 - **🔄 Instant Auto-Reloading** — Through sophisticated Server-Sent Events (SSE) polling the database Audit Logs, when a lower-priority user's file is auto-saved, the Team Leader's browser detects the exact millisecond of the update and **instantly auto-reloads the newly edited file** directly into their viewer without requiring a page refresh.
 - **⚡ Real-Time Collaboration & Chat** — Live document presence tracking and built-in encrypted chat (Group and Private-to-Leader) powered via Server-Sent Events (SSE).
 - **🟢 Live Activity Monitor** — Owners can track real-time connection status, active participants, and chat feeds directly from their unified dashboard.
+- **📜 Enterprise Audit Trails** — Immutable, server-side logging of all security events (OTP failures, access revocations) and document manipulations, filterable via a comprehensive UI with CSV export capabilities.
 - **🚫 Context-Aware Auto-Revocation** — Links can be explicitly revoked by the owner or auto-expire based on time. All data is permanently purged upon expiry.
 - **🚷 Strict No-Export Policy** — All download, export, and print functionalities are entirely disabled for vendors so that the encrypted data NEVER leaves the browser sandbox. Vendors can only edit and securely save back to the server.
 - **📸 Advanced Anti-Screenshot & Screen-Recording Protection** — Uses a combination of `visibilitychange`, `blur`, and specific keyboard capture (`PrintScreen`, `Win+Shift`) to immediately revoke access if a user attempts to screenshot, screen-record, or switch tabs away from the secure viewer.
@@ -38,6 +39,7 @@
 - **Device & Email Binding** — Sessions are locked to the browser fingerprint and the specific authenticated OAuth email address.
 - **Aggressive Kill Switch** — Fast Redis session invalidation combined with DB revocation triggers an immediate UI lock-out on any security violation.
 - **Hermetic Viewing Environment** — Data is decrypted directly in the browser's memory using `pdf-lib` and `pdfjs-dist` without leaving traces in local storage.
+- **Unmodifiable Audit Logging** — Every critical interaction, from successful views to security violations, is permanently logged in an append-only database to guarantee compliance tracing.
 
 ## 🚀 Tech Stack
 
