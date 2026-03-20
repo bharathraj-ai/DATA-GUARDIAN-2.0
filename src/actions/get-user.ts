@@ -63,6 +63,8 @@ export type MaskedUserData = {
     age: number;
     expiresAt: Date;
     remainingSeconds: number;
+    allowEditing: boolean;
+    level: number;
     files: FileMetadata[];
     // Sender & purpose info
     purpose: string | null;
@@ -144,6 +146,7 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
                         isUsed: true,
                     }
                 },
+                VendorAccess: true
             },
         });
 
@@ -211,10 +214,17 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
             };
         }
 
-        // Determine the vendor's assigned level
-        let myLevel = 2; // default member
+        // Determine the vendor's assigned level from either LinkAccess or VendorAccess
+        let currentUserLevel = 2; // default member
+        const vendorEmailStore = cookieStore.get('vendor_email')?.value;
+        
         if (vendorAccess) {
-            myLevel = vendorAccess.level;
+            currentUserLevel = vendorAccess.level;
+        } else if (vendorEmailStore && secureLink.VendorAccess) {
+             const vendor = secureLink.VendorAccess.find(v => v.email === vendorEmailStore.toLowerCase());
+             if (vendor) {
+                 currentUserLevel = vendor.level;
+             }
         }
 
         // Return masked user data (never expose full PII to frontend)
@@ -229,12 +239,14 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
                 age: decryptedData.age,
                 expiresAt: secureLink.expiresAt,
                 remainingSeconds,
+                allowEditing: secureLink.allowEditing,
+                level: currentUserLevel,
                 files: secureLink.UserFile || [],
                 purpose: secureLink.purpose,
                 purposeDetail: secureLink.purposeDetail,
                 ownerName: secureLink.User?.name || null,
                 ownerEmail: secureLink.User?.email || null,
-                myAssignedLevel: myLevel,
+                myAssignedLevel: currentUserLevel,
             },
         };
     } catch (error) {

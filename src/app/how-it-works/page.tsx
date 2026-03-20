@@ -14,7 +14,7 @@ export default function HowItWorksPage() {
                 <div className="container">
                     <div className="how-hero-content">
                         <h1 className="how-hero-title">
-                            How <span>Secure Protocol</span> Works
+                            How <span className="gradient-text">Secure Protocol</span> Works
                         </h1>
                         <p className="how-hero-subtitle">
                             Secure data sharing in three simple steps. No technical expertise required.

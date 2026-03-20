@@ -3,7 +3,7 @@ import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
     title: 'Services',
-    description: 'Explore Data Guardian services: AES-256 encrypted sharing, self-destructing links, OTP protection, instant revocation, QR code delivery, and zero-knowledge architecture.',
+    description: 'Explore Secure Protocol services: AES-256 encrypted sharing, self-destructing links, OTP protection, instant revocation, QR code delivery, and zero-knowledge architecture.',
 };
 
 export default function ServicesPage() {
@@ -270,7 +270,7 @@ export default function ServicesPage() {
                     <div className="services-cta-card">
                         <h2 className="services-cta-title">Ready to Protect Your Data?</h2>
                         <p className="services-cta-subtitle">
-                            Start using Data Guardian today. No registration required.
+                            Start using Secure Protocol today. No registration required.
                         </p>
                         <div className="services-cta-buttons">
                             <Link href="/create-link" className="btn btn-primary btn-large">

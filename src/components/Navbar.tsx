@@ -203,6 +203,8 @@ export default function Navbar() {
                                             <img
                                                 src={session.user.image}
                                                 alt="Profile"
+                                                width={32}
+                                                height={32}
                                                 style={{ width: '32px', height: '32px', borderRadius: '50%' }}
                                                 referrerPolicy="no-referrer"
                                             />

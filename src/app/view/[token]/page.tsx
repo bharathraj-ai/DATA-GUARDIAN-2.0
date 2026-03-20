@@ -8,10 +8,12 @@ import { revokeOnScreenshot } from '@/actions/revoke-on-screenshot';
 import { useSession } from 'next-auth/react';
 import dynamic from 'next/dynamic';
 
-// Lazy load the Universal File Editor to avoid loading heavy editor dependencies upfront
-const UniversalFileEditor = dynamic(() => import('@/components/UniversalFileEditor'), {
+import { getRawFileForEdit } from '@/actions/get-raw-file-for-edit';
+
+// Lazy load the Universal File Editor from our unified codebase
+const UniversalEditor = dynamic(() => import('@/components/editors/UniversalEditor'), {
     ssr: false,
-    loading: () => null,
+    loading: () => <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>Loading Editor...</div>,
 });
 
 interface ViewPageProps {
@@ -30,9 +32,10 @@ interface SSEData {
         myAssignedLevel?: number; // Backend provided via getUserData
     };
     remainingSeconds?: number;
-    highestActiveLevel?: number | null;
-    activeParticipants?: { email: string; name: string; level: number; color: string }[];
-    chats?: { id: string; senderEmail: string; receiverEmail: string | null; content: string; timestamp: string }[];
+    activeParticipants?: any[];
+    highestActiveLevel?: number;
+    highestAuthorityLevel?: number;
+    chats?: any[];
 }
 
 export default function ViewPage({ params }: ViewPageProps) {
@@ -44,13 +47,15 @@ export default function ViewPage({ params }: ViewPageProps) {
     const [error, setError] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [remainingSeconds, setRemainingSeconds] = useState(0);
-    const [preemptionCountdown, setPreemptionCountdown] = useState<number | null>(null);
-
+    const [isRevealed, setIsRevealed] = useState(false);
+    const [revealTimeout, setRevealTimeoutState] = useState<NodeJS.Timeout | null>(null);
     const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
     const eventSourceRef = useRef<EventSource | null>(null);
 
     // Presence & Chat State
     const [highestActiveLevel, setHighestActiveLevel] = useState<number | null>(null);
+    const [highestAuthorityLevel, setHighestAuthorityLevel] = useState<number | null>(null);
+    const [preemptionCountdown, setPreemptionCountdown] = useState<number | null>(null);
     const [activeParticipants, setActiveParticipants] = useState<SSEData['activeParticipants']>([]);
     const [chats, setChats] = useState<SSEData['chats']>([]);
     const [chatMessage, setChatMessage] = useState('');
@@ -67,13 +72,18 @@ export default function ViewPage({ params }: ViewPageProps) {
 
     // Security State
     const [warningCount, setWarningCount] = useState(0);
-    const MAX_WARNINGS = 1;
+    const MAX_WARNINGS = 3;
 
     // Inline Editor State
-    const [isEditingFile, setIsEditingFile] = useState(false);
-    const [editFileId, setEditFileId] = useState<string | null>(null);
-    const [editFileName, setEditFileName] = useState('');
+    const [isEditLoading, setIsEditLoading] = useState<string | null>(null);
+    const [editingFile, setEditingFile] = useState<File | null>(null);
+    const [editingFileId, setEditingFileId] = useState<string | null>(null);
     const [isFinished, setIsFinished] = useState(false);
+    const isEditingFile = editingFile !== null;
+    const editFileId = editingFileId;
+    const editFileName = editingFile?.name || '';
+    const closeEditor = () => { setEditingFile(null); setEditingFileId(null); };
+    const handleEditorSaved = () => { closeEditor(); };
 
     // Resolve params
     useEffect(() => {
@@ -90,15 +100,8 @@ export default function ViewPage({ params }: ViewPageProps) {
         let isRevoking = false;
         let screenshotDetected = false; // Debounce: prevent blur from double-counting a PrintScreen
 
-        const triggerSecurityViolation = async (reason: string, isImmediate: boolean = false) => {
+        const triggerSecurityViolation = async (reason: string, displayMessage?: string) => {
             if (isRevoking || !token) return;
-
-            if (!isImmediate && warningCount < MAX_WARNINGS - 1) {
-                // Just a warning
-                setWarningCount(prev => prev + 1);
-                console.warn(`[SECURITY WARNING ${warningCount + 1}/${MAX_WARNINGS}] ${reason}`);
-                return;
-            }
 
             // Revoke access
             isRevoking = true;
@@ -112,28 +115,39 @@ export default function ViewPage({ params }: ViewPageProps) {
             // Clear visible data immediately
             setUserData(null);
             setFullData(null);
-            setError(isImmediate
-                ? 'Security Violation: Access revoked due to screenshot attempt.'
-                : `Security Violation: Access revoked after ${MAX_WARNINGS} tab switches or focus losses.`
-            );
+            setError(displayMessage || 'security violation: Access revoked due to tab switch or focus loss');
             setConnectionStatus('disconnected');
 
             // Call server to revoke access and notify owner
-            await revokeOnScreenshot(token);
+            await revokeOnScreenshot(token, displayMessage);
+        };
+
+        // Tab Switch Protection - Combine blur and visibilitychange
+        let isHandlingTabSwitch = false;
+
+        const handleTabSwitch = (reason: string) => {
+            if (editingFile || screenshotDetected || isHandlingTabSwitch) return;
+            
+            isHandlingTabSwitch = true;
+            triggerSecurityViolation(reason, 'security violation: Access revoked due to tab switch');
+            
+            // Debounce to prevent immediate double-counting
+            setTimeout(() => { isHandlingTabSwitch = false; }, 1500);
         };
 
         // Detect when tab/window loses visibility (e.g., snipping tool overlay)
         const handleVisibilityChange = () => {
-            if (document.hidden && !isEditingFile && !screenshotDetected) {
-                triggerSecurityViolation('Tab hidden - possible screenshot', false);
+            if (document.hidden) {
+                handleTabSwitch('Tab hidden - possible screenshot');
             }
         };
 
         // Detect when window loses focus (e.g., snipping tool opens)
         const handleBlur = () => {
-            // Skip if editor is open or if PrintScreen was just detected
-            if (!isEditingFile && !screenshotDetected) {
-                triggerSecurityViolation('Window lost focus - possible screenshot', false);
+            // Only fire blur if the document is NOT hidden already 
+            // (If it's hidden, visibilitychange handles it. Blur handles cases like floating windows over the active tab)
+            if (!document.hidden) {
+                handleTabSwitch('Window lost focus - possible screenshot');
             }
         };
 
@@ -142,13 +156,17 @@ export default function ViewPage({ params }: ViewPageProps) {
             if (e.key === 'PrintScreen') {
                 e.preventDefault();
                 screenshotDetected = true;
-                triggerSecurityViolation('PrintScreen key detected', true);
+                triggerSecurityViolation('PrintScreen key detected', 'security violation: Access reveoke due to screen attempts');
                 // Reset debounce after a short delay
                 setTimeout(() => { screenshotDetected = false; }, 1000);
             }
             if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) {
                 e.preventDefault();
-                triggerSecurityViolation('Print shortcut (Ctrl+P) detected', true);
+                triggerSecurityViolation('Print shortcut (Ctrl+P) detected', 'security violation: Access reveoke due to try to print');
+            }
+            if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'C')) {
+                e.preventDefault();
+                triggerSecurityViolation('Copy shortcut (Ctrl+C) detected', 'security violation: Access reveoke due to copying the content');
             }
         };
 
@@ -157,7 +175,7 @@ export default function ViewPage({ params }: ViewPageProps) {
             if (e.key === 'PrintScreen') {
                 e.preventDefault();
                 screenshotDetected = true;
-                triggerSecurityViolation('PrintScreen key detected', true);
+                triggerSecurityViolation('PrintScreen key detected', 'security violation: Access reveoke due to screen attempts');
                 setTimeout(() => { screenshotDetected = false; }, 1000);
             }
         };
@@ -169,9 +187,20 @@ export default function ViewPage({ params }: ViewPageProps) {
                 const hasImage = items.some(item => item.type.startsWith('image/'));
                 if (hasImage) {
                     e.preventDefault();
-                    triggerSecurityViolation('Screenshot image detected in clipboard', true);
+                    triggerSecurityViolation('Screenshot image detected in clipboard', 'security violation: Access reveoke due to screen attempts');
                 }
             }
+        };
+
+        // Detect copy actions
+        const handleCopy = (e: ClipboardEvent) => {
+            e.preventDefault();
+            triggerSecurityViolation('Copy action detected', 'security violation: Access reveoke due to copying the content');
+        };
+
+        // Prevent right click
+        const handleContextMenu = (e: MouseEvent) => {
+            e.preventDefault();
         };
 
         document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -179,6 +208,8 @@ export default function ViewPage({ params }: ViewPageProps) {
         window.addEventListener('keydown', handleKeyDown);
         window.addEventListener('keyup', handleKeyUp);
         document.addEventListener('paste', handlePaste);
+        document.addEventListener('copy', handleCopy);
+        document.addEventListener('contextmenu', handleContextMenu);
 
         return () => {
             document.removeEventListener('visibilitychange', handleVisibilityChange);
@@ -186,9 +217,11 @@ export default function ViewPage({ params }: ViewPageProps) {
             window.removeEventListener('keydown', handleKeyDown);
             window.removeEventListener('keyup', handleKeyUp);
             document.removeEventListener('paste', handlePaste);
+            document.removeEventListener('copy', handleCopy);
+            document.removeEventListener('contextmenu', handleContextMenu);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [token, warningCount, isEditingFile]);
+    }, [token, warningCount, revealTimeout, isEditingFile]);
 
     // Initial data fetch
     const fetchUserData = useCallback(async (t: string) => {
@@ -251,6 +284,9 @@ export default function ViewPage({ params }: ViewPageProps) {
                                 lastChatCountRef.current = data.chats?.length || 0;
                                 return data.chats || [];
                             });
+                        }
+                        if (data.highestAuthorityLevel !== undefined) {
+                            setHighestAuthorityLevel(data.highestAuthorityLevel);
                         }
                         break;
 
@@ -384,29 +420,50 @@ export default function ViewPage({ params }: ViewPageProps) {
         setPreviewData(null);
     };
 
-    const handleEditClick = (fileId: string, fileName: string) => {
-        setEditFileId(fileId);
-        setEditFileName(fileName);
-        setIsEditingFile(true);
+    const handleEdit = async (fileId: string) => {
+        setIsEditLoading(fileId);
+        try {
+            const getFileResult = await getRawFileForEdit(token, fileId);
+            if (getFileResult.success && getFileResult.base64Content) {
+                const bstr = atob(getFileResult.base64Content);
+                let n = bstr.length;
+                const u8arr = new Uint8Array(n);
+                while (n--) {
+                    u8arr[n] = bstr.charCodeAt(n);
+                }
+                const newFile = new File([u8arr], getFileResult.fileName || 'document', { type: getFileResult.mimeType });
+                setEditingFileId(fileId);
+                setEditingFile(newFile);
+            } else {
+                alert(getFileResult.error || 'Failed to load file for editing');
+            }
+        } catch (err) {
+            console.error(err);
+            alert('Error loading file for edit');
+        } finally {
+            setIsEditLoading(null);
+        }
     };
 
-    const closeEditor = () => {
-        setIsEditingFile(false);
-        setEditFileId(null);
-        setEditFileName('');
-    };
+    const handleSaveFile = async (editedFile: File) => {
+        if (!editingFile || !editingFileId) return;
+        try {
+            const formData = new FormData();
+            formData.append('file', editedFile);
 
-    const handleEditorSaved = (fileId: string, newData?: { fileName: string; fileSize: number; fileType: string }) => {
-        if (newData) {
-            setUserData(prev => {
-                if (!prev) return prev;
-                return {
-                    ...prev,
-                    files: prev.files?.map(file =>
-                        file.id === fileId ? { ...file, ...newData } : file
-                    )
-                };
-            });
+            const { updateFile } = await import('@/actions/update-file');
+            const res = await updateFile(token, editingFileId, formData);
+
+            if (res.success) {
+                alert('File saved securely.');
+                setEditingFile(null);
+                setEditingFileId(null);
+            } else {
+                alert(res.error || 'Failed to save file.');
+            }
+        } catch (err) {
+            console.error('Save error:', err);
+            alert('An error occurred while saving the file.');
         }
     };
 
@@ -449,9 +506,8 @@ export default function ViewPage({ params }: ViewPageProps) {
         setFullData(null);
 
         // Close editor if open
-        setIsEditingFile(false);
-        setEditFileId(null);
-        setEditFileName('');
+        setEditingFile(null);
+        setEditingFileId(null);
 
         setIsFinished(true);
     }, []);
@@ -517,8 +573,9 @@ export default function ViewPage({ params }: ViewPageProps) {
 
     // Error State
     if (error) {
-        const isRevoked = error.includes('revoked');
-        const isExpired = error.includes('expired');
+        const errorLower = error.toLowerCase();
+        const isRevoked = errorLower.includes('revoked') || errorLower.includes('reveoke');
+        const isExpired = errorLower.includes('expired');
         return (
             <main className="profile-wrapper">
                 <div className="profile-card">
@@ -527,19 +584,6 @@ export default function ViewPage({ params }: ViewPageProps) {
                             {isRevoked ? 'Access Revoked' : isExpired ? 'Session Expired' : 'Access Denied'}
                         </h2>
                         <p className="error-message">{error}</p>
-                        <button
-                            onClick={() => {
-                                // Clear any cached data
-                                setUserData(null);
-                                setFullData(null);
-                                setError(null);
-                                // Force full page navigation to bypass all caches
-                                window.location.href = `/create-link?t=${Date.now()}`;
-                            }}
-                            className="return-button"
-                        >
-                            Create New Link
-                        </button>
                     </div>
                 </div>
             </main>
@@ -559,23 +603,6 @@ export default function ViewPage({ params }: ViewPageProps) {
                     <div className="header-top">
                         <h1 className="profile-title">Secure Shared Profile</h1>
                         <div className="status-badges">
-                            {warningCount > 0 && (
-                                <span style={{
-                                    background: 'rgba(255, 68, 68, 0.15)',
-                                    color: '#ff4444',
-                                    border: '1px solid rgba(255, 68, 68, 0.3)',
-                                    padding: '4px 8px',
-                                    borderRadius: '50px',
-                                    fontSize: '11px',
-                                    fontWeight: '600',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '4px',
-                                    animation: 'pulse 2s infinite'
-                                }}>
-                                    ⚠️ Tab Switches: {warningCount}/{MAX_WARNINGS}
-                                </span>
-                            )}
                             <span className={`status-badge ${connectionStatus}`}>
                                 <span className="status-dot" />
                                 {connectionStatus === 'connected' ? 'LIVE' : 'OFFLINE'}
@@ -683,24 +710,21 @@ export default function ViewPage({ params }: ViewPageProps) {
                                             </div>
                                             <div style={{ display: 'flex', gap: '8px' }}>
                                                 <button
-                                                    onClick={() => handleEditClick(file.id, file.fileName)}
-                                                    disabled={isEditingRestricted}
-                                                    title={isEditingRestricted ? "Editing disabled by a higher authority's presence." : "Edit File"}
+                                                    onClick={() => handleEdit(file.id)}
                                                     style={{
-                                                        background: isEditingRestricted ? 'rgba(156, 163, 175, 0.1)' : 'rgba(34, 197, 94, 0.1)',
-                                                        border: isEditingRestricted ? '1px solid rgba(156, 163, 175, 0.3)' : '1px solid rgba(34, 197, 94, 0.3)',
-                                                        color: isEditingRestricted ? '#9ca3af' : '#22c55e',
+                                                        background: 'rgba(34, 197, 94, 0.1)',
+                                                        border: '1px solid rgba(34, 197, 94, 0.3)',
+                                                        color: '#22c55e',
                                                         padding: '4px 8px',
                                                         fontSize: '12px',
                                                         borderRadius: '4px',
-                                                        cursor: isEditingRestricted ? 'not-allowed' : 'pointer',
+                                                        cursor: 'pointer',
                                                         display: 'flex',
                                                         alignItems: 'center',
-                                                        gap: '4px',
-                                                        opacity: isEditingRestricted ? 0.6 : 1
+                                                        gap: '4px'
                                                     }}
                                                 >
-                                                    {isEditingFile && editFileId === file.id ? '⏳' : isEditingRestricted ? '🔒' : '✍️'} Edit
+                                                    {isEditingFile && editFileId === file.id ? '⏳' : '✍️'} Edit
                                                 </button>
                                                 <button
                                                     onClick={() => handlePreview(file.id)}
@@ -966,15 +990,14 @@ export default function ViewPage({ params }: ViewPageProps) {
 
             {/* Universal File Editor */}
             {isEditingFile && editFileId && (
-                <UniversalFileEditor
+                <UniversalEditor
                     token={token}
                     fileId={editFileId}
-                    fileName={editFileName}
-                    remainingSeconds={remainingSeconds}
-                    connectionStatus={connectionStatus}
+                    initialFileProp={editingFile}
+                    currentUserLevel={highestActiveLevel || 2}
+                    highestAuthorityLevel={highestAuthorityLevel || 2}
                     onClose={closeEditor}
-                    onSaved={handleEditorSaved}
-                    preemptionCountdown={preemptionCountdown}
+                    onSave={handleSaveFile}
                 />
             )}
         </main>

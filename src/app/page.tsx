@@ -43,8 +43,8 @@ export default function LandingPage() {
           <div className="hero-content">
             {/* Logo/Brand */}
             <div className="brand-badge">
-              <Image src="/logo.svg" alt="Secure Protocol" width={24} height={24} style={{ opacity: 0.9 }}/>
-              <span style={{ fontWeight: 600 }}>Secure Protocol</span>
+              <Image src="/logo.svg" alt="Data Guardian" width={24} height={24} />
+              <span>Data Guardian</span>
             </div>
 
             {/* Main Heading */}

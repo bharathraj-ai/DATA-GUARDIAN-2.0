@@ -35,6 +35,8 @@ next-env.d.ts
 *.pem
 *.code-workspace
 /src/generated/prisma
+/secure-storage/
+/prisma/dev.db
 
 # debug
 npm-debug.log*
