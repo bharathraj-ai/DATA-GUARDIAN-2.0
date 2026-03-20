@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { getUserData, MaskedUserData } from '@/actions/get-user';
 import { getFilePreview, FilePreviewResult } from '@/actions/get-file-preview';
 import { revokeOnScreenshot } from '@/actions/revoke-on-screenshot';
+import { useSession } from 'next-auth/react';
 import dynamic from 'next/dynamic';
 
 // Lazy load the Universal File Editor to avoid loading heavy editor dependencies upfront
@@ -26,22 +27,38 @@ interface SSEData {
         phone: string;
         gender: string;
         age: number;
+        myAssignedLevel?: number; // Backend provided via getUserData
     };
     remainingSeconds?: number;
+    highestActiveLevel?: number | null;
+    activeParticipants?: { email: string; name: string; level: number; color: string }[];
+    chats?: { id: string; senderEmail: string; receiverEmail: string | null; content: string; timestamp: string }[];
 }
 
 export default function ViewPage({ params }: ViewPageProps) {
     const router = useRouter();
+    const { data: session } = useSession();
     const [token, setToken] = useState<string>('');
     const [userData, setUserData] = useState<MaskedUserData | null>(null);
     const [fullData, setFullData] = useState<SSEData['userData'] | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [remainingSeconds, setRemainingSeconds] = useState(0);
-    const [isRevealed, setIsRevealed] = useState(false);
-    const [revealTimeout, setRevealTimeoutState] = useState<NodeJS.Timeout | null>(null);
+    const [preemptionCountdown, setPreemptionCountdown] = useState<number | null>(null);
+
     const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
     const eventSourceRef = useRef<EventSource | null>(null);
+
+    // Presence & Chat State
+    const [highestActiveLevel, setHighestActiveLevel] = useState<number | null>(null);
+    const [activeParticipants, setActiveParticipants] = useState<SSEData['activeParticipants']>([]);
+    const [chats, setChats] = useState<SSEData['chats']>([]);
+    const [chatMessage, setChatMessage] = useState('');
+    const [myAssignedLevel, setMyAssignedLevel] = useState<number>(2); // Default to member
+    const chatEndRef = useRef<HTMLDivElement>(null);
+    const [isChatOpen, setIsChatOpen] = useState(false);
+    const [unreadCount, setUnreadCount] = useState(0);
+    const lastChatCountRef = useRef(0);
 
     // Preview State
     const [previewData, setPreviewData] = useState<FilePreviewResult | null>(null);
@@ -50,7 +67,7 @@ export default function ViewPage({ params }: ViewPageProps) {
 
     // Security State
     const [warningCount, setWarningCount] = useState(0);
-    const MAX_WARNINGS = 3;
+    const MAX_WARNINGS = 1;
 
     // Inline Editor State
     const [isEditingFile, setIsEditingFile] = useState(false);
@@ -171,7 +188,7 @@ export default function ViewPage({ params }: ViewPageProps) {
             document.removeEventListener('paste', handlePaste);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [token, warningCount, revealTimeout, isEditingFile]);
+    }, [token, warningCount, isEditingFile]);
 
     // Initial data fetch
     const fetchUserData = useCallback(async (t: string) => {
@@ -180,6 +197,7 @@ export default function ViewPage({ params }: ViewPageProps) {
         if (result.success && result.data) {
             setUserData(result.data);
             setRemainingSeconds(result.data.remainingSeconds);
+            setMyAssignedLevel((result.data as any).myAssignedLevel || 2);
             startSSEStream(t);
         } else {
             setError(result.error || 'Failed to load data');
@@ -221,8 +239,18 @@ export default function ViewPage({ params }: ViewPageProps) {
                         break;
 
                     case 'heartbeat':
-                        if (data.remainingSeconds !== undefined) {
-                            setRemainingSeconds(data.remainingSeconds);
+                        if (data.remainingSeconds !== undefined) setRemainingSeconds(data.remainingSeconds);
+                        if (data.highestActiveLevel !== undefined) setHighestActiveLevel(data.highestActiveLevel);
+                        if (data.activeParticipants) setActiveParticipants(data.activeParticipants);
+                        if (data.chats) {
+                            setChats(prev => {
+                                const newCount = (data.chats?.length || 0) - lastChatCountRef.current;
+                                if (newCount > 0 && !isChatOpen) {
+                                    setUnreadCount(c => c + newCount);
+                                }
+                                lastChatCountRef.current = data.chats?.length || 0;
+                                return data.chats || [];
+                            });
                         }
                         break;
 
@@ -263,9 +291,35 @@ export default function ViewPage({ params }: ViewPageProps) {
                 eventSourceRef.current.close();
             }
         };
-        // Note: revealTimeout cleanup is handled separately in handleHide
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [token, fetchUserData]);
+
+    // Heartbeat Sender
+    useEffect(() => {
+        if (!token || !session?.user?.email) return;
+
+        const sendHeartbeat = () => {
+            fetch('/api/collaboration/heartbeat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    token,
+                    vendorEmail: session.user.email,
+                    level: myAssignedLevel,
+                    displayName: session.user.name || session.user.email?.split('@')[0],
+                })
+            }).catch(e => console.error('Heartbeat failed:', e));
+        };
+
+        sendHeartbeat();
+        const interval = setInterval(sendHeartbeat, 5000);
+        return () => clearInterval(interval);
+    }, [token, session, myAssignedLevel]);
+
+    // Scroll chat to bottom
+    useEffect(() => {
+        chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [chats]);
 
     // Local countdown
     useEffect(() => {
@@ -299,9 +353,6 @@ export default function ViewPage({ params }: ViewPageProps) {
     };
 
     const getInitials = (): string => {
-        if (fullData && isRevealed) {
-            return `${fullData.firstName[0]}${fullData.lastName[0]}`.toUpperCase();
-        }
         if (userData) {
             return `${userData.firstName[0]}${userData.lastName[0]}`.toUpperCase();
         }
@@ -309,40 +360,10 @@ export default function ViewPage({ params }: ViewPageProps) {
     };
 
     const getDisplayName = (): string => {
-        if (fullData && isRevealed) {
-            return `${fullData.firstName} ${fullData.lastName}`;
-        }
         if (userData) {
             return `${userData.firstName} ${userData.lastName}`;
         }
         return 'Loading...';
-    };
-
-    const formatGender = (gender: string): string => {
-        const map: Record<string, string> = {
-            'male': 'Male',
-            'female': 'Female',
-            'other': 'Other',
-            'prefer-not-to-say': 'Prefer not to say',
-        };
-        return map[gender] || gender;
-    };
-
-    const handleReveal = () => {
-        if (!fullData) return;
-        setIsRevealed(true);
-        const timeout = setTimeout(() => {
-            setIsRevealed(false);
-        }, 10000);
-        setRevealTimeoutState(timeout);
-    };
-
-    const handleHide = () => {
-        setIsRevealed(false);
-        if (revealTimeout) {
-            clearTimeout(revealTimeout);
-            setRevealTimeoutState(null);
-        }
     };
 
     const handlePreview = async (fileId: string) => {
@@ -389,6 +410,31 @@ export default function ViewPage({ params }: ViewPageProps) {
         }
     };
 
+    // ---- Preemption Logic ----
+    useEffect(() => {
+        const isCurrentlyRestricted = highestActiveLevel !== null && myAssignedLevel > highestActiveLevel;
+        
+        if (isCurrentlyRestricted && isEditingFile && preemptionCountdown === null) {
+            setPreemptionCountdown(30);
+        } else if (!isCurrentlyRestricted) {
+            // Higher level user left, cancel countdown
+            setPreemptionCountdown(null);
+        }
+    }, [highestActiveLevel, myAssignedLevel, isEditingFile]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    useEffect(() => {
+        if (preemptionCountdown === null || preemptionCountdown <= 0) return;
+
+        const timer = setInterval(() => {
+            setPreemptionCountdown(prev => {
+                if (prev === null || prev <= 1) return 0;
+                return prev - 1;
+            });
+        }, 1000);
+
+        return () => clearInterval(timer);
+    }, [preemptionCountdown]);
+
     // ---- Finish & Close handler ----
     const handleFinish = useCallback(() => {
         // Close SSE stream
@@ -401,11 +447,6 @@ export default function ViewPage({ params }: ViewPageProps) {
         // Security wipe — clear all displayed data
         setUserData(null);
         setFullData(null);
-        setIsRevealed(false);
-        if (revealTimeout) {
-            clearTimeout(revealTimeout);
-            setRevealTimeoutState(null);
-        }
 
         // Close editor if open
         setIsEditingFile(false);
@@ -413,7 +454,29 @@ export default function ViewPage({ params }: ViewPageProps) {
         setEditFileName('');
 
         setIsFinished(true);
-    }, [revealTimeout]);
+    }, []);
+
+    const handleSendMessage = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!chatMessage.trim() || !session?.user?.email) return;
+
+        const msg = chatMessage;
+        setChatMessage('');
+        await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                token,
+                senderEmail: session.user.email,
+                content: msg,
+                receiverEmail: null // Group chat by default
+            })
+        });
+    };
+
+    // Access is restricted ONLY if they are not editing, OR if they were editing and the countdown has reached 0.
+    const isRestricted = highestActiveLevel !== null && myAssignedLevel > highestActiveLevel;
+    const isEditingRestricted = isRestricted && (preemptionCountdown === null || preemptionCountdown === 0);
 
     // Finished State
     if (isFinished) {
@@ -524,6 +587,13 @@ export default function ViewPage({ params }: ViewPageProps) {
                         <span className="countdown-label">Expires in</span>
                         <span className="countdown-time">{formatTime(remainingSeconds)}</span>
                     </div>
+
+                    {isRestricted && (
+                        <div style={{ marginTop: '10px', background: '#FEF2F2', border: '1px solid #EF4444', padding: '12px', borderRadius: '8px', color: '#B91C1C', fontSize: '14px', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
+                            <span>A higher-level user (Level {highestActiveLevel}) is active. Your editing access is restricted to Read-Only.</span>
+                        </div>
+                    )}
                 </div>
 
                 {/* Identity Section */}
@@ -535,33 +605,59 @@ export default function ViewPage({ params }: ViewPageProps) {
                     <p className="identity-label">Shared securely for temporary access</p>
                 </div>
 
+                {/* Sender & Purpose Info Card */}
+                {(userData?.ownerName || userData?.purpose) && (
+                    <div style={{
+                        background: 'linear-gradient(135deg, rgba(99,102,241,0.08), rgba(139,92,246,0.08))',
+                        border: '1px solid rgba(99,102,241,0.2)',
+                        borderRadius: '12px',
+                        padding: '16px 20px',
+                        margin: '0 0 4px 0',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '10px',
+                    }}>
+                        {userData?.ownerName && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                <div style={{
+                                    width: '36px', height: '36px', borderRadius: '50%',
+                                    background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    color: '#fff', fontSize: '14px', fontWeight: '700', flexShrink: 0,
+                                }}>
+                                    {userData.ownerName[0]?.toUpperCase() || '?'}
+                                </div>
+                                <div style={{ flex: 1 }}>
+                                    <div style={{ fontSize: '11px', color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600 }}>Shared by</div>
+                                    <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary, #111)' }}>{userData.ownerName}</div>
+                                </div>
+                            </div>
+                        )}
+                        {userData?.purpose && (
+                            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+                                <div style={{
+                                    width: '36px', height: '36px', borderRadius: '50%',
+                                    background: 'rgba(99,102,241,0.12)',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    fontSize: '16px', flexShrink: 0,
+                                }}>
+                                    📋
+                                </div>
+                                <div style={{ flex: 1 }}>
+                                    <div style={{ fontSize: '11px', color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600 }}>Topic</div>
+                                    <div style={{ fontSize: '15px', fontWeight: 500, color: 'var(--text-primary, #111)' }}>{userData.purpose}</div>
+                                    {userData.purposeDetail && (
+                                        <div style={{ fontSize: '13px', color: '#6B7280', marginTop: '2px' }}>{userData.purposeDetail}</div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
+
                 {/* Data Display */}
                 <div className="data-section">
                     <div className="data-card">
-                        <div className="data-row">
-                            <div className="data-label">Email</div>
-                            <span className="data-value">
-                                {isRevealed && fullData ? fullData.email : userData?.maskedEmail}
-                            </span>
-                        </div>
-                        <div className="data-row">
-                            <div className="data-label">Phone</div>
-                            <span className="data-value">
-                                {isRevealed && fullData ? fullData.phone : userData?.maskedPhone}
-                            </span>
-                        </div>
-                        <div className="data-row">
-                            <div className="data-label">Gender</div>
-                            <span className="data-value">
-                                {formatGender(isRevealed && fullData ? fullData.gender : userData?.gender || '')}
-                            </span>
-                        </div>
-                        <div className="data-row">
-                            <div className="data-label">Age</div>
-                            <span className="data-value">
-                                {isRevealed && fullData ? `${fullData.age} years` : `${userData?.age} years`}
-                            </span>
-                        </div>
 
                         {/* Files Section */}
                         {userData?.files && userData.files.length > 0 && (
@@ -588,20 +684,23 @@ export default function ViewPage({ params }: ViewPageProps) {
                                             <div style={{ display: 'flex', gap: '8px' }}>
                                                 <button
                                                     onClick={() => handleEditClick(file.id, file.fileName)}
+                                                    disabled={isEditingRestricted}
+                                                    title={isEditingRestricted ? "Editing disabled by a higher authority's presence." : "Edit File"}
                                                     style={{
-                                                        background: 'rgba(34, 197, 94, 0.1)',
-                                                        border: '1px solid rgba(34, 197, 94, 0.3)',
-                                                        color: '#22c55e',
+                                                        background: isEditingRestricted ? 'rgba(156, 163, 175, 0.1)' : 'rgba(34, 197, 94, 0.1)',
+                                                        border: isEditingRestricted ? '1px solid rgba(156, 163, 175, 0.3)' : '1px solid rgba(34, 197, 94, 0.3)',
+                                                        color: isEditingRestricted ? '#9ca3af' : '#22c55e',
                                                         padding: '4px 8px',
                                                         fontSize: '12px',
                                                         borderRadius: '4px',
-                                                        cursor: 'pointer',
+                                                        cursor: isEditingRestricted ? 'not-allowed' : 'pointer',
                                                         display: 'flex',
                                                         alignItems: 'center',
-                                                        gap: '4px'
+                                                        gap: '4px',
+                                                        opacity: isEditingRestricted ? 0.6 : 1
                                                     }}
                                                 >
-                                                    {isEditingFile && editFileId === file.id ? '⏳' : '✍️'} Edit
+                                                    {isEditingFile && editFileId === file.id ? '⏳' : isEditingRestricted ? '🔒' : '✍️'} Edit
                                                 </button>
                                                 <button
                                                     onClick={() => handlePreview(file.id)}
@@ -626,15 +725,6 @@ export default function ViewPage({ params }: ViewPageProps) {
                             </div>
                         )}
                     </div>
-
-                    {fullData && (
-                        <button
-                            onClick={isRevealed ? handleHide : handleReveal}
-                            className={`reveal-button ${isRevealed ? 'active' : ''}`}
-                        >
-                            {isRevealed ? 'Hide Data' : 'Temporarily Reveal'}
-                        </button>
-                    )}
                 </div>
 
                 {/* Finish & Close Button */}
@@ -653,6 +743,151 @@ export default function ViewPage({ params }: ViewPageProps) {
                     <p className="trust-text">Protected by Data Guardian V2</p>
                 </div>
             </div>
+
+            {/* Floating Chat Button + Panel */}
+            <div style={{ position: 'fixed', bottom: '24px', right: '24px', zIndex: 900, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '12px' }}>
+                {/* Chat Panel (slides up when open) */}
+                {isChatOpen && (
+                    <div style={{
+                        width: '360px', maxWidth: 'calc(100vw - 48px)',
+                        height: '450px', maxHeight: 'calc(100vh - 120px)',
+                        background: '#FFFFFF',
+                        borderRadius: '16px',
+                        boxShadow: '0 8px 40px rgba(0,0,0,0.15), 0 2px 8px rgba(0,0,0,0.1)',
+                        display: 'flex', flexDirection: 'column',
+                        overflow: 'hidden',
+                        animation: 'slideUp 0.25s ease-out',
+                    }}>
+                        {/* Chat Header */}
+                        <div style={{
+                            padding: '14px 16px',
+                            background: 'linear-gradient(135deg, #111, #1f2937)',
+                            color: '#fff',
+                            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                        }}>
+                            <div>
+                                <div style={{ fontSize: '14px', fontWeight: 700 }}>Team Chat</div>
+                                <div style={{ fontSize: '11px', color: '#9CA3AF', marginTop: '2px' }}>
+                                    {activeParticipants?.length || 0} active • Messages deleted on expiry
+                                </div>
+                            </div>
+                            <button onClick={() => setIsChatOpen(false)} style={{
+                                background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff',
+                                width: '28px', height: '28px', borderRadius: '50%', cursor: 'pointer',
+                                fontSize: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            }}>✕</button>
+                        </div>
+
+                        {/* Active Participants */}
+                        {activeParticipants && activeParticipants.length > 0 && (
+                            <div style={{ padding: '8px 12px', borderBottom: '1px solid #E5E7EB', display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                                {activeParticipants.map((p, idx) => (
+                                    <span key={idx} style={{
+                                        fontSize: '11px', padding: '2px 8px', borderRadius: '10px',
+                                        background: p.email === session?.user?.email ? '#EEF2FF' : '#F3F4F6',
+                                        color: p.email === session?.user?.email ? '#4F46E5' : '#6B7280',
+                                        fontWeight: p.email === session?.user?.email ? 600 : 400,
+                                    }}>
+                                        {p.name}{p.email === session?.user?.email ? ' (You)' : ''} L{p.level}
+                                    </span>
+                                ))}
+                            </div>
+                        )}
+
+                        {/* Chat Messages */}
+                        <div style={{ flex: 1, padding: '12px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                            {chats?.length === 0 ? (
+                                <div style={{ color: '#9CA3AF', fontSize: '12px', textAlign: 'center', margin: 'auto' }}>
+                                    No messages yet.
+                                </div>
+                            ) : chats?.map((c) => {
+                                const isMe = c.senderEmail === session?.user?.email;
+                                return (
+                                    <div key={c.id} style={{ alignSelf: isMe ? 'flex-end' : 'flex-start', maxWidth: '85%' }}>
+                                        <div style={{ fontSize: '10px', color: '#9CA3AF', marginBottom: '2px', textAlign: isMe ? 'right' : 'left' }}>
+                                            {isMe ? 'You' : c.senderEmail.split('@')[0]}
+                                        </div>
+                                        <div style={{
+                                            background: isMe ? '#111111' : '#F3F4F6',
+                                            color: isMe ? '#FFFFFF' : '#111111',
+                                            padding: '8px 12px', borderRadius: '12px', fontSize: '13px',
+                                            borderBottomRightRadius: isMe ? '4px' : '12px',
+                                            borderBottomLeftRadius: isMe ? '12px' : '4px',
+                                        }}>
+                                            {c.content}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                            <div ref={chatEndRef} />
+                        </div>
+
+                        {/* Chat Input */}
+                        <form onSubmit={handleSendMessage} style={{
+                            display: 'flex', borderTop: '1px solid #E5E7EB', padding: '10px 12px',
+                            background: '#F9FAFB', gap: '8px',
+                        }}>
+                            <input
+                                type="text"
+                                value={chatMessage}
+                                onChange={(e) => setChatMessage(e.target.value)}
+                                placeholder="Type a message..."
+                                style={{
+                                    flex: 1, border: '1px solid #E5E7EB', borderRadius: '20px',
+                                    padding: '8px 14px', fontSize: '13px', outline: 'none',
+                                    background: '#fff',
+                                }}
+                            />
+                            <button type="submit" disabled={!chatMessage.trim()} style={{
+                                width: '36px', height: '36px', borderRadius: '50%', border: 'none',
+                                background: chatMessage.trim() ? '#111' : '#E5E7EB',
+                                color: chatMessage.trim() ? '#fff' : '#9CA3AF',
+                                cursor: chatMessage.trim() ? 'pointer' : 'not-allowed',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                fontSize: '16px', flexShrink: 0,
+                            }}>↑</button>
+                        </form>
+                    </div>
+                )}
+
+                {/* Floating Chat Button */}
+                <button
+                    onClick={() => { setIsChatOpen(!isChatOpen); setUnreadCount(0); lastChatCountRef.current = chats?.length || 0; }}
+                    style={{
+                        width: '56px', height: '56px', borderRadius: '50%',
+                        background: isChatOpen ? '#374151' : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                        border: 'none', cursor: 'pointer',
+                        boxShadow: '0 4px 20px rgba(99,102,241,0.4)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: '24px', color: '#fff',
+                        transition: 'all 0.2s ease',
+                        position: 'relative',
+                    }}
+                    title={isChatOpen ? 'Close chat' : 'Open team chat'}
+                >
+                    {isChatOpen ? '✕' : '💬'}
+                    {!isChatOpen && unreadCount > 0 && (
+                        <span style={{
+                            position: 'absolute', top: '-4px', right: '-4px',
+                            background: '#EF4444', color: '#fff',
+                            width: '22px', height: '22px', borderRadius: '50%',
+                            fontSize: '11px', fontWeight: 700,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            border: '2px solid #fff',
+                        }}>
+                            {unreadCount > 9 ? '9+' : unreadCount}
+                        </span>
+                    )}
+                </button>
+            </div>
+
+            {/* Animation keyframes */}
+            <style>{`
+                @keyframes slideUp {
+                    from { opacity: 0; transform: translateY(20px); }
+                    to { opacity: 1; transform: translateY(0); }
+                }
+            `}</style>
 
             {/* Preview Modal */}
             {showPreviewModal && previewData && (
@@ -739,6 +974,7 @@ export default function ViewPage({ params }: ViewPageProps) {
                     connectionStatus={connectionStatus}
                     onClose={closeEditor}
                     onSaved={handleEditorSaved}
+                    preemptionCountdown={preemptionCountdown}
                 />
             )}
         </main>

@@ -144,6 +144,9 @@ export async function getLinkStatus(ownerToken: string): Promise<{
                 isRevoked: true,
                 expiresAt: true,
                 createdAt: true,
+                LinkAccess: {
+                    select: { isUsed: true }
+                }
             },
         });
 
@@ -156,11 +159,12 @@ export async function getLinkStatus(ownerToken: string): Promise<{
 
         const now = new Date();
         const isExpired = secureLink.expiresAt < now;
+        const anyVendorUsed = secureLink.LinkAccess?.some(a => a.isUsed) || false;
 
         return {
             success: true,
             status: {
-                isUsed: secureLink.isUsed,
+                isUsed: secureLink.isUsed || anyVendorUsed,
                 isRevoked: secureLink.isRevoked,
                 isExpired,
                 expiresAt: secureLink.expiresAt,
