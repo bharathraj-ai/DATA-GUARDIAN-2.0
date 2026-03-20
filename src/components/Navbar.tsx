@@ -36,8 +36,7 @@ export default function Navbar() {
         <nav className={`navbar ${isScrolled ? 'navbar-scrolled' : ''}`}>
             <div className="container navbar-container">
                 <Link href="/" className="navbar-logo">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src="/logo.svg" alt="Secure Protocol" width={28} height={28} style={{ opacity: 0.9 }} suppressHydrationWarning />
+                    <Image src="/logo.svg" alt="Secure Protocol" width={28} height={28} style={{ opacity: 0.9 }} />
                     <span style={{ fontWeight: 600, letterSpacing: '-0.02em', fontSize: '18px' }}>Secure Protocol</span>
                 </Link>
 
@@ -53,10 +52,10 @@ export default function Navbar() {
                         </Link>
                     ))}
 
-                    {(!hasMounted || status === 'loading') ? (
+                    {!hasMounted ? null : status === 'loading' ? (
                         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', opacity: 0 }}>
-                            <div className="btn btn-sm">Loading...</div>
-                            <div className="btn btn-sm">Loading...</div>
+                            <div className="btn btn-sm">...</div>
+                            <div className="btn btn-sm">...</div>
                         </div>
                     ) : isAuthenticated ? (
                             <>
@@ -184,10 +183,10 @@ export default function Navbar() {
                     )}
 
                     <div className="navbar-mobile-cta">
-                        {(!hasMounted || status === 'loading') ? (
+                        {!hasMounted ? null : status === 'loading' ? (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', opacity: 0 }}>
-                                <div className="btn btn-full">Loading...</div>
-                                <div className="btn btn-full">Loading...</div>
+                                <div className="btn btn-full">...</div>
+                                <div className="btn btn-full">...</div>
                             </div>
                         ) : isAuthenticated ? (
                                 <>
