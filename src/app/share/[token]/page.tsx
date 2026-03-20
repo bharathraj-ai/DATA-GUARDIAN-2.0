@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { verifyOTP } from '@/actions/verify-otp';
 import { validateShareAccess } from '@/actions/validate-share-access';
-import { signIn } from 'next-auth/react';
+import { signIn, useSession } from 'next-auth/react';
 
 interface SharePageProps {
     params: Promise<{ token: string }>;
@@ -15,9 +15,8 @@ type AccessState = 'checking' | 'allowed' | 'denied' | 'requires_auth';
 
 export default function SharePage({ params }: SharePageProps) {
     const router = useRouter();
+    const { data: sessionData } = useSession();
     const [token, setToken] = useState<string>('');
-    const [step, setStep] = useState<'email' | 'otp'>('email');
-    const [email, setEmail] = useState<string>('');
     const [otp, setOtp] = useState<string[]>(['', '', '', '', '', '']);
     const [state, setState] = useState<VerificationState>('idle');
     const [error, setError] = useState<string>('');
@@ -142,37 +141,8 @@ export default function SharePage({ params }: SharePageProps) {
         setTimeout(() => setShake(false), 500);
     };
 
-    const handleEmailSubmit = async () => {
-        if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-            setError('Please enter a valid email address');
-            triggerShake();
-            return;
-        }
-
-        setState('loading');
-        setError('');
-
-        try {
-            const { sendVendorOTP } = await import('@/actions/send-vendor-otp');
-            const result = await sendVendorOTP({ token, email });
-
-            if (result.success) {
-                setState('idle');
-                setStep('otp');
-                setCountdown(300); // 5 minutes fresh timer
-            } else {
-                setState('error');
-                setError(result.error || 'Failed to request OTP');
-                triggerShake();
-                setTimeout(() => setState('idle'), 2000);
-            }
-        } catch {
-            setState('error');
-            setError('Connection error. Please try again.');
-            triggerShake();
-            setTimeout(() => setState('idle'), 2000);
-        }
-    };
+    // Email is sourced from the authenticated session (vendor signed in with Google)
+    const email = sessionData?.user?.email || '';
 
     const handleSubmit = useCallback(async () => {
         const otpString = otp.join('');
@@ -192,7 +162,7 @@ export default function SharePage({ params }: SharePageProps) {
         setError('');
 
         try {
-            const result = await verifyOTP({ token, otp: otpString, email });
+            const result = await verifyOTP({ token, otp: otpString, email: email || undefined });
 
             if (result.success) {
                 setState('success');
@@ -221,14 +191,14 @@ export default function SharePage({ params }: SharePageProps) {
             triggerShake();
             setTimeout(() => setState('idle'), 2000);
         }
-    }, [otp, token, countdown, router]);
+    }, [otp, token, countdown, router, email]);
 
     // Auto-submit when all 6 digits entered
     useEffect(() => {
-        if (step === 'otp' && otp.every((digit) => digit !== '') && state === 'idle' && accessState === 'allowed') {
+        if (otp.every((digit) => digit !== '') && state === 'idle' && accessState === 'allowed') {
             handleSubmit();
         }
-    }, [otp, state, handleSubmit, accessState, step]);
+    }, [otp, state, handleSubmit, accessState]);
 
     // Loading state
     if (isLoading || accessState === 'checking') {
@@ -411,54 +381,10 @@ export default function SharePage({ params }: SharePageProps) {
                     </div>
                 )}
 
-                {/* Step 1: Email Input */}
-                {step === 'email' && state !== 'success' && (
+                {/* OTP Input */}
+                {state !== 'success' && (
                     <div className={`otp-input-container ${shake ? 'shake' : ''}`}>
-                        <label className="otp-label">Email Address</label>
-                        <input
-                            type="email"
-                            value={email}
-                            onChange={(e) => {
-                                setEmail(e.target.value);
-                                setError('');
-                            }}
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter') handleEmailSubmit();
-                            }}
-                            className={`otp-box filled ${error ? 'error' : ''}`}
-                            style={{ width: '100%', marginBottom: '16px', fontSize: '16px', padding: '12px' }}
-                            placeholder="Enter your email to receive OTP"
-                            disabled={state === 'loading'}
-                            autoFocus
-                        />
-                        <button
-                            onClick={handleEmailSubmit}
-                            disabled={state === 'loading' || !email}
-                            className={`otp-button ${state}`}
-                            style={{ margin: 0 }}
-                        >
-                            {state === 'loading' ? (
-                                <>
-                                    <span className="button-spinner" />
-                                    Sending...
-                                </>
-                            ) : (
-                                <>
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                        <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
-                                        <polyline points="22,6 12,13 2,6" />
-                                    </svg>
-                                    Send Verification Code
-                                </>
-                            )}
-                        </button>
-                    </div>
-                )}
-
-                {/* Step 2: OTP Input */}
-                {step === 'otp' && state !== 'success' && (
-                    <div className={`otp-input-container ${shake ? 'shake' : ''}`}>
-                        <label className="otp-label">Enter OTP sent to {email}</label>
+                        <label className="otp-label">{email ? `Enter OTP sent to ${email}` : 'Enter the 6-digit OTP from your email'}</label>
                         <div className="otp-boxes">
                             {otp.map((digit, index) => (
                                 <input

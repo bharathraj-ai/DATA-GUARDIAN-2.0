@@ -476,7 +476,7 @@ function StatsCard({ icon, label, value, accent }) {
 /* ═══════════════════════════════════════════════════════════════
    MAIN APP
 ═══════════════════════════════════════════════════════════════ */
-export default function PDFtoDOCX({ onBack, initialFile, onSave }) {
+export default function PDFtoDOCX({ onBack, initialFile, onSave, forceAutoSave, onAutoSaveComplete }) {
   const [phase, setPhase] = useState(initialFile ? "processing" : "upload"); // upload | processing | editing | done
   const [progress, setProgress] = useState(initialFile ? 5 : 0);
   const [progressLabel, setProgressLabel] = useState(initialFile ? "Loading PDF engine…" : "");
@@ -631,6 +631,7 @@ export default function PDFtoDOCX({ onBack, initialFile, onSave }) {
     setProgress(60);
     setProgressLabel("Building PDF to Save and Replace…");
     try {
+      const { PDFDocument, StandardFonts, rgb } = await import("pdf-lib");
       const pdfDoc = await PDFDocument.create();
       const fontRegular = await pdfDoc.embedFont(StandardFonts.Helvetica);
       const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
@@ -739,12 +740,21 @@ export default function PDFtoDOCX({ onBack, initialFile, onSave }) {
       await onSave(resultFile);
       setProgress(100);
       setPhase("done");
+      if (forceAutoSave && onAutoSaveComplete) {
+         onAutoSaveComplete();
+      }
     } catch (e) {
       console.error("PDF Export Error Detailed:", e);
       alert(`PDF Export Error: ${e.message}\n\nThis is usually caused by unsupported characters in the text. I've tried to clean them up, but some remain.`);
       setPhase("editing");
     }
   };
+
+  useEffect(() => {
+    if (forceAutoSave && phase === "editing") {
+      doSaveReplace();
+    }
+  }, [forceAutoSave, phase]);
 
   /* ── block editors ── */
   const updateBlock = (i, patch) => {

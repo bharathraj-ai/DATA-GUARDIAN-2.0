@@ -36,6 +36,7 @@ interface SSEData {
     highestActiveLevel?: number;
     highestAuthorityLevel?: number;
     chats?: any[];
+    latestFileInputTimestamp?: number;
 }
 
 export default function ViewPage({ params }: ViewPageProps) {
@@ -73,12 +74,14 @@ export default function ViewPage({ params }: ViewPageProps) {
     // Security State
     const [warningCount, setWarningCount] = useState(0);
     const MAX_WARNINGS = 3;
+    const lastEditTimestampRef = useRef<number | null>(null);
 
     // Inline Editor State
     const [isEditLoading, setIsEditLoading] = useState<string | null>(null);
     const [editingFile, setEditingFile] = useState<File | null>(null);
     const [editingFileId, setEditingFileId] = useState<string | null>(null);
     const [isFinished, setIsFinished] = useState(false);
+    const [triggerFileReload, setTriggerFileReload] = useState<number>(0);
     const isEditingFile = editingFile !== null;
     const editFileId = editingFileId;
     const editFileName = editingFile?.name || '';
@@ -118,6 +121,10 @@ export default function ViewPage({ params }: ViewPageProps) {
             setError(displayMessage || 'security violation: Access revoked due to tab switch or focus loss');
             setConnectionStatus('disconnected');
 
+            // Close editor if open
+            setEditingFile(null);
+            setEditingFileId(null);
+
             // Call server to revoke access and notify owner
             await revokeOnScreenshot(token, displayMessage);
         };
@@ -126,7 +133,8 @@ export default function ViewPage({ params }: ViewPageProps) {
         let isHandlingTabSwitch = false;
 
         const handleTabSwitch = (reason: string) => {
-            if (editingFile || screenshotDetected || isHandlingTabSwitch) return;
+            // Only debounce duplicate events — NEVER skip for editing state
+            if (screenshotDetected || isHandlingTabSwitch) return;
             
             isHandlingTabSwitch = true;
             triggerSecurityViolation(reason, 'security violation: Access revoked due to tab switch');
@@ -135,38 +143,72 @@ export default function ViewPage({ params }: ViewPageProps) {
             setTimeout(() => { isHandlingTabSwitch = false; }, 1500);
         };
 
-        // Detect when tab/window loses visibility (e.g., snipping tool overlay)
+        // Detect when tab/window loses visibility (e.g., snipping tool overlay, Alt+Tab)
         const handleVisibilityChange = () => {
             if (document.hidden) {
-                handleTabSwitch('Tab hidden - possible screenshot');
+                handleTabSwitch('Tab hidden - possible screenshot or tab switch');
             }
         };
 
-        // Detect when window loses focus (e.g., snipping tool opens)
+        // Detect when window loses focus (e.g., snipping tool opens, clicking outside browser)
         const handleBlur = () => {
             // Only fire blur if the document is NOT hidden already 
             // (If it's hidden, visibilitychange handles it. Blur handles cases like floating windows over the active tab)
             if (!document.hidden) {
-                handleTabSwitch('Window lost focus - possible screenshot');
+                handleTabSwitch('Window lost focus - possible screenshot or tab switch');
             }
         };
 
-        // Detect PrintScreen key (keydown — may not fire on all browsers)
+        // Block dangerous keyboard shortcuts
         const handleKeyDown = (e: KeyboardEvent) => {
+            // PrintScreen key
             if (e.key === 'PrintScreen') {
                 e.preventDefault();
                 screenshotDetected = true;
-                triggerSecurityViolation('PrintScreen key detected', 'security violation: Access reveoke due to screen attempts');
-                // Reset debounce after a short delay
+                triggerSecurityViolation('PrintScreen key detected', 'security violation: Access revoked due to screenshot attempt');
                 setTimeout(() => { screenshotDetected = false; }, 1000);
             }
+            // Ctrl+P (Print)
             if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) {
                 e.preventDefault();
-                triggerSecurityViolation('Print shortcut (Ctrl+P) detected', 'security violation: Access reveoke due to try to print');
+                triggerSecurityViolation('Print shortcut (Ctrl+P) detected', 'security violation: Access revoked due to print attempt');
             }
+            // Ctrl+S (Save)
+            if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+                e.preventDefault();
+                triggerSecurityViolation('Save shortcut (Ctrl+S) detected', 'security violation: Access revoked due to save attempt');
+            }
+            // Ctrl+C (Copy)
             if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'C')) {
                 e.preventDefault();
-                triggerSecurityViolation('Copy shortcut (Ctrl+C) detected', 'security violation: Access reveoke due to copying the content');
+                triggerSecurityViolation('Copy shortcut (Ctrl+C) detected', 'security violation: Access revoked due to copying content');
+            }
+            // Ctrl+Shift+I (DevTools)
+            if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'i' || e.key === 'I')) {
+                e.preventDefault();
+                triggerSecurityViolation('DevTools shortcut detected', 'security violation: Access revoked due to developer tools attempt');
+            }
+            // Ctrl+Shift+J (Console)
+            if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'j' || e.key === 'J')) {
+                e.preventDefault();
+                triggerSecurityViolation('Console shortcut detected', 'security violation: Access revoked due to developer tools attempt');
+            }
+            // Ctrl+U (View Source)
+            if ((e.ctrlKey || e.metaKey) && (e.key === 'u' || e.key === 'U')) {
+                e.preventDefault();
+                triggerSecurityViolation('View source shortcut detected', 'security violation: Access revoked due to view source attempt');
+            }
+            // F12 (DevTools)
+            if (e.key === 'F12') {
+                e.preventDefault();
+                triggerSecurityViolation('F12 DevTools shortcut detected', 'security violation: Access revoked due to developer tools attempt');
+            }
+            // Win+Shift (any combo — blocks Snipping Tool, screen recording, etc.)
+            if (e.metaKey && e.shiftKey) {
+                e.preventDefault();
+                screenshotDetected = true;
+                triggerSecurityViolation('Win+Shift shortcut detected', 'security violation: Access revoked due to screenshot attempt');
+                setTimeout(() => { screenshotDetected = false; }, 1000);
             }
         };
 
@@ -175,27 +217,22 @@ export default function ViewPage({ params }: ViewPageProps) {
             if (e.key === 'PrintScreen') {
                 e.preventDefault();
                 screenshotDetected = true;
-                triggerSecurityViolation('PrintScreen key detected', 'security violation: Access reveoke due to screen attempts');
+                triggerSecurityViolation('PrintScreen key detected', 'security violation: Access revoked due to screenshot attempt');
                 setTimeout(() => { screenshotDetected = false; }, 1000);
             }
         };
 
-        // Detect screenshot images landing on the clipboard (Ctrl+V or paste after PrtSc)
-        const handlePaste = (e: ClipboardEvent) => {
-            if (e.clipboardData) {
-                const items = Array.from(e.clipboardData.items);
-                const hasImage = items.some(item => item.type.startsWith('image/'));
-                if (hasImage) {
-                    e.preventDefault();
-                    triggerSecurityViolation('Screenshot image detected in clipboard', 'security violation: Access reveoke due to screen attempts');
-                }
-            }
-        };
 
-        // Detect copy actions
+        // Detect any copy action (selection + copy)
         const handleCopy = (e: ClipboardEvent) => {
             e.preventDefault();
-            triggerSecurityViolation('Copy action detected', 'security violation: Access reveoke due to copying the content');
+            triggerSecurityViolation('Copy action detected', 'security violation: Access revoked due to copying content');
+        };
+
+        // Block drag events (prevent dragging text/images out)
+        const handleDragStart = (e: DragEvent) => {
+            e.preventDefault();
+            triggerSecurityViolation('Drag detected', 'security violation: Access revoked due to data extraction attempt');
         };
 
         // Prevent right click
@@ -205,23 +242,25 @@ export default function ViewPage({ params }: ViewPageProps) {
 
         document.addEventListener('visibilitychange', handleVisibilityChange);
         window.addEventListener('blur', handleBlur);
-        window.addEventListener('keydown', handleKeyDown);
+        window.addEventListener('keydown', handleKeyDown, true); // Use capture phase to intercept before browser
         window.addEventListener('keyup', handleKeyUp);
-        document.addEventListener('paste', handlePaste);
+
         document.addEventListener('copy', handleCopy);
+        document.addEventListener('dragstart', handleDragStart);
         document.addEventListener('contextmenu', handleContextMenu);
 
         return () => {
             document.removeEventListener('visibilitychange', handleVisibilityChange);
             window.removeEventListener('blur', handleBlur);
-            window.removeEventListener('keydown', handleKeyDown);
+            window.removeEventListener('keydown', handleKeyDown, true);
             window.removeEventListener('keyup', handleKeyUp);
-            document.removeEventListener('paste', handlePaste);
+
             document.removeEventListener('copy', handleCopy);
+            document.removeEventListener('dragstart', handleDragStart);
             document.removeEventListener('contextmenu', handleContextMenu);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [token, warningCount, revealTimeout, isEditingFile]);
+    }, [token]);
 
     // Initial data fetch
     const fetchUserData = useCallback(async (t: string) => {
@@ -287,6 +326,13 @@ export default function ViewPage({ params }: ViewPageProps) {
                         }
                         if (data.highestAuthorityLevel !== undefined) {
                             setHighestAuthorityLevel(data.highestAuthorityLevel);
+                        }
+                        if (data.latestFileInputTimestamp) {
+                            if (lastEditTimestampRef.current !== null && lastEditTimestampRef.current !== data.latestFileInputTimestamp) {
+                                // Another user updated the file! Trigger a reload.
+                                setTriggerFileReload(data.latestFileInputTimestamp);
+                            }
+                            lastEditTimestampRef.current = data.latestFileInputTimestamp;
                         }
                         break;
 
@@ -444,6 +490,17 @@ export default function ViewPage({ params }: ViewPageProps) {
             setIsEditLoading(null);
         }
     };
+
+    // Auto-reload active file if another user saved it (detecting priority save from lower user)
+    useEffect(() => {
+        if (triggerFileReload > 0) {
+            // Only alert and reload if the user is currently looking at *a* file, or looking at the list.
+            if (editingFileId) {
+                alert('A high-priority event occurred: The file was just saved by another user. Reloading the latest changes...');
+                handleEdit(editingFileId);
+            }
+        }
+    }, [triggerFileReload]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const handleSaveFile = async (editedFile: File) => {
         if (!editingFile || !editingFileId) return;
@@ -988,17 +1045,85 @@ export default function ViewPage({ params }: ViewPageProps) {
                 </div>
             )}
 
-            {/* Universal File Editor */}
+            {/* Universal File Editor — Full-screen Modal Popup */}
             {isEditingFile && editFileId && (
-                <UniversalEditor
-                    token={token}
-                    fileId={editFileId}
-                    initialFileProp={editingFile}
-                    currentUserLevel={highestActiveLevel || 2}
-                    highestAuthorityLevel={highestAuthorityLevel || 2}
-                    onClose={closeEditor}
-                    onSave={handleSaveFile}
-                />
+                <div style={{
+                    position: 'fixed',
+                    inset: 0,
+                    zIndex: 2000,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    background: 'rgba(0, 0, 0, 0.75)',
+                    backdropFilter: 'blur(4px)',
+                    animation: 'fadeIn 0.2s ease-out',
+                }}>
+                    <div style={{
+                        position: 'relative',
+                        width: '95vw',
+                        maxWidth: '1200px',
+                        height: '90vh',
+                        background: '#fff',
+                        borderRadius: '16px',
+                        boxShadow: '0 24px 80px rgba(0,0,0,0.4)',
+                        overflow: 'hidden',
+                        display: 'flex',
+                        flexDirection: 'column',
+                    }}>
+                        {/* Modal Header */}
+                        <div style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            padding: '14px 20px',
+                            background: '#111',
+                            color: '#fff',
+                            flexShrink: 0,
+                        }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                <span style={{ fontSize: '16px' }}>✍️</span>
+                                <span style={{ fontSize: '14px', fontWeight: 600 }}>Editing: {editFileName}</span>
+                            </div>
+                            <button
+                                onClick={closeEditor}
+                                style={{
+                                    background: 'rgba(255,255,255,0.15)',
+                                    border: 'none',
+                                    color: '#fff',
+                                    width: '32px',
+                                    height: '32px',
+                                    borderRadius: '50%',
+                                    cursor: 'pointer',
+                                    fontSize: '16px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    transition: 'background 0.2s',
+                                }}
+                                onMouseOver={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.3)')}
+                                onMouseOut={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.15)')}
+                                title="Close Editor"
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        {/* Editor Content */}
+                        <div style={{ flex: 1, overflow: 'auto' }}>
+                            <UniversalEditor
+                                token={token}
+                                fileId={editFileId}
+                                initialFileProp={editingFile}
+                                currentUserLevel={myAssignedLevel || 2}
+                                highestAuthorityLevel={highestActiveLevel !== null ? highestActiveLevel : 2}
+                                onClose={closeEditor}
+                                onSave={handleSaveFile}
+                                forceAutoSave={preemptionCountdown === 1}
+                                onAutoSaveComplete={closeEditor}
+                            />
+                        </div>
+                    </div>
+                </div>
             )}
         </main>
     );

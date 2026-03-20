@@ -2194,6 +2194,28 @@ body {
   background: transparent;
   position: relative;
   overflow: hidden;
+  /* Security: Prevent text selection, copying, and mobile callouts */
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* Security: Hide all content when printing */
+@media print {
+  .profile-wrapper {
+    display: none !important;
+  }
+  body::after {
+    content: 'Printing is not allowed for security reasons.';
+    display: block;
+    font-size: 24px;
+    text-align: center;
+    padding: 100px 20px;
+    color: #ef4444;
+    font-weight: 700;
+  }
 }
 
 .bg-orb {
@@ -4136,4 +4158,18 @@ body {
   .footer {
     padding-bottom: calc(40px + env(safe-area-inset-bottom, 0px));
   }
+}
+
+/* ============================================
+   ANIMATIONS
+   ============================================ */
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
 }

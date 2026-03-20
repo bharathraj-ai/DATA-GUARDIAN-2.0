@@ -330,7 +330,14 @@ export async function GET(
                         take: 100
                     });
 
-                    // Send heartbeat with countdown, presence, and chat
+                    // Fetch latest file edit timestamp
+                    const latestEditLog = await prisma.auditLog.findFirst({
+                        where: { linkId: link.id, action: 'VENDOR_EDITED_FILE' },
+                        orderBy: { timestamp: 'desc' },
+                        select: { timestamp: true }
+                    });
+
+                    // Send heartbeat with countdown, presence, chat, and latest edit info
                     const heartbeat = {
                         type: 'heartbeat',
                         remainingSeconds: Math.min(ttl, dbRemainingSeconds),
@@ -338,6 +345,7 @@ export async function GET(
                         highestActiveLevel: highestActiveLevel === 99 ? undefined : highestActiveLevel,
                         highestAuthorityLevel,
                         chats: recentChats,
+                        latestFileInputTimestamp: latestEditLog?.timestamp?.getTime(),
                         timestamp: Date.now(),
                     };
                     safeEnqueue(encoder.encode(`data: ${JSON.stringify(heartbeat)}\n\n`));

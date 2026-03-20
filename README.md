@@ -4,25 +4,55 @@
 
 ## ✨ Key Features
 
-- **🔐 AES-256-GCM Encryption** — Military-grade encrypted file storage for all shared data.
-- **🔑 Zero Trust OTP Protection** — 6-digit one-time passwords, completely isolated per-vendor.
-- **👥 Dynamic Group Sharing** — Share secure links with multiple vendors, enforcing individual OTP authentication.
-- **🥇 Arranged Vendor Priority** — Explicit hierarchical control (Level 1, Level 2, etc.) for collaborative editing. Higher levels transparently preempt lower levels.
-- **⚡ Real-Time Collaboration** — Live document editor with built-in secure chat, utilizing Server-Sent Events (SSE).
-- **🟢 Live Activity Monitor** — Owners can track real-time connection status and chat feeds of all participants directly from the dashboard.
-- **🚫 Instant Revocation & Self-Destruct** — Links can be explicitly revoked or set to auto-expire.
-- **📸 Anti-Screenshot & Device Binding** — Automatic revocation on screenshot attempts and session locking to original hardware fingerprints.
+- **🔐 AES-256-GCM Encryption** — Military-grade encrypted file storage with per-file Data Encryption Keys (DEK).
+- **🔑 Zero Trust OTP Protection** — 6-digit one-time passwords, per-vendor isolation. Single attempt policy — wrong OTP = permanent revocation.
+- **👥 Dynamic Group Sharing** — Share secure links with multiple vendors, each with their own OTP and hierarchical access level.
+- **🥇 Hierarchical Vendor Priority** — Explicit level-based control (Level 1 Owner, Level 2 Admin, etc.). Higher levels preempt lower-level editing.
+- **⚡ Real-Time Collaboration** — Live document editing with built-in encrypted chat via Server-Sent Events (SSE).
+- **🟢 Live Activity Monitor** — Owners track real-time connection status, active participants, and chat feeds from the dashboard.
+- **🚫 Instant Revocation & Self-Destruct** — Links can be explicitly revoked or auto-expire. All data permanently deleted on expiry.
+- **📸 Anti-Screenshot & Device Binding** — Automatic access revocation on screenshot attempts (PrintScreen, Win+Shift, Snipping Tool), tab switching, and DevTools. Sessions locked to original device fingerprint.
+- **🔒 Anti-Phishing Protection** — 3-minute OTP verification window, single-use OTP enforcement, forwarded link detection with owner alerts.
+
+## 🔒 Security Architecture
+
+### Keyboard & Interaction Blocking (View Page)
+
+| Threat Vector | Protection |
+|---|---|
+| Tab Switch / Alt+Tab | `visibilitychange` + `blur` → instant revocation |
+| PrintScreen | `keydown` + `keyup` → instant revocation |
+| Win+Shift (Snipping Tool) | `keydown` capture → instant revocation |
+| Ctrl+P (Print) | Blocked + instant revocation |
+| Ctrl+S (Save) | Blocked + instant revocation |
+| Ctrl+C (Copy) | Blocked + instant revocation |
+| Ctrl+U (View Source) | Blocked + instant revocation |
+| Ctrl+Shift+I/J (DevTools) | Blocked + instant revocation |
+| F12 (DevTools) | Blocked + instant revocation |
+| Right-click | Context menu disabled |
+| Text Selection | CSS `user-select: none` |
+| Drag & Drop | `dragstart` → instant revocation |
+| Print (CSS) | `@media print` hides all content |
+
+### Zero Trust Principles
+
+- **Single-Attempt OTP** — Wrong OTP = permanent link revocation. No retries.
+- **Device Binding** — Sessions bound to browser/device fingerprint on first use.
+- **Email Binding** — OTPs locked to specific vendor emails. Forwarded links are blocked.
+- **Kill Switch** — Redis session invalidation + DB revocation on any security violation.
+- **Event Revocation** — SSE streams severed instantly on compromise, expiry, or owner action.
 
 ## 🚀 Tech Stack
 
 | Technology | Purpose |
 |---|---|
-| **Next.js 16 (App Router)** | Full-stack React framework |
+| **Next.js (App Router)** | Full-stack React framework |
 | **TypeScript** | Type-safe development |
 | **Prisma (PostgreSQL)** | Type-safe database ORM |
 | **NextAuth.js** | Google OAuth Authentication |
-| **Upstash Redis** | High-performance Rate limiting & Session Management |
-| **Server-Sent Events (SSE)** | Low-latency Real-time Data Streaming |
+| **Upstash Redis** | Rate limiting & Session Management |
+| **Nodemailer (Gmail SMTP)** | OTP & notification email delivery |
+| **Server-Sent Events (SSE)** | Real-time data streaming & collaboration |
 
 ## 📦 Getting Started
 
@@ -31,7 +61,7 @@
 - **Node.js** ≥ 18.17.0
 - **PostgreSQL** database (e.g., [Neon](https://neon.tech))
 - **Google OAuth** credentials
-- **Upstash Redis** instance
+- **Upstash Redis** instance (optional — gracefully degrades without it)
 
 ### Installation
 
@@ -67,30 +97,56 @@ npm run dev
 | `NEXTAUTH_URL` | ✅ | Application base URL |
 | `NEXTAUTH_SECRET` | ✅ | NextAuth.js secret key |
 | `ENCRYPTION_KEY` | ✅ | AES-256 encryption key (32 bytes, hex) |
-| `UPSTASH_REDIS_REST_URL` | ✅ | Redis REST API URL |
-| `UPSTASH_REDIS_REST_TOKEN` | ✅ | Redis REST API token |
+| `KEK_KEY` | ✅ | Key Encryption Key for per-file DEKs |
+| `EMAIL_USER` | ✅ | Gmail address for sending OTPs |
+| `EMAIL_PASS` | ✅ | Gmail App Password |
+| `UPSTASH_REDIS_REST_URL` | ⬜ | Redis REST API URL (optional) |
+| `UPSTASH_REDIS_REST_TOKEN` | ⬜ | Redis REST API token (optional) |
 
-## 🏗️ Architecture Summary
+## 🏗️ Project Structure
 
-```text
+```
 src/
-├── app/                    # Next.js App Router endpoints
-│   ├── api/                # API routes (health, SSE streams, collaboration)
-│   ├── auth/               # Authentication logic & OAuth handling
-│   ├── dashboard/          # Owner & Vendor dashboards
-│   ├── create-link/        # Secure group link creation with priority mapping
-│   ├── view/               # Secure view interface with Universal File Editor
-│   └── share/              # OTP validation entry point (per-vendor)
-├── components/             # Reusable UI React components (LiveActivityModal, ChatPanel, etc)
-├── lib/                    # Core utilities & configuration
-│   ├── auth.ts             # NextAuth strategies
-│   ├── crypto.ts           # AES-256 and HMAC wrappers
-│   └── rate-limit.ts       # Upstash Redis rate limiter
-├── actions/                # Next.js Server Actions (Database mutations)
-│   ├── verify-otp.ts       # Per-vendor zero-trust validation
-│   ├── get-user.ts         # Authentication state retrieval
-│   └── realtime.ts         # Collaboration presence state
-└── prisma/                 # Database schema models (PostgreSQL)
+├── app/                        # Next.js App Router
+│   ├── api/                    # API routes
+│   │   ├── stream/             # SSE real-time data streaming
+│   │   ├── collaboration/      # Heartbeat & presence endpoints
+│   │   ├── chat/               # Real-time chat API
+│   │   ├── session-monitor/    # Live session monitoring
+│   │   ├── documents/          # Document CRDT operations
+│   │   ├── files/              # File serving endpoints
+│   │   ├── cleanup/            # Auto-expiry cleanup
+│   │   └── health/             # Container health check
+│   ├── auth/                   # OAuth sign-in/sign-out
+│   ├── dashboard/              # Owner & Vendor dashboards
+│   ├── create-link/            # Secure link creation with file upload
+│   ├── view/[token]/           # Secure data viewer with protections
+│   ├── share/[token]/          # OTP verification entry point
+│   └── revoke/[ownerToken]/    # Link revocation page
+├── actions/                    # Next.js Server Actions
+│   ├── verify-otp.ts           # Per-vendor Zero Trust OTP validation
+│   ├── create-link-with-files.ts # Encrypted link + file creation
+│   ├── revoke-on-screenshot.ts # Security violation handler
+│   ├── get-user.ts             # Authenticated data retrieval
+│   ├── dashboard.ts            # Dashboard data queries
+│   └── ...                     # Other server mutations
+├── components/                 # React components
+│   ├── editors/                # UniversalEditor (PDF, DOCX, etc.)
+│   ├── LiveActivityModal.tsx   # Real-time session monitoring
+│   ├── Navbar.tsx              # Navigation bar
+│   └── ...                     # Other UI components
+├── lib/                        # Core utilities
+│   ├── crypto.ts               # AES-256-GCM, HMAC, DEK/KEK encryption
+│   ├── auth.ts                 # NextAuth configuration
+│   ├── email.ts                # Gmail SMTP OTP delivery
+│   ├── notifications.ts        # Security event notifications
+│   ├── rate-limit.ts           # Upstash Redis rate limiter
+│   ├── redis.ts                # Session management & kill switch
+│   ├── collaborationEngine.ts  # Real-time presence engine
+│   └── ...                     # Other utilities
+├── middleware.ts                # Request-level security middleware
+└── prisma/
+    └── schema.prisma           # Database models
 ```
 
 ## 🐳 Docker Deployment
@@ -103,14 +159,8 @@ docker build -t data-guardian .
 docker run -p 3000:3000 --env-file .env data-guardian
 ```
 
-*The Dockerfile includes an automated `HEALTHCHECK` that guarantees the container is responding effectively.*
-
-## 🔒 Security Principles
-
-- **Zero Trust**: No operation assumes safety; verification required per vendor/device.
-- **Single-Attempt OTP**: OTPs invalid upon failure or success.
-- **Hardware Binding**: Sessions bound to precise device fingerprints via modern browser APIs.
-- **Event Revocation**: Live SSE streams are aggressively severed upon compromise or expiry.
+The Dockerfile includes an automated `HEALTHCHECK` that monitors container responsiveness.
 
 ## 📄 License
+
 Private — All rights reserved.
