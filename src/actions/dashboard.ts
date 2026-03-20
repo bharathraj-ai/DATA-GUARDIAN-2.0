@@ -23,6 +23,7 @@ export interface DashboardLink {
     lockedAt: Date | null;
     otpVerifiedAt: Date | null;
     fileCount: number;
+    vendors: { vendorEmail: string; level: number }[];
     files: { id: string; fileName: string; fileSize: number; fileType: string }[];
     auditLogs: { action: string; timestamp: Date; reason: string | null }[];
 }
@@ -47,7 +48,6 @@ export async function getOwnedLinks(userId: string): Promise<DashboardLink[]> {
                 isUsed: true,
                 isRevoked: true,
                 createdAt: true,
-                allowedVendorEmail: true,
                 purpose: true,
                 purposeDetail: true,
                 notificationEmail: true,
@@ -55,6 +55,13 @@ export async function getOwnedLinks(userId: string): Promise<DashboardLink[]> {
                 lockedAt: true,
                 otpVerifiedAt: true,
                 otpPlain: true,
+                LinkAccess: {
+                    select: {
+                        vendorEmail: true,
+                        level: true,
+                        isUsed: true,
+                    }
+                },
                 VendorAccess: {
                     select: {
                         email: true,
@@ -86,15 +93,25 @@ export async function getOwnedLinks(userId: string): Promise<DashboardLink[]> {
             },
         });
 
-        const mappedLinks = links.map((link) => ({
-            ...link,
-            vendorAccess: link.VendorAccess,
-            files: link.UserFile,
-            auditLogs: link.AuditLog,
-            status: getStatus(link),
-            fileCount: link.UserFile.length,
-            otp: link.otpPlain,
-        }));
+        const mappedLinks = links.map((link) => {
+            const primaryVendor = link.LinkAccess?.[0]?.vendorEmail || (link as any).allowedVendorEmail || null;
+            
+            // For the owner, the link is "Used" if any vendor has viewed it, or if it was globally used.
+            const anyVendorUsed = link.LinkAccess?.some(a => a.isUsed) || false;
+            const effectiveIsUsed = link.isUsed || anyVendorUsed;
+
+            return {
+                ...link,
+                allowedVendorEmail: primaryVendor,
+                vendorAccess: link.VendorAccess || [],
+                vendors: link.LinkAccess || [],
+                files: link.UserFile,
+                auditLogs: link.AuditLog,
+                status: getStatus({ ...link, isUsed: effectiveIsUsed }),
+                fileCount: link.UserFile.length,
+                otp: link.otpPlain,
+            };
+        });
 
         // AUTO-CLEANUP: If any expired/revoked links exist, trigger background purge
         const hasExpiredData = mappedLinks.some(l => l.status === 'expired' || l.status === 'revoked');
@@ -118,7 +135,8 @@ export async function getReceivedLinks(email: string): Promise<DashboardLink[]> 
             where: {
                 OR: [
                     { allowedVendorEmail: email.toLowerCase() },
-                    { VendorAccess: { some: { email: email.toLowerCase() } } }
+                    { VendorAccess: { some: { email: email.toLowerCase() } } },
+                    { LinkAccess: { some: { vendorEmail: email.toLowerCase() } } }
                 ],
             },
             orderBy: {
@@ -132,7 +150,6 @@ export async function getReceivedLinks(email: string): Promise<DashboardLink[]> 
                 isUsed: true,
                 isRevoked: true,
                 createdAt: true,
-                allowedVendorEmail: true,
                 purpose: true,
                 purposeDetail: true,
                 notificationEmail: true,
@@ -140,6 +157,13 @@ export async function getReceivedLinks(email: string): Promise<DashboardLink[]> 
                 lockedAt: true,
                 otpVerifiedAt: true,
                 otpPlain: true,
+                LinkAccess: {
+                    select: {
+                        vendorEmail: true,
+                        level: true,
+                        isUsed: true,
+                    }
+                },
                 VendorAccess: {
                     select: {
                         email: true,
@@ -171,15 +195,25 @@ export async function getReceivedLinks(email: string): Promise<DashboardLink[]> 
             },
         });
 
-        const mappedLinks = links.map((link) => ({
-            ...link,
-            vendorAccess: link.VendorAccess,
-            files: link.UserFile,
-            auditLogs: link.AuditLog,
-            status: getStatus(link),
-            fileCount: link.UserFile.length,
-            otp: link.otpPlain,
-        }));
+        const mappedLinks = links.map((link) => {
+            const primaryVendor = link.LinkAccess?.[0]?.vendorEmail || (link as any).allowedVendorEmail || null;
+            
+            // For the vendor, the link is "Used" ONLY if THEIR specific LinkAccess record is marked as used.
+            // (Since the query filters by their email, LinkAccess[0] is guaranteed to be theirs if it exists).
+            const vendorIsUsed = link.LinkAccess?.[0]?.isUsed ?? link.isUsed;
+
+            return {
+                ...link,
+                allowedVendorEmail: primaryVendor,
+                vendors: link.LinkAccess || [],
+                vendorAccess: link.VendorAccess || [],
+                files: link.UserFile,
+                auditLogs: link.AuditLog,
+                status: getStatus({ ...link, isUsed: vendorIsUsed }),
+                fileCount: link.UserFile.length,
+                otp: link.otpPlain,
+            };
+        });
 
         // AUTO-CLEANUP: If any expired/revoked links exist, trigger background purge
         const hasExpiredData = mappedLinks.some(l => l.status === 'expired' || l.status === 'revoked');

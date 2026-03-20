@@ -66,20 +66,23 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
         const vendorsStr = formData.get('vendors') as string | null;
         
         // Parse hierarchical vendors
-        let vendorsList: { email: string; level: number }[] = [];
+        let vendors: { email: string; level: number }[] = [];
         if (vendorsStr) {
             try {
-                vendorsList = JSON.parse(vendorsStr);
+                vendors = JSON.parse(vendorsStr);
             } catch (e) {
                 return { success: false, error: 'Invalid vendors JSON format' };
             }
         } else if (vendorEmail) {
             // Fallback: Make them a standard Level 2 user
-            vendorsList = [{ email: vendorEmail.toLowerCase(), level: 2 }];
+            vendors = [{ email: vendorEmail.toLowerCase(), level: 2 }];
+        }
+
+        if (vendors.length === 0) {
+            return { success: false, error: 'At least one vendor is required. Specify who you are sending data to.' };
         }
 
         const allowEditing = formData.get('allowEditing') === 'true';
-
         const validatedData = userDataSchema.safeParse(rawData);
         if (!validatedData.success) {
             return {
@@ -143,12 +146,26 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
         // 4. Generate Security Artifacts - PARALLELIZE crypto operations
         const token = generateSecureToken();
         const ownerToken = generateOwnerToken();
-        const otp = generateOTP();
+        const globalOtp = generateOTP(); // Fallback/Global OTP
         const expiresAt = calculateExpiry(validityMinutes);
 
-        // Run OTP hashing, user data encryption, and file encryption IN PARALLEL
-        const [otpHash, encryptedUserData, dataHash, encryptedFiles] = await Promise.all([
-            hashOTP(otp),
+        // Generate per-vendor OTPs
+        const vendorAcessData = await Promise.all(
+            vendors.map(async (v) => {
+                const vendorOtp = generateOTP();
+                const vendorOtpHash = await hashOTP(vendorOtp);
+                return {
+                    email: v.email,
+                    level: v.level,
+                    otp: vendorOtp,
+                    otpHash: vendorOtpHash
+                };
+            })
+        );
+
+        // Run global OTP hashing, user data encryption, and file encryption IN PARALLEL
+        const [globalOtpHash, encryptedUserData, dataHash, encryptedFiles] = await Promise.all([
+            hashOTP(globalOtp),
             Promise.resolve(encryptData(userData)),
             Promise.resolve(generateDataHash(userData)),
             Promise.all(
@@ -185,24 +202,31 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
                 data: {
                     token,
                     ownerToken,
-                    otpHash,
-                    otpPlain: otp,
+                    otpHash: globalOtpHash,
+                    otpPlain: globalOtp,
                     expiresAt,
                     userId: userDataRecord.id,
                     // OWNER BINDING: Associate link with authenticated user
                     ownerId: session.user.id,
-                    // V2.1 Additions
                     purpose: topic,
                     purposeDetail: purposeDetail || undefined,
                     notificationEmail: notificationEmail || undefined,
                     // Zero Trust: Email binding - only this email can verify OTP
                     allowedVendorEmail: vendorEmail || undefined,
                     allowEditing,
+                    LinkAccess: {
+                        create: vendorAcessData.map(v => ({ 
+                            vendorEmail: v.email, 
+                            level: v.level,
+                            otpHash: v.otpHash,
+                            otpPlain: v.otp
+                        })),
+                    },
                     UserFile: {
                         create: encryptedFiles,
                     },
                     VendorAccess: {
-                        create: vendorsList.map(v => ({
+                        create: vendors.map(v => ({
                             email: v.email.toLowerCase(),
                             level: v.level,
                             maxLogins: 3
@@ -217,7 +241,7 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
                 data: {
                     ownerId: session.user.id,
                     topic,
-                    vendorEmail: vendorEmail || null,
+                    vendorEmail: vendors.map(v => v.email).join(', '),
                     fileCount: files.length,
                     status: 'active',
                     expiredAt: expiresAt,
@@ -249,16 +273,22 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
 
         console.log(`[SECURE] Link created with ${files.length} files. ID: ${result.id}`);
 
-        // Note: For hierarchical vendor links, OTPs are generated on-demand when the vendor 
-        // accesses the share page, so we no longer send an upfront email here.
-        // If it's a legacy single-email request, we could send an intro email, but we'll 
-        // delegate all OTP logic to the on-demand auth flow for consistency.
+        // 📧 Send OTP email to all vendors per their unique OTPs (fire-and-forget)
+        if (vendorAcessData.length > 0) {
+            import('@/lib/email').then(({ sendOTPEmail }) => {
+                vendorAcessData.forEach(v => {
+                    sendOTPEmail(v.email, token, v.otp, validityMinutes)
+                        .then(() => console.log(`[EMAIL] OTP sent to ${v.email.substring(0, 3)}***`))
+                        .catch((err) => console.error('[EMAIL] Failed to send OTP:', err.message));
+                });
+            });
+        }
 
         return {
             success: true,
             shareUrl,
             ownerUrl,
-            otp,
+            otp: globalOtp,
             expiresAt,
             purpose: purpose || undefined,  // V2.1: Return for UI confirmation
         };

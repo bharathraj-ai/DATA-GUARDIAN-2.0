@@ -2,7 +2,7 @@ import Link from 'next/link';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-    title: 'How It Works',
+    title: 'How It Works | Secure Protocol',
     description: 'Learn how Secure Protocol secures your data in three simple steps: enter information, get encrypted link with OTP, and share securely with time-limited access.',
 };
 
@@ -276,7 +276,6 @@ export default function HowItWorksPage() {
 
                     <div className="use-cases-grid">
                         <div className="use-case-card">
-                            <div className="use-case-emoji">💼</div>
                             <h4 className="use-case-title">Business Documents</h4>
                             <p className="use-case-description">
                                 Share contracts, NDAs, financial reports, and confidential business information securely.
@@ -284,7 +283,6 @@ export default function HowItWorksPage() {
                         </div>
 
                         <div className="use-case-card">
-                            <div className="use-case-emoji">🏥</div>
                             <h4 className="use-case-title">Medical Records</h4>
                             <p className="use-case-description">
                                 HIPAA-compliant sharing of patient records, test results, and sensitive health information.
@@ -292,7 +290,6 @@ export default function HowItWorksPage() {
                         </div>
 
                         <div className="use-case-card">
-                            <div className="use-case-emoji">⚖️</div>
                             <h4 className="use-case-title">Legal Documents</h4>
                             <p className="use-case-description">
                                 Securely share case files, evidence, client information, and legal correspondence.
@@ -300,7 +297,6 @@ export default function HowItWorksPage() {
                         </div>
 
                         <div className="use-case-card">
-                            <div className="use-case-emoji">🎓</div>
                             <h4 className="use-case-title">Academic Research</h4>
                             <p className="use-case-description">
                                 Share research data, unpublished papers, and confidential academic materials safely.
@@ -308,7 +304,6 @@ export default function HowItWorksPage() {
                         </div>
 
                         <div className="use-case-card">
-                            <div className="use-case-emoji">🏦</div>
                             <h4 className="use-case-title">Financial Data</h4>
                             <p className="use-case-description">
                                 Transmit bank statements, tax documents, and sensitive financial information securely.
@@ -316,7 +311,6 @@ export default function HowItWorksPage() {
                         </div>
 
                         <div className="use-case-card">
-                            <div className="use-case-emoji">👤</div>
                             <h4 className="use-case-title">Personal Information</h4>
                             <p className="use-case-description">
                                 Share ID documents, passwords, private photos, and personal data with confidence.

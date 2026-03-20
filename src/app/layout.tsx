@@ -3,6 +3,7 @@ import { Inter } from 'next/font/google';
 import Link from 'next/link';
 import Image from 'next/image';
 import "./globals.css";
+import "./anthropic.css";
 import Navbar from "@/components/Navbar";
 import Providers from "@/components/Providers";
 
@@ -24,7 +25,7 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
   title: {
-    default: "Secure Protocol - Secure Data Protection",
+    default: "Secure Protocol - Enterprise Data Security",
     template: "%s | Secure Protocol",
   },
   description: "Protect your sensitive data with military-grade encryption, ephemeral sessions, and complete access control. Share securely with OTP protection and instant revocation.",
@@ -70,9 +71,9 @@ export default function RootLayout({
             <div className="container">
               <div className="footer-grid">
                 <div className="footer-brand">
-                   <Link href="/" className="footer-logo">
-                    <Image src="/logo.svg" alt="Secure Protocol" width={24} height={24} />
-                    <span className="gradient-text">Secure Protocol</span>
+                  <Link href="/" className="footer-logo">
+                    <Image src="/logo.svg" alt="Secure Protocol" width={24} height={24} style={{ opacity: 0.9 }}/>
+                    <span className="gradient-text" style={{ fontWeight: 600, letterSpacing: '-0.02em', fontSize: '18px' }}>Secure Protocol</span>
                   </Link>
                   <p className="footer-motto">
                     Protecting your sensitive data with military-grade encryption and self-destructing links.

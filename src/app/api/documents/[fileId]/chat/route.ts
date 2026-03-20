@@ -32,7 +32,7 @@ export async function POST(
     // (though authorizeApiRequest stringently checks it for vendor links)
     const sender = effectiveEmail || 'Anonymous Vendor';
 
-    const chatMessage = await prisma.chatMessage.create({
+    const chatMessage = await prisma.documentChatMessage.create({
       data: {
         fileId,
         sender,
@@ -75,7 +75,7 @@ export async function GET(
 
     // Fetch chat history.
     // If it's a private message, only return if it's sent BY this user OR sent TO this user
-    const messages = await prisma.chatMessage.findMany({
+    const messages = await prisma.documentChatMessage.findMany({
       where: {
         fileId,
         OR: [

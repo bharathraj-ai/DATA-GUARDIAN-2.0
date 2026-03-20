@@ -7,6 +7,11 @@ import { useSession } from 'next-auth/react';
 import { getOwnedLinks, DashboardLink, getSendHistory, SendHistoryRecord } from '@/actions/dashboard';
 import { revokeAccess } from '@/actions/revoke-access';
 import { downloadFile } from '@/actions/download-file';
+import dynamic from 'next/dynamic';
+
+const LiveActivityModal = dynamic(() => import('@/components/LiveActivityModal'), {
+    ssr: false,
+});
 
 export default function OwnerDashboardPage() {
     const router = useRouter();
@@ -22,6 +27,7 @@ export default function OwnerDashboardPage() {
     const [downloadingId, setDownloadingId] = useState<string | null>(null);
     const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
     const [activeTab, setActiveTab] = useState<'links' | 'history'>('links');
+    const [liveActivityLink, setLiveActivityLink] = useState<{token: string, topic: string} | null>(null);
 
     // Redirect to sign-in if not authenticated
     useEffect(() => {
@@ -703,9 +709,21 @@ export default function OwnerDashboardPage() {
                                                         {expandedId === link.id ? '▲ Less' : '▼ Details'}
                                                     </button>
 
-                                                    {/* Inline Revoke */}
+                                                    {/* Inline actions for Active Links */}
                                                     {link.status === 'active' && (
                                                         <>
+                                                            <button
+                                                                onClick={() => setLiveActivityLink({ token: link.token, topic: link.purpose || 'Shared Document' })}
+                                                                className="btn btn-sm"
+                                                                style={{
+                                                                    fontSize: '0.75rem', background: 'rgba(34, 197, 94, 0.1)',
+                                                                    color: '#22c55e', border: '1px solid rgba(34, 197, 94, 0.2)',
+                                                                    cursor: 'pointer', borderRadius: '8px', padding: '6px 12px',
+                                                                }}
+                                                            >
+                                                                🟢 Live Activity
+                                                            </button>
+
                                                             {confirmRevokeId === link.id ? (
                                                                 <div style={{
                                                                     display: 'flex', alignItems: 'center', gap: '6px',
@@ -946,6 +964,14 @@ export default function OwnerDashboardPage() {
                     </div>
                 </div>
             </section>
+
+            {liveActivityLink && (
+                <LiveActivityModal
+                    token={liveActivityLink.token}
+                    topic={liveActivityLink.topic}
+                    onClose={() => setLiveActivityLink(null)}
+                />
+            )}
         </main>
     );
 }

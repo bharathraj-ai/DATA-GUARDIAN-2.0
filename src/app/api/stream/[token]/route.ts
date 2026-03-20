@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { decryptData } from '@/lib/crypto';
 import { cleanupSingleLink } from '@/actions/cleanup';
+import { auth } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic'; // Prevent static generation during build
 
@@ -93,10 +94,27 @@ export async function GET(
     // Get secure link and encrypted data
     const secureLink = await prisma.secureLink.findUnique({
         where: { token },
-        include: { UserData: true, VendorAccess: true },
+        include: { 
+            UserData: true,
+            LinkAccess: {
+                select: {
+                    vendorEmail: true,
+                    isUsed: true
+                }
+            },
+            VendorAccess: true
+        },
     });
 
-    if (!secureLink || !secureLink.UserData || !secureLink.isUsed || secureLink.isRevoked) {
+    // Determine vendor access state
+    const authSession = await auth();
+    const userEmail = authSession?.user?.email;
+    const vendorAccess = secureLink?.LinkAccess?.find(
+        a => userEmail && a.vendorEmail.toLowerCase() === userEmail.toLowerCase()
+    );
+    const isUsed = vendorAccess ? vendorAccess.isUsed : secureLink?.isUsed;
+
+    if (!secureLink || !secureLink.UserData || !isUsed || secureLink.isRevoked) {
         return new Response('Not accessible', { status: 404 });
     }
 
@@ -252,7 +270,7 @@ export async function GET(
                     // Check DB for revocation (fallback when Redis not configured)
                     const link = await prisma.secureLink.findUnique({
                         where: { token },
-                        select: { isRevoked: true, expiresAt: true },
+                        select: { id: true, isRevoked: true, expiresAt: true },
                     });
 
                     if (!link || link.isRevoked) {
@@ -279,20 +297,47 @@ export async function GET(
                         return;
                     }
 
-                    // Get highest active authority level for real-time locks
+                    // Fetch active sessions for presence
+                    const threshold = new Date(Date.now() - 15000);
                     const activeSessions = await prisma.documentSession.findMany({
-                        where: { token: token },
-                        select: { level: true }
+                        where: {
+                            token,
+                            lastSeenAt: { gte: threshold }
+                        },
+                        select: {
+                            userId: true,
+                            displayName: true,
+                            level: true,
+                            color: true
+                        }
                     });
-                    const highestAuthorityLevel = activeSessions.length > 0 
-                         ? Math.min(...activeSessions.map(s => s.level))
-                         : userLevel;
 
-                    // Send heartbeat with countdown and hierarchy status
+                    let highestAuthorityLevel = userLevel;
+                    if (activeSessions.length > 0) {
+                        highestAuthorityLevel = Math.min(...activeSessions.map(s => s.level));
+                    }
+
+                    // Compute highest authority for UI
+                    let highestActiveLevel = 99;
+                    activeSessions.forEach(session => {
+                        if (session.level < highestActiveLevel) highestActiveLevel = session.level;
+                    });
+
+                    // Fetch recent chat messages
+                    const recentChats = await prisma.chatMessage.findMany({
+                        where: { secureLinkId: link.id },
+                        orderBy: { timestamp: 'asc' },
+                        take: 100
+                    });
+
+                    // Send heartbeat with countdown, presence, and chat
                     const heartbeat = {
                         type: 'heartbeat',
                         remainingSeconds: Math.min(ttl, dbRemainingSeconds),
+                        activeParticipants: activeSessions,
+                        highestActiveLevel: highestActiveLevel === 99 ? undefined : highestActiveLevel,
                         highestAuthorityLevel,
+                        chats: recentChats,
                         timestamp: Date.now(),
                     };
                     safeEnqueue(encoder.encode(`data: ${JSON.stringify(heartbeat)}\n\n`));

@@ -141,8 +141,20 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
                 purposeDetail: true,
                 notificationEmail: true,
                 // Zero Trust: Email binding
-                allowedVendorEmail: true,
-                // Anti-Phishing fields
+                LinkAccess: {
+                    select: {
+                        id: true,
+                        vendorEmail: true,
+                        otpHash: true,
+                        isUsed: true,
+                        deviceHash: true,
+                        failedAttempts: true,
+                        lockedAt: true,
+                        otpFirstAttemptAt: true,
+                        otpVerifiedAt: true,
+                    }
+                },
+                // Anti-Phishing fields (Legacy fallback)
                 otpFirstAttemptAt: true,
                 otpVerifiedAt: true,
                 VendorAccess: true,
@@ -158,8 +170,20 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
             };
         }
 
+        // Get effective access state (Per-vendor if available, otherwise global legacy)
+        const vendorAccess = secureLink.LinkAccess?.find(
+            a => userEmail && a.vendorEmail.toLowerCase() === userEmail.toLowerCase()
+        );
+
+        const isLocked = vendorAccess ? vendorAccess.lockedAt : secureLink.lockedAt;
+        const failedAttempts = vendorAccess ? vendorAccess.failedAttempts : secureLink.failedAttempts;
+        const isUsed = vendorAccess ? vendorAccess.isUsed : secureLink.isUsed;
+        const deviceHash = vendorAccess ? vendorAccess.deviceHash : secureLink.deviceHash;
+        const otpVerifiedAt = vendorAccess ? vendorAccess.otpVerifiedAt : secureLink.otpVerifiedAt;
+        const otpFirstAttemptAt = vendorAccess ? vendorAccess.otpFirstAttemptAt : secureLink.otpFirstAttemptAt;
+
         // 1. SECURITY: Check if link is permanently locked
-        if (secureLink.lockedAt) {
+        if (isLocked) {
             return {
                 success: false,
                 error: 'This link has been permanently locked due to excessive failed attempts.',
@@ -168,7 +192,7 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
         }
 
         // 2. ZERO TRUST: Check max attempts (SINGLE ATTEMPT POLICY)
-        if (secureLink.failedAttempts >= 1) {
+        if (failedAttempts >= 1) {
             return {
                 success: false,
                 error: 'This link has been permanently revoked due to an invalid OTP attempt.',
@@ -201,6 +225,58 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
                     errorType: 'DENIED',
                 };
             }
+        } else if (secureLink.LinkAccess && secureLink.LinkAccess.length > 0) {
+            if (!userEmail) {
+                await prisma.auditLog.create({
+                    data: {
+                        action: 'DENIED',
+                        linkId: secureLink.id,
+                        reason: 'Unauthenticated access attempt to email-bound link',
+                        metadata: JSON.stringify({ type: 'no_auth' }),
+                    }
+                });
+
+                return {
+                    success: false,
+                    error: 'Authentication required. Please sign in with Google.',
+                    errorType: 'DENIED',
+                };
+            }
+
+            const isAllowed = secureLink.LinkAccess.some(
+                access => access.vendorEmail.toLowerCase() === userEmail.toLowerCase()
+            );
+
+            if (!isAllowed) {
+                await prisma.auditLog.create({
+                    data: {
+                        action: 'DENIED',
+                        linkId: secureLink.id,
+                        reason: 'Email mismatch - forwarded link attempt blocked',
+                        metadata: JSON.stringify({
+                            type: 'email_mismatch',
+                            attemptedEmail: userEmail.substring(0, 3) + '***'
+                        }),
+                    }
+                });
+
+                // Alert the owner about forwarded link attempt
+                if (secureLink.notificationEmail) {
+                    import('@/lib/notifications').then(({ notifyForwardedLinkAttempt }) => {
+                        notifyForwardedLinkAttempt(
+                            secureLink.notificationEmail!,
+                            secureLink.id,
+                            secureLink.LinkAccess.map(a => a.vendorEmail).join(', ')
+                        ).catch(() => { }); // Silent fail
+                    });
+                }
+
+                return {
+                    success: false,
+                    error: `This link was created for a different recipient. Access denied.`,
+                    errorType: 'EMAIL_MISMATCH',
+                };
+            }
         }
 
         // 4. SECURITY: Check if link is revoked in DB
@@ -212,10 +288,8 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
             };
         }
 
-        // ANTI-PHISHING: Check if OTP was already verified 
-        // Note: For hierarchical vendor groups, OTPs are per-vendor and generated dynamically,
-        // so we skip this global `otpVerifiedAt` check if dealing with a vendor record.
-        if (!vendor && secureLink.otpVerifiedAt) {
+        // ANTI-PHISHING: Check if OTP was already verified (single-use enforcement)
+        if ((!vendor && !vendorAccess && secureLink.otpVerifiedAt) || (vendorAccess && vendorAccess.otpVerifiedAt)) {
             await prisma.auditLog.create({
                 data: {
                     action: 'DENIED',
@@ -223,7 +297,7 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
                     reason: 'OTP reuse attempt blocked',
                     metadata: JSON.stringify({
                         type: 'otp_reuse',
-                        originalVerifyTime: secureLink.otpVerifiedAt.toISOString()
+                        originalVerifyTime: (vendorAccess?.otpVerifiedAt || secureLink.otpVerifiedAt)?.toISOString()
                     })
                 }
             });
@@ -237,9 +311,9 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
 
         // ANTI-PHISHING: 5-minute OTP verification window
         const now = new Date();
-        if (secureLink.otpFirstAttemptAt) {
+        if (otpFirstAttemptAt) {
             const windowExpiry = new Date(
-                secureLink.otpFirstAttemptAt.getTime() + OTP_VERIFY_WINDOW_MINUTES * 60 * 1000
+                otpFirstAttemptAt.getTime() + OTP_VERIFY_WINDOW_MINUTES * 60 * 1000
             );
             if (now > windowExpiry) {
                 await prisma.auditLog.create({
@@ -264,7 +338,7 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
 
         // 5. SECURITY: Check device binding
         // If deviceHash is set (link was previously used), ensuring it's the same device
-        if (secureLink.isUsed && secureLink.deviceHash && secureLink.deviceHash !== currentDeviceHash) {
+        if (isUsed && deviceHash && deviceHash !== currentDeviceHash) {
             // Log security event
             await prisma.auditLog.create({
                 data: {
@@ -300,15 +374,22 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
         }
 
         // ANTI-PHISHING: Track first OTP attempt (start 5-min window)
-        if (!secureLink.otpFirstAttemptAt) {
-            await prisma.secureLink.update({
-                where: { id: secureLink.id },
-                data: { otpFirstAttemptAt: now }
-            });
+        if (!otpFirstAttemptAt) {
+            if (vendorAccess) {
+                await prisma.linkAccess.update({
+                    where: { id: vendorAccess.id },
+                    data: { otpFirstAttemptAt: now }
+                });
+            } else if (!vendor) {
+                await prisma.secureLink.update({
+                    where: { id: secureLink.id },
+                    data: { otpFirstAttemptAt: now }
+                });
+            }
         }
 
-        // Verify OTP 
-        const targetHash = vendor?.otpHash || secureLink.otpHash;
+        // Verify OTP (constant-time comparison via bcrypt)
+        const targetHash = vendor?.otpHash || vendorAccess?.otpHash || secureLink.otpHash;
         
         if (!targetHash) {
              return {
@@ -321,13 +402,48 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
         const isValidOTP = await verifyOTPHash(otp, targetHash);
 
         if (!isValidOTP) {
-            // Log failed attempt
-            await prisma.auditLog.create({
-                data: {
-                    action: 'DENIED',
-                    linkId: secureLink.id,
-                    reason: 'Invalid OTP entered',
-                },
+            // ZERO TRUST: SINGLE ATTEMPT - Wrong OTP = Permanent Revocation
+            // This is the strictest security policy for enterprise-grade protection
+            await prisma.$transaction(async (tx) => {
+                if (vendorAccess) {
+                    await tx.linkAccess.update({
+                        where: { id: vendorAccess.id },
+                        data: {
+                            failedAttempts: 1,
+                            lockedAt: new Date(),
+                        },
+                    });
+                } else if (vendor) {
+                    await tx.vendorAccess.update({
+                        where: { id: vendor.id },
+                        data: {
+                            failedAttempts: { increment: 1 },
+                        }
+                    });
+                    if (vendor.failedAttempts + 1 >= 3) {
+                         await tx.vendorAccess.update({
+                            where: { id: vendor.id },
+                            data: { isRevoked: true },
+                        });
+                    }
+                } else {
+                    await tx.secureLink.update({
+                        where: { id: secureLink.id },
+                        data: {
+                            failedAttempts: 1,
+                            lockedAt: new Date(),
+                            isRevoked: true, // Immediate revocation for individual links
+                        },
+                    });
+                }
+
+                await tx.auditLog.create({
+                    data: {
+                        action: 'LOCKED',
+                        linkId: secureLink.id,
+                        reason: 'Single-attempt OTP policy: Wrong OTP entered',
+                    },
+                });
             });
 
             return {
@@ -352,14 +468,21 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
                 isUsed: true,
                 otpVerifiedAt: now  // ANTI-PHISHING: Mark OTP as single-use
             };
-            if (!secureLink.deviceHash) {
+            if (!deviceHash) {
                 updateData.deviceHash = currentDeviceHash;
             }
 
-            await tx.secureLink.update({
-                where: { id: secureLink.id },
-                data: updateData,
-            });
+            if (vendorAccess) {
+                await tx.linkAccess.update({
+                    where: { id: vendorAccess.id },
+                    data: updateData,
+                });
+            } else {
+                await tx.secureLink.update({
+                    where: { id: secureLink.id },
+                    data: updateData,
+                });
+            }
 
             if (vendor) {
                 await tx.vendorAccess.update({
