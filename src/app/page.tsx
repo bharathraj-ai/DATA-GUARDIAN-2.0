@@ -12,7 +12,7 @@ export default function LandingPage() {
           __html: JSON.stringify({
             '@context': 'https://schema.org',
             '@type': 'WebApplication',
-            name: 'Data Guardian',
+            name: 'Secure Protocol',
             description: 'Secure data sharing platform with military-grade AES-256 encryption, OTP protection, and instant revocation.',
             applicationCategory: 'SecurityApplication',
             operatingSystem: 'Web',
@@ -37,23 +37,21 @@ export default function LandingPage() {
       <section className="hero-section">
         <div className="hero-background">
           <div className="hero-grid"></div>
-          <div className="hero-glow hero-glow-1"></div>
-          <div className="hero-glow hero-glow-2"></div>
         </div>
 
         <div className="container">
           <div className="hero-content">
             {/* Logo/Brand */}
             <div className="brand-badge">
-              <Image src="/logo.svg" alt="Data Guardian" width={24} height={24} />
-              <span>Data Guardian</span>
+              <Image src="/logo.svg" alt="Secure Protocol" width={24} height={24} style={{ opacity: 0.9 }}/>
+              <span style={{ fontWeight: 600 }}>Secure Protocol</span>
             </div>
 
             {/* Main Heading */}
             <h1 className="hero-title">
               Secure Data Sharing
               <br />
-              <span className="gradient-text">Made Simple</span>
+              <span>Made Simple</span>
             </h1>
 
             <p className="hero-subtitle">
@@ -133,7 +131,7 @@ export default function LandingPage() {
         <div className="container">
           <ScrollReveal>
             <div className="section-header">
-              <h2 className="section-title">Why Choose Data Guardian?</h2>
+              <h2 className="section-title">Why Choose Secure Protocol?</h2>
               <p className="section-subtitle">
                 Enterprise-grade security meets simplicity
               </p>

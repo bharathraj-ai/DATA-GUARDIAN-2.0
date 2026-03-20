@@ -59,9 +59,12 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
             return { success: false, error: 'Topic is required. Please describe what data you are sharing.' };
         }
 
-        // Zero Trust: Extract vendor email for email binding
-        const vendorEmail = formData.get('vendorEmail') as string | null;
-
+        // Zero Trust: Extract vendors array for email binding and level assignment
+        const vendorsJson = formData.get('vendors') as string | null;
+        const vendors: { email: string; level: number }[] = vendorsJson ? JSON.parse(vendorsJson) : [];
+        if (vendors.length === 0) {
+            return { success: false, error: 'At least one vendor is required. Specify who you are sending data to.' };
+        }
         const validatedData = userDataSchema.safeParse(rawData);
         if (!validatedData.success) {
             return {
@@ -125,12 +128,26 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
         // 4. Generate Security Artifacts - PARALLELIZE crypto operations
         const token = generateSecureToken();
         const ownerToken = generateOwnerToken();
-        const otp = generateOTP();
+        const globalOtp = generateOTP(); // Fallback/Global OTP
         const expiresAt = calculateExpiry(validityMinutes);
 
-        // Run OTP hashing, user data encryption, and file encryption IN PARALLEL
-        const [otpHash, encryptedUserData, dataHash, encryptedFiles] = await Promise.all([
-            hashOTP(otp),
+        // Generate per-vendor OTPs
+        const vendorAcessData = await Promise.all(
+            vendors.map(async (v) => {
+                const vendorOtp = generateOTP();
+                const vendorOtpHash = await hashOTP(vendorOtp);
+                return {
+                    email: v.email,
+                    level: v.level,
+                    otp: vendorOtp,
+                    otpHash: vendorOtpHash
+                };
+            })
+        );
+
+        // Run global OTP hashing, user data encryption, and file encryption IN PARALLEL
+        const [globalOtpHash, encryptedUserData, dataHash, encryptedFiles] = await Promise.all([
+            hashOTP(globalOtp),
             Promise.resolve(encryptData(userData)),
             Promise.resolve(generateDataHash(userData)),
             Promise.all(
@@ -164,18 +181,23 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
                 data: {
                     token,
                     ownerToken,
-                    otpHash,
-                    otpPlain: otp,
+                    otpHash: globalOtpHash,
+                    otpPlain: globalOtp,
                     expiresAt,
                     userId: userDataRecord.id,
                     // OWNER BINDING: Associate link with authenticated user
                     ownerId: session.user.id,
-                    // V2.1 Additions
                     purpose: topic,
                     purposeDetail: purposeDetail || undefined,
                     notificationEmail: notificationEmail || undefined,
-                    // Zero Trust: Email binding - only this email can verify OTP
-                    allowedVendorEmail: vendorEmail || undefined,
+                    LinkAccess: {
+                        create: vendorAcessData.map(v => ({ 
+                            vendorEmail: v.email, 
+                            level: v.level,
+                            otpHash: v.otpHash,
+                            otpPlain: v.otp
+                        })),
+                    },
                     UserFile: {
                         create: encryptedFiles,
                     },
@@ -188,7 +210,7 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
                 data: {
                     ownerId: session.user.id,
                     topic,
-                    vendorEmail: vendorEmail || null,
+                    vendorEmail: vendors.map(v => v.email).join(', '),
                     fileCount: files.length,
                     status: 'active',
                     expiredAt: expiresAt,
@@ -220,12 +242,14 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
 
         console.log(`[SECURE] Link created with ${files.length} files. ID: ${result.id}`);
 
-        // 📧 Send OTP email to vendor (fire-and-forget, non-blocking)
-        if (vendorEmail) {
+        // 📧 Send OTP email to all vendors per their unique OTPs (fire-and-forget)
+        if (vendorAcessData.length > 0) {
             import('@/lib/email').then(({ sendOTPEmail }) => {
-                sendOTPEmail(vendorEmail, token, otp, validityMinutes)
-                    .then(() => console.log(`[EMAIL] OTP sent to ${vendorEmail.substring(0, 3)}***`))
-                    .catch((err) => console.error('[EMAIL] Failed to send OTP:', err.message));
+                vendorAcessData.forEach(v => {
+                    sendOTPEmail(v.email, token, v.otp, validityMinutes)
+                        .then(() => console.log(`[EMAIL] OTP sent to ${v.email.substring(0, 3)}***`))
+                        .catch((err) => console.error('[EMAIL] Failed to send OTP:', err.message));
+                });
             });
         }
 
@@ -233,7 +257,7 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
             success: true,
             shareUrl,
             ownerUrl,
-            otp,
+            otp: globalOtp,
             expiresAt,
             purpose: purpose || undefined,  // V2.1: Return for UI confirmation
         };

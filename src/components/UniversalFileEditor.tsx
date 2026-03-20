@@ -6,8 +6,6 @@ import {
     useCallback,
     useRef,
     useMemo,
-    lazy,
-    Suspense,
 } from 'react';
 import dynamic from 'next/dynamic';
 import { getFileForEdit, FileEditData } from '@/actions/get-file-edit';
@@ -16,13 +14,26 @@ import { updateFile } from '@/actions/update-file';
 import { detectEditorType, getEditorLabel, EditorType } from '@/lib/file-type-utils';
 import './editors/editors.css';
 
-// Lazy load heavy editor components
-const MonacoTextEditor = lazy(() => import('./editors/MonacoTextEditor'));
-const SpreadsheetEditor = lazy(() => import('./editors/SpreadsheetEditor'));
-
-const RichTextEditor = lazy(() => import('./editors/RichTextEditor'));
-const ImageEditor = lazy(() => import('./editors/ImageEditor'));
-const PdfViewer = dynamic(() => import('./editors/PdfViewer'), { ssr: false, loading: () => <div className="editor-loading"><div className="loading-spinner" /><p>Loading PDF viewer...</p></div> });
+const MonacoTextEditor = dynamic(() => import('./editors/MonacoTextEditor'), { 
+    ssr: false, 
+    loading: () => <div className="editor-loading"><div className="loading-spinner" /><p>Loading Text Editor...</p></div> 
+});
+const SpreadsheetEditor = dynamic(() => import('./editors/SpreadsheetEditor'), { 
+    ssr: false, 
+    loading: () => <div className="editor-loading"><div className="loading-spinner" /><p>Loading Spreadsheet...</p></div> 
+});
+const RichTextEditor = dynamic(() => import('./editors/RichTextEditor'), { 
+    ssr: false, 
+    loading: () => <div className="editor-loading"><div className="loading-spinner" /><p>Loading Rich Text Editor...</p></div> 
+});
+const ImageEditor = dynamic(() => import('./editors/ImageEditor'), { 
+    ssr: false, 
+    loading: () => <div className="editor-loading"><div className="loading-spinner" /><p>Loading Image Editor...</p></div> 
+});
+const PdfViewer = dynamic(() => import('./editors/PdfViewer'), { 
+    ssr: false, 
+    loading: () => <div className="editor-loading"><div className="loading-spinner" /><p>Loading PDF viewer...</p></div> 
+});
 
 interface UniversalFileEditorProps {
     token: string;
@@ -32,6 +43,7 @@ interface UniversalFileEditorProps {
     connectionStatus: 'connecting' | 'connected' | 'disconnected';
     onClose: () => void;
     onSaved: (fileId: string, newData?: { fileName: string; fileSize: number; fileType: string }) => void;
+    preemptionCountdown?: number | null;
 }
 
 export default function UniversalFileEditor({
@@ -42,6 +54,7 @@ export default function UniversalFileEditor({
     connectionStatus,
     onClose,
     onSaved,
+    preemptionCountdown,
 }: UniversalFileEditorProps) {
     // ---- State ----
     const [isLoading, setIsLoading] = useState(true);
@@ -240,6 +253,13 @@ export default function UniversalFileEditor({
         }
     }, [editorType, token, fileId, textContent, spreadsheetRows, imageDataUrl, richTextHtml, onSaved, onClose]);
 
+    // ---- Auto-save on preemption ----
+    useEffect(() => {
+        if (preemptionCountdown === 0 && !isSaving && !error) {
+            handleSave();
+        }
+    }, [preemptionCountdown, isSaving, error, handleSave]);
+
     // ---- Replace file handler ----
     const handleReplace = useCallback(async () => {
         const file = replaceInputRef.current?.files?.[0];
@@ -283,14 +303,7 @@ export default function UniversalFileEditor({
         }
 
         return (
-            <Suspense
-                fallback={
-                    <div className="editor-loading">
-                        <div className="loading-spinner" />
-                        <p>Loading editor...</p>
-                    </div>
-                }
-            >
+            <>
                 {['text', 'json', 'markdown'].includes(editorType) && (
                     <MonacoTextEditor
                         content={textContent}
@@ -339,13 +352,34 @@ export default function UniversalFileEditor({
                         </p>
                     </div>
                 )}
-            </Suspense>
+            </>
         );
     };
 
     return (
         <div className="editor-overlay">
             <div className={`editor-shell ${isBlurred ? 'blurred' : ''}`}>
+                {/* ---- Preemption Warning Banner ---- */}
+                {preemptionCountdown !== undefined && preemptionCountdown !== null && preemptionCountdown > 0 && (
+                    <div style={{
+                        background: '#EF4444', 
+                        color: '#ffffff', 
+                        padding: '12px 20px', 
+                        textAlign: 'center', 
+                        fontSize: '14px', 
+                        fontWeight: 600,
+                        borderBottom: '1px solid #B91C1C',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px',
+                        animation: preemptionCountdown <= 10 ? 'pulse 1s infinite' : 'none'
+                    }}>
+                        ⚠️ Higher-level user active. Editing will be restricted in {preemptionCountdown}s. 
+                        Files will autosave automatically.
+                    </div>
+                )}
+                
                 {/* ---- Top Toolbar ---- */}
                 <div className="editor-toolbar">
                     <div className="editor-toolbar-left">

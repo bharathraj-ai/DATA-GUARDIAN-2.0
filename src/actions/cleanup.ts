@@ -42,7 +42,11 @@ export async function cleanupExpiredData(): Promise<CleanupResult> {
                 isRevoked: true,
                 ownerId: true,
                 purpose: true,
-                allowedVendorEmail: true,
+                LinkAccess: {
+                    select: {
+                        vendorEmail: true,
+                    }
+                },
                 expiresAt: true,
                 createdAt: true,
                 UserFile: { select: { id: true } },
@@ -68,12 +72,17 @@ export async function cleanupExpiredData(): Promise<CleanupResult> {
             for (const link of linksToClean) {
                 if (link.ownerId) {
                     const status = link.isRevoked ? 'revoked' : 'expired';
+                    const isGroupShare = link.LinkAccess.length > 1;
+                    const vendorEmailToMatch = isGroupShare 
+                        ? `Group Share (${link.LinkAccess.length} members)`
+                        : (link.LinkAccess[0]?.vendorEmail || null);
+
                     // Update matching SendRecords by owner + topic + vendor
                     await tx.sendRecord.updateMany({
                         where: {
                             ownerId: link.ownerId,
                             topic: link.purpose || '',
-                            vendorEmail: link.allowedVendorEmail,
+                            vendorEmail: vendorEmailToMatch,
                             status: 'active',
                         },
                         data: {

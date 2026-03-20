@@ -16,7 +16,8 @@ interface FormDataState {
     gender: string;
     age: string;
     validityMinutes: string;
-    vendorEmail: string; // Zero Trust: only this email can access the link
+    vendors: { email: string; level: number }[]; // Multi-vendor with levels
+    vendorEmail: string; 
     topic: string; // Mandatory: describe what data is being shared
 }
 
@@ -31,6 +32,7 @@ export default function SignupPage() {
         gender: '',
         age: '',
         validityMinutes: '',
+        vendors: [{ email: '', level: 1 }],
         vendorEmail: '',
         topic: '',
     });
@@ -44,6 +46,8 @@ export default function SignupPage() {
     const [countdown, setCountdown] = useState<number | null>(null);
     const countdownRef = useRef<NodeJS.Timeout | null>(null);
     const [vendors, setVendors] = useState<VendorOption[]>([]);
+    const [sharingMode, setSharingMode] = useState<'individual' | 'group'>('individual');
+    const [selectedVendors, setSelectedVendors] = useState<{email: string, level: number}[]>([]);
 
     // Fetch available vendors on mount
     useEffect(() => {
@@ -79,28 +83,43 @@ export default function SignupPage() {
         setFormData({ ...formData, [e.target.name]: e.target.value });
     };
 
+    const handleVendorChange = (index: number, field: string, value: string | number) => {
+        const newVendors = [...formData.vendors];
+        newVendors[index] = { ...newVendors[index], [field]: value };
+        setFormData({ ...formData, vendors: newVendors });
+    };
+
+    const addVendor = () => {
+        setFormData({ ...formData, vendors: [...formData.vendors, { email: '', level: 2 }] });
+    };
+
+    const removeVendor = (index: number) => {
+        const newVendors = [...formData.vendors];
+        newVendors.splice(index, 1);
+        setFormData({ ...formData, vendors: newVendors });
+    };
+
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         setFiles(e.target.files);
     };
 
     const validateForm = (): string | null => {
-        if (!formData.firstName) return 'First name is required';
-        if (!formData.lastName) return 'Last name is required';
-        if (!formData.email) return 'Email is required';
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) return 'Invalid email format';
-        if (!formData.phone) return 'Phone number is required';
-        if (!/^\d{10}$/.test(formData.phone)) return 'Phone must be 10 digits';
-        if (!formData.gender) return 'Gender is required';
-        if (!formData.age) return 'Age is required';
+        if (formData.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) return 'Invalid email format';
+        if (formData.phone && !/^\d{10,15}$/.test(formData.phone)) return 'Phone must be 10-15 digits';
         if (!formData.validityMinutes) return 'Time in minutes is required';
         if (!formData.topic.trim()) return 'Topic is required — describe what data you are sharing';
         const minutes = parseInt(formData.validityMinutes);
         if (isNaN(minutes) || minutes <= 0) return 'Time must be a positive number';
-        // Vendor email is mandatory — owner must specify who they're sending data to
-        if (!formData.vendorEmail) return 'Vendor email is required — specify who you are sending data to';
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.vendorEmail)) {
-            return 'Invalid vendor email format';
+
+        if (sharingMode === 'individual') {
+            if (!formData.vendorEmail) return 'Vendor email is required — specify who you are sending data to';
+            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.vendorEmail)) {
+                return 'Invalid vendor email format';
+            }
+        } else {
+            if (selectedVendors.length === 0) return 'At least one vendor must be selected for group sharing';
         }
+
         return null;
     };
 
@@ -119,10 +138,23 @@ export default function SignupPage() {
         try {
             const data = new FormData();
             Object.entries(formData).forEach(([key, value]) => {
-                data.append(key, value);
+                if (key === 'vendors' || key === 'vendorEmail') {
+                    return; // Skip — appended separately below with correct data
+                } else {
+                    data.append(key, value as string);
+                }
             });
             // Also send topic as 'purpose' for backward compatibility with backend
             data.append('purpose', formData.topic);
+
+            // Backend requires a 'vendors' JSON array
+            if (sharingMode === 'individual' && formData.vendorEmail) {
+                // Must be level 1 because exactly one Team Leader is required
+                data.append('vendors', JSON.stringify([{ email: formData.vendorEmail.toLowerCase(), level: 1 }]));
+            } else if (sharingMode === 'group' && selectedVendors.length > 0) {
+                // Assign level based on array order (index + 1)
+                data.append('vendors', JSON.stringify(selectedVendors.map((v, index) => ({ email: v.email.toLowerCase(), level: index + 1 }))));
+            }
 
             if (files) {
                 for (let i = 0; i < files.length; i++) {
@@ -331,7 +363,7 @@ export default function SignupPage() {
                                             onChange={handleChange}
                                             className="form-select"
                                         >
-                                            <option value="" disabled>Select gender</option>
+                                            <option value="">Not specified</option>
                                             <option value="male">Male</option>
                                             <option value="female">Female</option>
                                             <option value="other">Other</option>
@@ -381,27 +413,145 @@ export default function SignupPage() {
                                         </small>
                                     </div>
 
-                                    {/* Zero Trust: Vendor Email Binding */}
                                     <div className="form-group">
-                                        <label className="form-label">Vendor Email <span style={{ color: 'var(--danger)' }}>*</span></label>
-                                        <select
-                                            name="vendorEmail"
-                                            value={formData.vendorEmail}
-                                            onChange={handleChange}
-                                            className="form-select"
-                                            required
-                                        >
-                                            <option value="">Select vendor email</option>
-                                            {vendors.map((vendor) => (
-                                                <option key={vendor.email} value={vendor.email}>
-                                                    {vendor.name ? `${vendor.name} — ${vendor.email}` : vendor.email}
-                                                </option>
-                                            ))}
-                                        </select>
-                                        <small className="form-hint">
-                                            Only this vendor can verify the OTP. Prevents link forwarding.
-                                        </small>
+                                        <label className="form-label">Sharing Mode</label>
+                                        <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
+                                            <button 
+                                                type="button" 
+                                                className={`btn ${sharingMode === 'individual' ? 'btn-primary' : 'btn-secondary'}`}
+                                                onClick={() => setSharingMode('individual')}
+                                                style={{ flex: 1, padding: '10px' }}
+                                            >
+                                                Individual
+                                            </button>
+                                            <button 
+                                                type="button" 
+                                                className={`btn ${sharingMode === 'group' ? 'btn-primary' : 'btn-secondary'}`}
+                                                onClick={() => setSharingMode('group')}
+                                                style={{ flex: 1, padding: '10px' }}
+                                            >
+                                                Group
+                                            </button>
+                                        </div>
                                     </div>
+
+                                    {/* Zero Trust: Vendor Binding */}
+                                    {sharingMode === 'individual' ? (
+                                        <div className="form-group">
+                                            <label className="form-label">Vendor Email <span style={{ color: 'var(--danger)' }}>*</span></label>
+                                            <select
+                                                name="vendorEmail"
+                                                value={formData.vendorEmail}
+                                                onChange={handleChange}
+                                                className="form-select"
+                                                required={sharingMode === 'individual'}
+                                            >
+                                                <option value="">Select vendor email</option>
+                                                {vendors.map((vendor) => (
+                                                    <option key={vendor.email} value={vendor.email}>
+                                                        {vendor.name ? `${vendor.name} — ${vendor.email}` : vendor.email}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                            <small className="form-hint">
+                                                Only this vendor can verify the OTP. Prevents link forwarding.
+                                            </small>
+                                        </div>
+                                    ) : (
+                                        <div className="form-group">
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                                                <label className="form-label" style={{ marginBottom: 0 }}>Select Group Members <span style={{ color: 'var(--danger)' }}>*</span></label>
+                                                <span style={{ backgroundColor: selectedVendors.length > 0 ? 'var(--primary)' : 'var(--bg-tertiary)', color: selectedVendors.length > 0 ? 'white' : 'var(--text-secondary)', padding: '2px 8px', borderRadius: '12px', fontSize: '12px', fontWeight: 600 }}>
+                                                    {selectedVendors.length} {selectedVendors.length === 1 ? 'Member' : 'Members'} Selected
+                                                </span>
+                                            </div>
+                                            <div style={{ border: '1px solid var(--border)', borderRadius: '8px', padding: '12px', maxHeight: '250px', overflowY: 'auto' }}>
+                                                {vendors.length === 0 ? (
+                                                    <p style={{ color: 'var(--text-secondary)', textAlign: 'center', margin: '10px 0' }}>No vendors available</p>
+                                                ) : vendors.map((vendor) => {
+                                                    const isSelected = selectedVendors.some(v => v.email === vendor.email);
+                                                    const currentLevel = selectedVendors.find(v => v.email === vendor.email)?.level || 2;
+                                                    
+                                                    return (
+                                                        <div key={vendor.email} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px', borderBottom: '1px solid var(--border)', background: isSelected ? 'rgba(99, 102, 241, 0.05)' : 'transparent', borderRadius: '4px' }}>
+                                                            <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', flex: 1 }}>
+                                                                <input 
+                                                                    type="checkbox" 
+                                                                    checked={isSelected}
+                                                                    onChange={(e) => {
+                                                                        if (e.target.checked) {
+                                                                            setSelectedVendors([...selectedVendors, { email: vendor.email, level: 2 }]);
+                                                                        } else {
+                                                                            setSelectedVendors(selectedVendors.filter(v => v.email !== vendor.email));
+                                                                        }
+                                                                    }}
+                                                                    style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: 'var(--primary)' }}
+                                                                />
+                                                                <div>
+                                                                    <div style={{ fontWeight: 500, color: 'var(--text-primary)', fontSize: '14px' }}>{vendor.name || vendor.email.split('@')[0]}</div>
+                                                                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{vendor.email}</div>
+                                                                </div>
+                                                            </label>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                            
+                                            {/* Arranged Hierarchy UI */}
+                                            {selectedVendors.length > 0 && (
+                                                <div style={{ marginTop: '16px', borderTop: '1px dashed var(--border)', paddingTop: '16px' }}>
+                                                    <label className="form-label" style={{ marginBottom: '8px' }}>
+                                                        Arranged Hierarchy <span style={{ color: 'var(--danger)' }}>*</span>
+                                                    </label>
+                                                    <small className="form-hint" style={{ marginBottom: '12px', display: 'block' }}>
+                                                        Use arrows to arrange priority. The top person gets exclusive editing access (Level 1).
+                                                    </small>
+                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                                        {selectedVendors.map((sv, index) => {
+                                                            const vendorObj = vendors.find(v => v.email === sv.email);
+                                                            const name = vendorObj?.name || sv.email.split('@')[0];
+                                                            
+                                                            const moveUp = () => {
+                                                                if (index === 0) return;
+                                                                const newArr = [...selectedVendors];
+                                                                [newArr[index - 1], newArr[index]] = [newArr[index], newArr[index - 1]];
+                                                                setSelectedVendors(newArr);
+                                                            };
+                                                            
+                                                            const moveDown = () => {
+                                                                if (index === selectedVendors.length - 1) return;
+                                                                const newArr = [...selectedVendors];
+                                                                [newArr[index + 1], newArr[index]] = [newArr[index], newArr[index + 1]];
+                                                                setSelectedVendors(newArr);
+                                                            };
+
+                                                            return (
+                                                                <div key={sv.email} style={{ display: 'flex', alignItems: 'center', gap: '12px', background: 'rgba(255,255,255,0.03)', padding: '10px 14px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                                                        <button type="button" onClick={moveUp} disabled={index === 0} style={{ border: 'none', background: 'transparent', color: 'var(--color-text)', cursor: index === 0 ? 'not-allowed' : 'pointer', opacity: index === 0 ? 0.3 : 1, padding: 0, fontSize: '14px' }}>▲</button>
+                                                                        <button type="button" onClick={moveDown} disabled={index === selectedVendors.length - 1} style={{ border: 'none', background: 'transparent', color: 'var(--color-text)', cursor: index === selectedVendors.length - 1 ? 'not-allowed' : 'pointer', opacity: index === selectedVendors.length - 1 ? 0.3 : 1, padding: 0, fontSize: '14px' }}>▼</button>
+                                                                    </div>
+                                                                    
+                                                                    <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: index === 0 ? 'var(--primary)' : 'rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 'bold' }}>
+                                                                        {index + 1}
+                                                                    </div>
+                                                                    
+                                                                    <div style={{ flex: 1 }}>
+                                                                        <p style={{ fontSize: '14px', fontWeight: 600, color: index === 0 ? '#60a5fa' : 'var(--text-primary)', margin: 0 }}>
+                                                                            {name} {index === 0 ? '(Team Leader)' : ''}
+                                                                        </p>
+                                                                        <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: 0 }}>
+                                                                            {sv.email}
+                                                                        </p>
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
 
                                     <div className="form-group">
                                         <label className="form-label">Attach Files (Optional)</label>
@@ -484,12 +634,18 @@ export default function SignupPage() {
                                             background: 'var(--bg-tertiary)',
                                             borderRadius: '8px',
                                             padding: '16px',
-                                            textAlign: 'center',
-                                            marginBottom: '16px'
+                                            textAlign: 'left',
+                                            marginBottom: '16px',
+                                            display: 'flex',
+                                            flexDirection: 'column',
+                                            gap: '8px'
                                         }}>
-                                            <p style={{ color: 'var(--text-primary)', fontSize: '18px', fontWeight: 600, margin: 0 }}>
-                                                📧 {formData.vendorEmail}
-                                            </p>
+                                            {formData.vendors.map((v, idx) => (
+                                                <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', borderBottom: idx < formData.vendors.length - 1 ? '1px solid #E5E7EB' : 'none', paddingBottom: idx < formData.vendors.length - 1 ? '8px' : '0' }}>
+                                                    <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>📧 {v.email}</span>
+                                                    <span style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>Level {v.level}</span>
+                                                </div>
+                                            ))}
                                         </div>
                                         <p className="result-hint">
                                             The vendor will receive the secure link and OTP in their inbox. You do not need to share them manually.
@@ -549,6 +705,8 @@ export default function SignupPage() {
                                         setQrDataUrl('');
                                         setCountdown(null);
                                         setStatus({ message: '', type: '' });
+                                        setSharingMode('individual');
+                                        setSelectedVendors([]);
                                         setFormData({
                                             firstName: '',
                                             lastName: '',
@@ -557,6 +715,7 @@ export default function SignupPage() {
                                             gender: '',
                                             age: '',
                                             validityMinutes: '',
+                                            vendors: [{ email: '', level: 1 }],
                                             vendorEmail: '',
                                             topic: '',
                                         });

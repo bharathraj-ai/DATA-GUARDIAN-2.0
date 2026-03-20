@@ -1,35 +1,35 @@
 # 🛡️ Data Guardian 2.0
 
-**Enterprise-grade secure data sharing platform** with military-grade encryption, OTP protection, and instant revocation.
+**Enterprise-grade secure data sharing platform** with military-grade encryption, real-time collaboration, and Zero Trust security architecture.
 
-## ✨ Features
+## ✨ Key Features
 
-- **🔐 AES-256-GCM Encryption** — Military-grade encryption for all shared data
-- **🔑 OTP Protection** — 6-digit one-time passwords with HMAC-SHA256 hashing
-- **⏱️ Self-Destructing Links** — Time-limited access with automatic expiry
-- **🚫 Instant Revocation** — Revoke access immediately from the owner dashboard
-- **📸 Screenshot Detection** — Automatic access revocation on screenshot attempts
-- **📱 QR Code Delivery** — Generate QR codes for easy link sharing
-- **🏗️ Zero-Knowledge Architecture** — We can't read your data, ever
-- **🔒 Device & Email Binding** — Prevent session hijacking and link forwarding
+- **🔐 AES-256-GCM Encryption** — Military-grade encrypted file storage for all shared data.
+- **🔑 Zero Trust OTP Protection** — 6-digit one-time passwords, completely isolated per-vendor.
+- **👥 Dynamic Group Sharing** — Share secure links with multiple vendors, enforcing individual OTP authentication.
+- **🥇 Arranged Vendor Priority** — Explicit hierarchical control (Level 1, Level 2, etc.) for collaborative editing. Higher levels transparently preempt lower levels.
+- **⚡ Real-Time Collaboration** — Live document editor with built-in secure chat, utilizing Server-Sent Events (SSE).
+- **🟢 Live Activity Monitor** — Owners can track real-time connection status and chat feeds of all participants directly from the dashboard.
+- **🚫 Instant Revocation & Self-Destruct** — Links can be explicitly revoked or set to auto-expire.
+- **📸 Anti-Screenshot & Device Binding** — Automatic revocation on screenshot attempts and session locking to original hardware fingerprints.
 
 ## 🚀 Tech Stack
 
 | Technology | Purpose |
 |---|---|
-| **Next.js 16** | Full-stack React framework (App Router) |
+| **Next.js 16 (App Router)** | Full-stack React framework |
 | **TypeScript** | Type-safe development |
-| **Prisma** | Database ORM with PostgreSQL |
-| **NextAuth.js** | Authentication (Google OAuth) |
-| **Upstash Redis** | Rate limiting & session management |
-| **Zod** | Runtime input validation |
+| **Prisma (PostgreSQL)** | Type-safe database ORM |
+| **NextAuth.js** | Google OAuth Authentication |
+| **Upstash Redis** | High-performance Rate limiting & Session Management |
+| **Server-Sent Events (SSE)** | Low-latency Real-time Data Streaming |
 
 ## 📦 Getting Started
 
 ### Prerequisites
 
-- **Node.js** ≥ 18.17.0 (see `.nvmrc`)
-- **PostgreSQL** database (or [Neon](https://neon.tech))
+- **Node.js** ≥ 18.17.0
+- **PostgreSQL** database (e.g., [Neon](https://neon.tech))
 - **Google OAuth** credentials
 - **Upstash Redis** instance
 
@@ -70,31 +70,30 @@ npm run dev
 | `UPSTASH_REDIS_REST_URL` | ✅ | Redis REST API URL |
 | `UPSTASH_REDIS_REST_TOKEN` | ✅ | Redis REST API token |
 
-## 🏗️ Architecture
+## 🏗️ Architecture Summary
 
-```
+```text
 src/
-├── app/                    # Next.js App Router pages
-│   ├── api/                # API routes (health check)
-│   ├── auth/               # Authentication pages
+├── app/                    # Next.js App Router endpoints
+│   ├── api/                # API routes (health, SSE streams, collaboration)
+│   ├── auth/               # Authentication logic & OAuth handling
 │   ├── dashboard/          # Owner & Vendor dashboards
-│   ├── how-it-works/       # How it works page
-│   ├── legal/              # Privacy, Terms, Cookies
-│   ├── services/           # Services page
-│   └── signup/             # Secure link creation
-├── components/             # Shared UI components
-├── lib/                    # Utilities & configuration
-│   ├── auth.ts             # NextAuth configuration
-│   ├── crypto.ts           # Encryption & hashing utilities
-│   ├── rate-limit.ts       # Rate limiting with Redis
-│   └── validations.ts      # Zod validation schemas
-├── actions/                # Server actions
-│   ├── verify-otp.ts       # OTP verification logic
-│   └── revoke-on-screenshot.ts  # Screenshot revocation
-└── types/                  # TypeScript type extensions
+│   ├── create-link/        # Secure group link creation with priority mapping
+│   ├── view/               # Secure view interface with Universal File Editor
+│   └── share/              # OTP validation entry point (per-vendor)
+├── components/             # Reusable UI React components (LiveActivityModal, ChatPanel, etc)
+├── lib/                    # Core utilities & configuration
+│   ├── auth.ts             # NextAuth strategies
+│   ├── crypto.ts           # AES-256 and HMAC wrappers
+│   └── rate-limit.ts       # Upstash Redis rate limiter
+├── actions/                # Next.js Server Actions (Database mutations)
+│   ├── verify-otp.ts       # Per-vendor zero-trust validation
+│   ├── get-user.ts         # Authentication state retrieval
+│   └── realtime.ts         # Collaboration presence state
+└── prisma/                 # Database schema models (PostgreSQL)
 ```
 
-## 🐳 Docker
+## 🐳 Docker Deployment
 
 ```bash
 # Build the image
@@ -104,17 +103,14 @@ docker build -t data-guardian .
 docker run -p 3000:3000 --env-file .env data-guardian
 ```
 
-The Dockerfile includes a `HEALTHCHECK` that pings `/api/health` every 30 seconds.
+*The Dockerfile includes an automated `HEALTHCHECK` that guarantees the container is responding effectively.*
 
-## 🔒 Security
+## 🔒 Security Principles
 
-- **Zero Trust**: All operations validated server-side
-- **Single-Attempt OTP**: OTPs are invalidated after first use
-- **Rate Limiting**: Protection against brute-force attacks
-- **Device Binding**: Sessions bound to the original device
-- **Email Binding**: Links restricted to the intended recipient
-- **Audit Logging**: Complete trail of all security events
+- **Zero Trust**: No operation assumes safety; verification required per vendor/device.
+- **Single-Attempt OTP**: OTPs invalid upon failure or success.
+- **Hardware Binding**: Sessions bound to precise device fingerprints via modern browser APIs.
+- **Event Revocation**: Live SSE streams are aggressively severed upon compromise or expiry.
 
 ## 📄 License
-
 Private — All rights reserved.

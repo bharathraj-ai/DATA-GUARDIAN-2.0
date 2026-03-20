@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import { useSession, signOut } from 'next-auth/react';
+import Image from 'next/image';
 
 export default function Navbar() {
     const pathname = usePathname();
@@ -36,8 +37,8 @@ export default function Navbar() {
             <div className="container navbar-container">
                 <Link href="/" className="navbar-logo">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src="/logo.svg" alt="Data Guardian" width={32} height={32} suppressHydrationWarning />
-                    <span className="gradient-text">Data Guardian</span>
+                    <img src="/logo.svg" alt="Secure Protocol" width={28} height={28} style={{ opacity: 0.9 }} suppressHydrationWarning />
+                    <span style={{ fontWeight: 600, letterSpacing: '-0.02em', fontSize: '18px' }}>Secure Protocol</span>
                 </Link>
 
                 {/* Desktop Menu */}
@@ -52,57 +53,65 @@ export default function Navbar() {
                         </Link>
                     ))}
 
-                    {isAuthenticated ? (
-                        <>
-                            {userRole === 'OWNER' && (
-                                <Link
-                                    href="/dashboard/owner"
-                                    className={`nav-link ${pathname?.startsWith('/dashboard/owner') ? 'active' : ''}`}
-                                >
-                                    Owner
-                                </Link>
-                            )}
-                            {userRole === 'VENDOR' && (
-                                <Link
-                                    href="/dashboard/vendor"
-                                    className={`nav-link ${pathname?.startsWith('/dashboard/vendor') ? 'active' : ''}`}
-                                >
-                                    Vendor
-                                </Link>
-                            )}
-                            {userRole === 'OWNER' && (
-                                <Link href="/create-link" className="btn btn-primary btn-sm">
-                                    Create Link
-                                </Link>
-                            )}
+                    {(!hasMounted || status === 'loading') ? (
+                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', opacity: 0 }}>
+                            <div className="btn btn-sm">Loading...</div>
+                            <div className="btn btn-sm">Loading...</div>
+                        </div>
+                    ) : isAuthenticated ? (
+                            <>
+                                {userRole === 'OWNER' && (
+                                    <Link
+                                        href="/dashboard/owner"
+                                        className={`nav-link ${pathname?.startsWith('/dashboard/owner') ? 'active' : ''}`}
+                                    >
+                                        Owner
+                                    </Link>
+                                )}
+                                {userRole === 'VENDOR' && (
+                                    <Link
+                                        href="/dashboard/vendor"
+                                        className={`nav-link ${pathname?.startsWith('/dashboard/vendor') ? 'active' : ''}`}
+                                    >
+                                        Vendor
+                                    </Link>
+                                )}
+                                {userRole === 'OWNER' && (
+                                    <Link href="/create-link" className="btn btn-primary btn-sm">
+                                        Create Link
+                                    </Link>
+                                )}
 
-                            {/* Profile Badge with Role */}
-                            <div className="navbar-profile-wrapper">
-                                <div className="navbar-profile-badge">
-                                    {session?.user?.image ? (
-                                        <img
-                                            src={session.user.image}
-                                            alt={`${session?.user?.name || 'User'} profile`}
-                                            className="navbar-avatar"
-                                            referrerPolicy="no-referrer"
-                                        />
-                                    ) : (
-                                        <div className="navbar-avatar-fallback" aria-hidden="true">
-                                            {session?.user?.name?.[0]?.toUpperCase() || '?'}
-                                        </div>
-                                    )}
-                                    <span className={`navbar-role-tag ${userRole === 'OWNER' ? 'navbar-role-tag--owner' : 'navbar-role-tag--vendor'}`}>
-                                        {userRole === 'OWNER' ? 'Owner' : 'Vendor'}
-                                    </span>
+                                {/* Profile Badge with Role */}
+                                <div className="navbar-profile-wrapper">
+                                    <div className="navbar-profile-badge">
+                                        {session?.user?.image ? (
+                                            <Image
+                                                src={session.user.image}
+                                                alt={`${session?.user?.name || 'User'} profile`}
+                                                width={32}
+                                                height={32}
+                                                className="navbar-avatar"
+                                                referrerPolicy="no-referrer"
+                                                unoptimized={false}
+                                            />
+                                        ) : (
+                                            <div className="navbar-avatar-fallback" aria-hidden="true">
+                                                {session?.user?.name?.[0]?.toUpperCase() || '?'}
+                                            </div>
+                                        )}
+                                        <span className={`navbar-role-tag ${userRole === 'OWNER' ? 'navbar-role-tag--owner' : 'navbar-role-tag--vendor'}`}>
+                                            {userRole === 'OWNER' ? 'Owner' : 'Vendor'}
+                                        </span>
+                                    </div>
+                                    <button
+                                        onClick={() => signOut({ callbackUrl: '/' })}
+                                        className="btn btn-secondary btn-sm"
+                                    >
+                                        Sign Out
+                                    </button>
                                 </div>
-                                <button
-                                    onClick={() => signOut({ callbackUrl: '/' })}
-                                    className="btn btn-secondary btn-sm"
-                                >
-                                    Sign Out
-                                </button>
-                            </div>
-                        </>
+                            </>
                     ) : (
                         <>
                             <Link href="/auth/signin" className="btn btn-secondary btn-sm">
@@ -175,70 +184,75 @@ export default function Navbar() {
                     )}
 
                     <div className="navbar-mobile-cta">
-                        {isAuthenticated ? (
-                            <>
-                                {/* Mobile Profile Badge */}
-                                <div style={{
-                                    display: 'flex', alignItems: 'center', gap: '10px',
-                                    padding: '10px 14px', borderRadius: '12px',
-                                    background: 'rgba(255,255,255,0.04)',
-                                    border: '1px solid rgba(255,255,255,0.08)',
-                                    marginBottom: '8px',
-                                }}>
-                                    {session?.user?.image ? (
-                                        <img
-                                            src={session.user.image}
-                                            alt="Profile"
-                                            style={{ width: '32px', height: '32px', borderRadius: '50%' }}
-                                            referrerPolicy="no-referrer"
-                                        />
-                                    ) : (
-                                        <div style={{
-                                            width: '32px', height: '32px', borderRadius: '50%',
-                                            background: 'linear-gradient(135deg, var(--primary-blue), var(--accent-purple))',
-                                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                            fontSize: '0.85rem', fontWeight: '700', color: '#fff',
-                                        }}>
-                                            {session?.user?.name?.[0]?.toUpperCase() || '?'}
+                        {(!hasMounted || status === 'loading') ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', opacity: 0 }}>
+                                <div className="btn btn-full">Loading...</div>
+                                <div className="btn btn-full">Loading...</div>
+                            </div>
+                        ) : isAuthenticated ? (
+                                <>
+                                    {/* Mobile Profile Badge */}
+                                    <div style={{
+                                        display: 'flex', alignItems: 'center', gap: '10px',
+                                        padding: '10px 14px', borderRadius: '12px',
+                                        background: 'rgba(255,255,255,0.04)',
+                                        border: '1px solid rgba(255,255,255,0.08)',
+                                        marginBottom: '8px',
+                                    }}>
+                                        {session?.user?.image ? (
+                                            <img
+                                                src={session.user.image}
+                                                alt="Profile"
+                                                style={{ width: '32px', height: '32px', borderRadius: '50%' }}
+                                                referrerPolicy="no-referrer"
+                                            />
+                                        ) : (
+                                            <div style={{
+                                                width: '32px', height: '32px', borderRadius: '50%',
+                                                background: 'linear-gradient(135deg, var(--primary-blue), var(--accent-purple))',
+                                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                fontSize: '0.85rem', fontWeight: '700', color: '#fff',
+                                            }}>
+                                                {session?.user?.name?.[0]?.toUpperCase() || '?'}
+                                            </div>
+                                        )}
+                                        <div style={{ flex: 1 }}>
+                                            <p style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-primary)' }}>
+                                                {session?.user?.name || 'User'}
+                                            </p>
+                                            <span style={{
+                                                fontSize: '0.65rem', fontWeight: '700', textTransform: 'uppercase',
+                                                letterSpacing: '0.5px',
+                                                padding: '2px 6px', borderRadius: '6px',
+                                                background: userRole === 'OWNER'
+                                                    ? 'linear-gradient(135deg, rgba(99,102,241,0.25), rgba(139,92,246,0.25))'
+                                                    : 'rgba(20, 184, 166, 0.2)',
+                                                color: userRole === 'OWNER' ? '#a78bfa' : '#14b8a6',
+                                            }}>
+                                                {userRole === 'OWNER' ? 'Owner' : 'Vendor'}
+                                            </span>
                                         </div>
-                                    )}
-                                    <div style={{ flex: 1 }}>
-                                        <p style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-primary)' }}>
-                                            {session?.user?.name || 'User'}
-                                        </p>
-                                        <span style={{
-                                            fontSize: '0.65rem', fontWeight: '700', textTransform: 'uppercase',
-                                            letterSpacing: '0.5px',
-                                            padding: '2px 6px', borderRadius: '6px',
-                                            background: userRole === 'OWNER'
-                                                ? 'linear-gradient(135deg, rgba(99,102,241,0.25), rgba(139,92,246,0.25))'
-                                                : 'rgba(20, 184, 166, 0.2)',
-                                            color: userRole === 'OWNER' ? '#a78bfa' : '#14b8a6',
-                                        }}>
-                                            {userRole === 'OWNER' ? 'Owner' : 'Vendor'}
-                                        </span>
                                     </div>
-                                </div>
 
-                                {userRole === 'OWNER' && (
-                                    <Link
-                                        href="/create-link"
-                                        className="btn btn-primary btn-full"
-                                        onClick={() => setIsMobileMenuOpen(false)}
+                                    {userRole === 'OWNER' && (
+                                        <Link
+                                            href="/create-link"
+                                            className="btn btn-primary btn-full"
+                                            onClick={() => setIsMobileMenuOpen(false)}
+                                        >
+                                            Create Link
+                                        </Link>
+                                    )}
+                                    <button
+                                        onClick={() => {
+                                            setIsMobileMenuOpen(false);
+                                            signOut({ callbackUrl: '/' });
+                                        }}
+                                        className="btn btn-secondary btn-full"
                                     >
-                                        Create Link
-                                    </Link>
-                                )}
-                                <button
-                                    onClick={() => {
-                                        setIsMobileMenuOpen(false);
-                                        signOut({ callbackUrl: '/' });
-                                    }}
-                                    className="btn btn-secondary btn-full"
-                                >
-                                    Sign Out
-                                </button>
-                            </>
+                                        Sign Out
+                                    </button>
+                                </>
                         ) : (
                             <>
                                 <Link
