@@ -38,7 +38,7 @@ export default function Navbar() {
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src="/logo.svg" alt="Secure Protocol" width={32} height={32} suppressHydrationWarning />
                     <span 
-                        className="gradient-text" 
+                        style={{ fontSize: '18px', fontWeight: 600, color: 'var(--text-primary)' }}
                         suppressHydrationWarning
                     >
                         Secure Protocol
@@ -88,6 +88,8 @@ export default function Navbar() {
                                         <img
                                             src={session.user.image}
                                             alt={`${session?.user?.name || 'User'} profile`}
+                                            width={28}
+                                            height={28}
                                             className="navbar-avatar"
                                             referrerPolicy="no-referrer"
                                         />
@@ -194,15 +196,17 @@ export default function Navbar() {
                                         <img
                                             src={session.user.image}
                                             alt="Profile"
+                                            width={32}
+                                            height={32}
                                             style={{ width: '32px', height: '32px', borderRadius: '50%' }}
                                             referrerPolicy="no-referrer"
                                         />
                                     ) : (
                                         <div style={{
                                             width: '32px', height: '32px', borderRadius: '50%',
-                                            background: 'linear-gradient(135deg, var(--primary-blue), var(--accent-purple))',
+                                            background: 'var(--primary)',
                                             display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                            fontSize: '0.85rem', fontWeight: '700', color: '#fff',
+                                            fontSize: '0.85rem', fontWeight: '600', color: '#fff',
                                         }}>
                                             {session?.user?.name?.[0]?.toUpperCase() || '?'}
                                         </div>
@@ -212,13 +216,12 @@ export default function Navbar() {
                                             {session?.user?.name || 'User'}
                                         </p>
                                         <span style={{
-                                            fontSize: '0.65rem', fontWeight: '700', textTransform: 'uppercase',
+                                            fontSize: '0.65rem', fontWeight: '600', textTransform: 'uppercase',
                                             letterSpacing: '0.5px',
-                                            padding: '2px 6px', borderRadius: '6px',
-                                            background: userRole === 'OWNER'
-                                                ? 'linear-gradient(135deg, rgba(99,102,241,0.25), rgba(139,92,246,0.25))'
-                                                : 'rgba(20, 184, 166, 0.2)',
-                                            color: userRole === 'OWNER' ? '#a78bfa' : '#14b8a6',
+                                            padding: '4px 8px', borderRadius: '4px',
+                                            background: 'var(--bg-tertiary)',
+                                            border: '1px solid var(--border-color)',
+                                            color: 'var(--text-primary)',
                                         }}>
                                             {userRole === 'OWNER' ? 'Owner' : 'Vendor'}
                                         </span>
