@@ -59,19 +59,43 @@ model SecureLink {
   otpFirstAttemptAt  DateTime?
   otpVerifiedAt      DateTime?
   allowedVendorEmail String?
+  allowEditing       Boolean    @default(false)
   ownerId            String?
   otpPlain           String?
   AuditLog           AuditLog[]
   User               User?      @relation(fields: [ownerId], references: [id])
-  UserData           UserData   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  UserData           UserData      @relation(fields: [userId], references: [id], onDelete: Cascade)
   UserFile           UserFile[]
+  LinkAccess         LinkAccess[]
+  ChatMessage        ChatMessage[]
+  VendorAccess       VendorAccess[]
 
-  @@index([allowedVendorEmail])
   @@index([expiresAt])
   @@index([ownerId])
   @@index([ownerToken])
   @@index([token])
 }
+
+model VendorAccess {
+  id             String     @id @default(cuid())
+  secureLinkId   String
+  email          String
+  level          Int        @default(2) // 1 = Team leader
+  otpHash        String?
+  otpPlain       String?
+  loginCount     Int        @default(0)
+  maxLogins      Int        @default(3)
+  failedAttempts Int        @default(0)
+  isRevoked      Boolean    @default(false)
+  createdAt      DateTime   @default(now())
+
+  SecureLink     SecureLink @relation(fields: [secureLinkId], references: [id], onDelete: Cascade)
+
+  @@unique([secureLinkId, email])
+  @@index([secureLinkId])
+  @@index([email])
+}
+
 
 model Session {
   id           String   @id @default(cuid())
@@ -89,11 +113,13 @@ model User {
   image         String?
   role          String       @default("VENDOR")
   createdAt     DateTime     @default(now())
-  updatedAt     DateTime
+  updatedAt     DateTime     @updatedAt
   roleSelected  Boolean      @default(false)
   Account       Account[]
   SecureLink    SecureLink[]
   Session       Session[]
+  SendRecord    SendRecord[]
+  Document      Document[]
 }
 
 model UserData {
@@ -105,18 +131,39 @@ model UserData {
 }
 
 model UserFile {
-  id               String     @id @default(cuid())
+  id               String        @id @default(cuid())
   fileName         String
   fileType         String
   fileSize         Int
   encryptedContent Bytes
   iv               String
   authTag          String
+  encryptedDek     String?
   secureLinkId     String
-  createdAt        DateTime   @default(now())
-  SecureLink       SecureLink @relation(fields: [secureLinkId], references: [id], onDelete: Cascade)
+  createdAt        DateTime      @default(now())
+  SecureLink       SecureLink    @relation(fields: [secureLinkId], references: [id], onDelete: Cascade)
+  FileVersion      FileVersion[]
+  Annotation       Annotation[]
 
   @@index([secureLinkId])
+}
+
+model FileVersion {
+  id                String   @id @default(cuid())
+  fileId            String
+  versionNumber     Int
+  encryptedContent  Bytes
+  iv                String
+  authTag           String
+  encryptedDek      String?
+  fileSize          Int
+  changeType        String   // "annotation" | "page_replace" | "restore"
+  changeDescription String?
+  createdAt         DateTime @default(now())
+  UserFile          UserFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@index([fileId])
+  @@index([createdAt])
 }
 
 model VerificationToken {
@@ -125,4 +172,183 @@ model VerificationToken {
   expires    DateTime
 
   @@unique([identifier, token])
+}
+
+/// Preserved record of data sharing — survives data deletion.
+/// Lets the owner see WHO they sent data to and WHAT topic it was about,
+/// even after the actual data has been purged from the database.
+model SendRecord {
+  id              String   @id @default(cuid())
+  ownerId         String
+  topic           String                        // Mandatory: what data was shared
+  vendorEmail     String?                       // Who it was sent to
+  fileCount       Int      @default(0)          // How many files were attached
+  status          String   @default("expired")  // expired | revoked | cleaned
+  createdAt       DateTime @default(now())      // When the link was created
+  expiredAt       DateTime?                     // When it expired/was revoked
+  owner           User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId])
+  @@index([createdAt])
+}
+
+/// Persistent annotation overlay stored separately from the encrypted document.
+model Annotation {
+  id         String   @id @default(cuid())
+  fileId     String
+  pageNumber Int
+  type       String   // "highlight" | "text" | "draw" | "comment" | "signature"
+  data       String   // JSON blob (DocumentAnnotation shape)
+  authorId   String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  UserFile   UserFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@index([fileId])
+  @@index([pageNumber])
+}
+
+/// Active editing session for presence tracking.
+model DocumentSession {
+  id          String   @id @default(cuid())
+  fileId      String
+  userId      String?
+  token       String
+  role        String   @default("VENDOR")
+  level       Int      @default(2) // 1 = Team Leader, 2+ = Members
+  displayName String   @default("User")
+  color       String   @default("#6366f1")
+  joinedAt    DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+
+  @@index([fileId])
+  @@index([token])
+}
+
+/// Append-only audit log of collaboration operations.
+model CollabOperation {
+  id        String   @id @default(cuid())
+  fileId    String
+  sessionId String
+  opType    String
+  payload   String   // JSON
+  version   Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([fileId])
+  @@index([createdAt])
+}
+
+/// Link access mapping for multiple vendors with hierarchy levels.
+model LinkAccess {
+  id           String     @id @default(cuid())
+  secureLinkId String
+  vendorEmail  String
+  level            Int        @default(2) // 1 = Team Leader, 2+ = Member
+  otpHash          String?    // Per-vendor unique OTP hash
+  otpPlain         String?    // Per-vendor plain OTP (for email sending)
+  isUsed           Boolean    @default(false)
+  otpVerifiedAt    DateTime?
+  deviceHash       String?
+  failedAttempts   Int        @default(0)
+  lockedAt         DateTime?
+  otpFirstAttemptAt DateTime?
+  SecureLink       SecureLink @relation(fields: [secureLinkId], references: [id], onDelete: Cascade)
+
+  @@unique([secureLinkId, vendorEmail])
+  @@index([vendorEmail])
+}
+
+/// Real-time collaboration chat messages.
+model ChatMessage {
+  id            String     @id @default(cuid())
+  secureLinkId  String
+  senderEmail   String
+  receiverEmail String?    // null = Group Chat, string = Direct Message
+  content       String
+  timestamp     DateTime   @default(now())
+  SecureLink    SecureLink @relation(fields: [secureLinkId], references: [id], onDelete: Cascade)
+
+  @@index([secureLinkId])
+  @@index([timestamp])
+}
+
+// ============================================
+// ONLYOFFICE DOCUMENT MANAGEMENT
+// ============================================
+
+/// Secure document metadata for ONLYOFFICE-managed files.
+/// Actual files are stored on disk at storagePath — never publicly accessible.
+model Document {
+  id             String             @id @default(cuid())
+  fileName       String
+  fileType       String             // Extension: docx, xlsx, pptx, etc.
+  mimeType       String             @default("application/octet-stream")
+  storagePath    String             // Relative path inside secure-storage
+  fileSize       Int                @default(0)
+  ownerId        String
+  classification String             @default("INTERNAL") // PUBLIC | INTERNAL | CONFIDENTIAL | RESTRICTED
+  currentVersion Int                @default(1)
+  isDeleted      Boolean            @default(false)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  owner          User               @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  versions       DocumentVersion[]
+  auditLogs      DocumentAuditLog[]
+
+  @@index([ownerId])
+  @@index([classification])
+  @@index([createdAt])
+  @@index([isDeleted])
+}
+
+/// Version history entry — stores path to previous version on disk.
+model DocumentVersion {
+  id          String   @id @default(cuid())
+  documentId  String
+  version     Int
+  storagePath String   // e.g. /secure-storage/versions/{docId}/{version}.docx
+  fileSize    Int      @default(0)
+  changeType  String   @default("edit") // "edit" | "autosave" | "force_save" | "restore"
+  changedBy   String?  // userId who triggered the save
+  createdAt   DateTime @default(now())
+  document    Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, version])
+  @@index([documentId])
+  @@index([createdAt])
+}
+
+/// Append-only audit log for every document event.
+model DocumentAuditLog {
+  id         String   @id @default(cuid())
+  documentId String
+  userId     String?
+  action     String   // "upload" | "view" | "edit" | "download" | "delete"
+  ipAddress  String?
+  userAgent  String?
+  metadata   String?  // JSON — extra context
+  createdAt  DateTime @default(now())
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+/// Real-time collaboration chat messages per document.
+model DocumentChatMessage {
+  id         String   @id @default(cuid())
+  fileId     String
+  sender     String
+  level      Int      @default(2)
+  message    String
+  isPrivate  Boolean  @default(false)
+  targetUser String?
+  isSystem   Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([fileId])
+  @@index([createdAt])
 }

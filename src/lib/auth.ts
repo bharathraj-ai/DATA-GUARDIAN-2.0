@@ -21,12 +21,13 @@ export const authOptions: NextAuthOptions = {
         GoogleProvider({
             clientId: process.env.GOOGLE_CLIENT_ID!,
             clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+            httpOptions: {
+                timeout: 10000,
+            },
             // Force account selection every time for security
             authorization: {
                 params: {
                     prompt: 'select_account',
-                    access_type: 'offline',
-                    response_type: 'code',
                 },
             },
         }),
@@ -135,13 +136,10 @@ export const authOptions: NextAuthOptions = {
         async session({ session, user }) {
             if (session.user) {
                 session.user.id = user.id;
-                // Fetch role from database (server-side truth)
-                const dbUser = await prisma.user.findUnique({
-                    where: { id: user.id },
-                    select: { role: true, roleSelected: true },
-                });
-                (session.user as any).role = dbUser?.role || 'VENDOR';
-                (session.user as any).roleSelected = dbUser?.roleSelected ?? false;
+                // NextAuth PrismaAdapter already fetches the full user object from the database.
+                // We can access custom fields directly without an extra database query.
+                session.user.role = ((user as any).role as 'OWNER' | 'VENDOR') || 'VENDOR';
+                session.user.roleSelected = (user as any).roleSelected ?? false;
             }
             return session;
         },
@@ -152,6 +150,17 @@ export const authOptions: NextAuthOptions = {
     },
     // Disable debug mode in production to avoid leaking secrets
     debug: process.env.NODE_ENV === 'development',
+    logger: {
+        error(code, metadata) {
+            console.error(`[NEXTAUTH ERROR] ${code}`, metadata);
+        },
+        warn(code) {
+            console.warn(`[NEXTAUTH WARN] ${code}`);
+        },
+        debug(code, metadata) {
+            console.debug(`[NEXTAUTH DEBUG] ${code}`, metadata);
+        }
+    },
     events: {
         /**
          * Auto-create new users as VENDOR role by default

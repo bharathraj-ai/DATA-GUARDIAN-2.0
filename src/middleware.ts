@@ -28,7 +28,7 @@ function isFromSearchEngine(referer: string | null): boolean {
 }
 
 /**
- * Middleware for Data Guardian
+ * Middleware for Secure Protocol
  * 
  * Security layers:
  * 1. Disables caching for all dynamic routes
@@ -54,7 +54,8 @@ export function middleware(request: NextRequest) {
     const isSecureRoute =
         pathname.startsWith('/share/') ||
         pathname.startsWith('/view/') ||
-        pathname.startsWith('/revoke/');
+        pathname.startsWith('/revoke/') ||
+        pathname.startsWith('/editor/');
 
     // SECURITY: Block access from search engine referrers
     if (isSecureRoute) {
@@ -87,7 +88,7 @@ export function middleware(request: NextRequest) {
     // Disable caching for all dynamic routes
     if (
         isSecureRoute ||
-        pathname.startsWith('/signup') ||
+        pathname.startsWith('/create-link') ||
         pathname.startsWith('/api/') ||
         pathname.startsWith('/auth/')
     ) {
@@ -105,9 +106,10 @@ export const config = {
         '/share/:path*',
         '/view/:path*',
         '/revoke/:path*',
-        '/signup',
+        '/create-link',
         '/api/((?!auth).*)',
         '/auth/:path*',
+        '/editor/:path*',
     ],
 };
 

@@ -9,7 +9,9 @@ import {
     encryptData,
     generateDataHash,
     generateOwnerToken,
-    encryptBuffer
+    encryptBuffer,
+    generateDek,
+    encryptDek
 } from '@/lib/crypto';
 import { userDataSchema, fileSchema, ACCEPTED_FILE_TYPES } from '@/lib/validations';
 import { z } from 'zod';
@@ -53,9 +55,34 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
         const purposeDetail = formData.get('purposeDetail') as string | null;
         const notificationEmail = formData.get('notificationEmail') as string | null;
 
-        // Zero Trust: Extract vendor email for email binding
-        const vendorEmail = formData.get('vendorEmail') as string | null;
+        // V2.2: Topic is mandatory — owner must describe what they're sharing
+        const topic = (purpose || '').trim();
+        if (!topic) {
+            return { success: false, error: 'Topic is required. Please describe what data you are sharing.' };
+        }
 
+        // Zero Trust: Extract vendor email for email binding (Legacy/Fallback)
+        const vendorEmail = formData.get('vendorEmail') as string | null;
+        const vendorsStr = formData.get('vendors') as string | null;
+        
+        // Parse hierarchical vendors
+        let vendors: { email: string; level: number }[] = [];
+        if (vendorsStr) {
+            try {
+                vendors = JSON.parse(vendorsStr);
+            } catch (e) {
+                return { success: false, error: 'Invalid vendors JSON format' };
+            }
+        } else if (vendorEmail) {
+            // Fallback: Make them a standard Level 2 user
+            vendors = [{ email: vendorEmail.toLowerCase(), level: 2 }];
+        }
+
+        if (vendors.length === 0) {
+            return { success: false, error: 'At least one vendor is required. Specify who you are sending data to.' };
+        }
+
+        const allowEditing = formData.get('allowEditing') === 'true';
         const validatedData = userDataSchema.safeParse(rawData);
         if (!validatedData.success) {
             return {
@@ -119,18 +146,34 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
         // 4. Generate Security Artifacts - PARALLELIZE crypto operations
         const token = generateSecureToken();
         const ownerToken = generateOwnerToken();
-        const otp = generateOTP();
+        const globalOtp = generateOTP(); // Fallback/Global OTP
         const expiresAt = calculateExpiry(validityMinutes);
 
-        // Run OTP hashing, user data encryption, and file encryption IN PARALLEL
-        const [otpHash, encryptedUserData, dataHash, encryptedFiles] = await Promise.all([
-            hashOTP(otp),
+        // Generate per-vendor OTPs
+        const vendorAcessData = await Promise.all(
+            vendors.map(async (v) => {
+                const vendorOtp = generateOTP();
+                const vendorOtpHash = await hashOTP(vendorOtp);
+                return {
+                    email: v.email,
+                    level: v.level,
+                    otp: vendorOtp,
+                    otpHash: vendorOtpHash
+                };
+            })
+        );
+
+        // Run global OTP hashing, user data encryption, and file encryption IN PARALLEL
+        const [globalOtpHash, encryptedUserData, dataHash, encryptedFiles] = await Promise.all([
+            hashOTP(globalOtp),
             Promise.resolve(encryptData(userData)),
             Promise.resolve(generateDataHash(userData)),
             Promise.all(
                 files.map(async (file) => {
                     const buffer = Buffer.from(await file.arrayBuffer());
-                    const { iv, authTag, encryptedContent } = encryptBuffer(buffer);
+                    const dek = generateDek();
+                    const { iv, authTag, encryptedContent } = encryptBuffer(buffer, dek);
+                    const encryptedDek = encryptDek(dek);
                     return {
                         fileName: file.name,
                         fileType: file.type,
@@ -138,6 +181,7 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
                         encryptedContent,
                         iv,
                         authTag,
+                        encryptedDek,
                     };
                 })
             ),
@@ -158,21 +202,49 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
                 data: {
                     token,
                     ownerToken,
-                    otpHash,
-                    otpPlain: otp,
+                    otpHash: globalOtpHash,
+                    otpPlain: globalOtp,
                     expiresAt,
                     userId: userDataRecord.id,
                     // OWNER BINDING: Associate link with authenticated user
                     ownerId: session.user.id,
-                    // V2.1 Additions
-                    purpose: purpose || undefined,
+                    purpose: topic,
                     purposeDetail: purposeDetail || undefined,
                     notificationEmail: notificationEmail || undefined,
                     // Zero Trust: Email binding - only this email can verify OTP
                     allowedVendorEmail: vendorEmail || undefined,
+                    allowEditing,
+                    LinkAccess: {
+                        create: vendorAcessData.map(v => ({ 
+                            vendorEmail: v.email, 
+                            level: v.level,
+                            otpHash: v.otpHash,
+                            otpPlain: v.otp
+                        })),
+                    },
                     UserFile: {
                         create: encryptedFiles,
                     },
+                    VendorAccess: {
+                        create: vendors.map(v => ({
+                            email: v.email.toLowerCase(),
+                            level: v.level,
+                            maxLogins: 3
+                        }))
+                    }
+                },
+            });
+
+            // V2.2: Create a SendRecord that SURVIVES data deletion
+            // Owner can always see WHO they sent data to and WHAT topic
+            await tx.sendRecord.create({
+                data: {
+                    ownerId: session.user.id,
+                    topic,
+                    vendorEmail: vendors.map(v => v.email).join(', '),
+                    fileCount: files.length,
+                    status: 'active',
+                    expiredAt: expiresAt,
                 },
             });
 
@@ -201,11 +273,22 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
 
         console.log(`[SECURE] Link created with ${files.length} files. ID: ${result.id}`);
 
+        // 📧 Send OTP email to all vendors per their unique OTPs (fire-and-forget)
+        if (vendorAcessData.length > 0) {
+            import('@/lib/email').then(({ sendOTPEmail }) => {
+                vendorAcessData.forEach(v => {
+                    sendOTPEmail(v.email, token, v.otp, validityMinutes)
+                        .then(() => console.log(`[EMAIL] OTP sent to ${v.email.substring(0, 3)}***`))
+                        .catch((err) => console.error('[EMAIL] Failed to send OTP:', err.message));
+                });
+            });
+        }
+
         return {
             success: true,
             shareUrl,
             ownerUrl,
-            otp,
+            otp: globalOtp,
             expiresAt,
             purpose: purpose || undefined,  // V2.1: Return for UI confirmation
         };

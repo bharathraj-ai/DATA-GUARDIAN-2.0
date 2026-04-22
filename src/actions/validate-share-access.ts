@@ -31,7 +31,11 @@ export async function validateShareAccess(token: string): Promise<ValidateShareA
                 expiresAt: true,
                 lockedAt: true,
                 failedAttempts: true,
-                allowedVendorEmail: true,
+                LinkAccess: {
+                    select: {
+                        vendorEmail: true,
+                    }
+                },
             },
         });
 
@@ -45,7 +49,7 @@ export async function validateShareAccess(token: string): Promise<ValidateShareA
         }
 
         // Check if link is locked
-        if (secureLink.lockedAt || secureLink.failedAttempts >= 1) {
+        if (secureLink.lockedAt || secureLink.failedAttempts >= 3) {
             return {
                 allowed: false,
                 requiresAuth: false,
@@ -78,7 +82,7 @@ export async function validateShareAccess(token: string): Promise<ValidateShareA
         }
 
         // SECURITY: If link has an allowed vendor email, enforce authentication
-        if (secureLink.allowedVendorEmail) {
+        if (secureLink.LinkAccess && secureLink.LinkAccess.length > 0) {
             const session = await auth();
             const userEmail = session?.user?.email;
 
@@ -91,7 +95,11 @@ export async function validateShareAccess(token: string): Promise<ValidateShareA
                 };
             }
 
-            if (userEmail.toLowerCase() !== secureLink.allowedVendorEmail.toLowerCase()) {
+            const isAllowed = secureLink.LinkAccess.some(
+                access => access.vendorEmail.toLowerCase() === userEmail.toLowerCase()
+            );
+
+            if (!isAllowed) {
                 // Log the unauthorized access attempt
                 await prisma.auditLog.create({
                     data: {

@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { setUserRole } from '@/actions/set-role';
+import Image from 'next/image';
 
 export default function RoleSelectPage() {
     const router = useRouter();
@@ -54,10 +55,10 @@ export default function RoleSelectPage() {
 
     if (sessionStatus === 'loading') {
         return (
-            <main className="signup-page">
-                <section className="signup-section">
+            <main className="app-page">
+                <section className="app-section">
                     <div className="container">
-                        <div className="signup-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
+                        <div className="app-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
                             <div style={{ textAlign: 'center' }}>
                                 <div className="button-spinner" style={{ width: '48px', height: '48px', margin: '0 auto 16px' }}></div>
                                 <p style={{ color: 'var(--color-text-secondary)' }}>Loading...</p>
@@ -70,24 +71,21 @@ export default function RoleSelectPage() {
     }
 
     return (
-        <main className="signup-page">
-            <section className="signup-section">
+        <main className="app-page">
+            <section className="app-section">
                 <div className="container">
-                    <div className="signup-container" style={{ maxWidth: '640px' }}>
+                    <div className="app-container" style={{ maxWidth: '640px' }}>
                         {/* Header */}
-                        <div className="signup-header">
+                        <div className="app-header">
                             <div className="brand-badge" style={{ marginBottom: '24px', justifyContent: 'center' }}>
-                                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                                    <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-                                </svg>
-                                <span className="gradient-text" style={{ fontSize: '1.5rem' }}>Data Guardian</span>
+                                <Image src="/logo.svg" alt="Secure Protocol" width={32} height={32} style={{ opacity: 0.9 }}/>
+                                <span className="gradient-text" style={{ fontSize: '1.5rem', fontWeight: 600 }}>Secure Protocol</span>
                             </div>
-                            <h1 className="signup-page-title">
+                            <h1 className="app-page-title">
                                 Choose Your <span className="gradient-text">Role</span>
                             </h1>
-                            <p className="signup-page-subtitle">
-                                Welcome{session?.user?.name ? `, ${session.user.name}` : ''}! Select how you&apos;ll use Data Guardian.
+                            <p className="app-page-subtitle">
+                                Welcome{session?.user?.name ? `, ${session.user.name}` : ''}! Select how you&apos;ll use Secure Protocol.
                             </p>
                         </div>
 
@@ -220,7 +218,7 @@ export default function RoleSelectPage() {
                         </div>
 
                         {/* Info */}
-                        <div className="signup-form-card" style={{ padding: '20px 24px' }}>
+                        <div className="app-form-card" style={{ padding: '20px 24px' }}>
                             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
                                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" strokeWidth="2" style={{ flexShrink: 0, marginTop: '2px' }}>
                                     <circle cx="12" cy="12" r="10"></circle>

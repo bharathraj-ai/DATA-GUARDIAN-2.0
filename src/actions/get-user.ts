@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { decryptData } from '@/lib/crypto';
 import { maskEmail, maskPhone } from '@/lib/masking';
 import { cookies } from 'next/headers';
+import { auth } from '@/lib/auth';
 import { cleanupSingleLink } from '@/actions/cleanup';
 
 // Cache Redis availability check at module load (performance optimization)
@@ -62,7 +63,15 @@ export type MaskedUserData = {
     age: number;
     expiresAt: Date;
     remainingSeconds: number;
+    allowEditing: boolean;
+    level: number;
     files: FileMetadata[];
+    // Sender & purpose info
+    purpose: string | null;
+    purposeDetail: string | null;
+    ownerName: string | null;
+    ownerEmail: string | null;
+    myAssignedLevel?: number;
 };
 
 export type GetUserDataResult = {
@@ -123,7 +132,21 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
                         fileType: true,
                         fileSize: true,
                     }
-                }
+                },
+                User: {
+                    select: {
+                        name: true,
+                        email: true,
+                    }
+                },
+                LinkAccess: {
+                    select: {
+                        vendorEmail: true,
+                        level: true,
+                        isUsed: true,
+                    }
+                },
+                VendorAccess: true
             },
         });
 
@@ -145,8 +168,16 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
             };
         }
 
+        // Get effective access state (Per-vendor if available, otherwise global legacy)
+        const authSession = await auth();
+        const userEmail = authSession?.user?.email;
+        const vendorAccess = secureLink.LinkAccess?.find(
+            a => userEmail && a.vendorEmail.toLowerCase() === userEmail.toLowerCase()
+        );
+        const isUsed = vendorAccess ? vendorAccess.isUsed : secureLink.isUsed;
+
         // Check if link was verified (must be used to view data)
-        if (!secureLink.isUsed) {
+        if (!isUsed) {
             return {
                 success: false,
                 error: 'Please verify with OTP first.',
@@ -183,6 +214,19 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
             };
         }
 
+        // Determine the vendor's assigned level from either LinkAccess or VendorAccess
+        let currentUserLevel = 2; // default member
+        const vendorEmailStore = cookieStore.get('vendor_email')?.value;
+        
+        if (vendorAccess) {
+            currentUserLevel = vendorAccess.level;
+        } else if (vendorEmailStore && secureLink.VendorAccess) {
+             const vendor = secureLink.VendorAccess.find(v => v.email === vendorEmailStore.toLowerCase());
+             if (vendor) {
+                 currentUserLevel = vendor.level;
+             }
+        }
+
         // Return masked user data (never expose full PII to frontend)
         return {
             success: true,
@@ -195,7 +239,14 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
                 age: decryptedData.age,
                 expiresAt: secureLink.expiresAt,
                 remainingSeconds,
+                allowEditing: secureLink.allowEditing,
+                level: currentUserLevel,
                 files: secureLink.UserFile || [],
+                purpose: secureLink.purpose,
+                purposeDetail: secureLink.purposeDetail,
+                ownerName: secureLink.User?.name || null,
+                ownerEmail: secureLink.User?.email || null,
+                myAssignedLevel: currentUserLevel,
             },
         };
     } catch (error) {
