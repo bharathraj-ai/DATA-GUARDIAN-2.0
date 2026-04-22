@@ -30,10 +30,10 @@ export default function DashboardPage() {
     }, [sessionStatus, userRole, router]);
 
     return (
-        <main className="signup-page">
-            <section className="signup-section">
+        <main className="app-page">
+            <section className="app-section">
                 <div className="container">
-                    <div className="signup-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
+                    <div className="app-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
                         <div style={{ textAlign: 'center' }}>
                             <div className="button-spinner" style={{ width: '48px', height: '48px', margin: '0 auto 16px' }}></div>
                             <p style={{ color: 'var(--text-secondary)' }}>Redirecting to your dashboard...</p>

@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  output: 'standalone',
+  // output: 'standalone', // Uncomment this ONLY for Docker/Linux deployments. Turbopack on Windows throws EINVAL due to 'node:crypto' chunk renaming.
 
   // Enable GZIP/Brotli compression
   compress: true,
@@ -18,6 +18,9 @@ const nextConfig: NextConfig = {
   },
 
   // Experimental features
+  // ONLYOFFICE JWT uses Node.js crypto — must be external
+  serverExternalPackages: ['jsonwebtoken'],
+
   experimental: {
     serverActions: {
       bodySizeLimit: '150mb',
@@ -37,6 +40,18 @@ const nextConfig: NextConfig = {
   // Optimized image handling
   images: {
     formats: ['image/avif', 'image/webp'],
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'lh3.googleusercontent.com',
+        pathname: '/**',
+      },
+      {
+        protocol: 'https',
+        hostname: 'avatars.githubusercontent.com',
+        pathname: '/**',
+      }
+    ],
     minimumCacheTTL: 3600, // 1 hour (was 60s — too aggressive)
     deviceSizes: [640, 750, 828, 1080, 1200],
     imageSizes: [16, 32, 48, 64, 96, 128, 256],
@@ -92,6 +107,18 @@ const nextConfig: NextConfig = {
           { key: 'Pragma', value: 'no-cache' },
         ],
       },
+      // ONLYOFFICE editor — no-cache + CSP allowing ONLYOFFICE iframe
+      {
+        source: '/editor/:path*',
+        headers: [
+          { key: 'Cache-Control', value: 'no-store, no-cache, must-revalidate, max-age=0' },
+          { key: 'Pragma', value: 'no-cache' },
+          {
+            key: 'Content-Security-Policy',
+            value: `frame-src 'self' ${process.env.ONLYOFFICE_SERVER_URL || 'http://localhost:8080'}; script-src 'self' 'unsafe-inline' 'unsafe-eval' ${process.env.ONLYOFFICE_SERVER_URL || 'http://localhost:8080'}`,
+          },
+        ],
+      },
       // AGGRESSIVE CACHE for static assets (1 year, immutable)
       {
         source: '/_next/static/(.*)',
@@ -116,7 +143,9 @@ const nextConfig: NextConfig = {
   },
 
   // Turbopack config (Next.js 16 default bundler)
-  turbopack: {},
+  turbopack: {
+    root: __dirname,
+  },
 
   // Webpack optimizations (fallback for non-Turbopack builds)
   webpack: (config, { isServer }) => {

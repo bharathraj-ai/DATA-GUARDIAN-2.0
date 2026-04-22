@@ -1,4 +1,10 @@
 import Link from 'next/link';
+import type { Metadata } from 'next';
+
+export const metadata: Metadata = {
+    title: 'How It Works | Secure Protocol',
+    description: 'Learn how Secure Protocol secures your data in three simple steps: enter information, get encrypted link with OTP, and share securely with time-limited access.',
+};
 
 export default function HowItWorksPage() {
     return (
@@ -8,7 +14,7 @@ export default function HowItWorksPage() {
                 <div className="container">
                     <div className="how-hero-content">
                         <h1 className="how-hero-title">
-                            How <span className="gradient-text">Data Guardian</span> Works
+                            How <span className="gradient-text">Secure Protocol</span> Works
                         </h1>
                         <p className="how-hero-subtitle">
                             Secure data sharing in three simple steps. No technical expertise required.
@@ -270,7 +276,6 @@ export default function HowItWorksPage() {
 
                     <div className="use-cases-grid">
                         <div className="use-case-card">
-                            <div className="use-case-emoji">💼</div>
                             <h4 className="use-case-title">Business Documents</h4>
                             <p className="use-case-description">
                                 Share contracts, NDAs, financial reports, and confidential business information securely.
@@ -278,7 +283,6 @@ export default function HowItWorksPage() {
                         </div>
 
                         <div className="use-case-card">
-                            <div className="use-case-emoji">🏥</div>
                             <h4 className="use-case-title">Medical Records</h4>
                             <p className="use-case-description">
                                 HIPAA-compliant sharing of patient records, test results, and sensitive health information.
@@ -286,7 +290,6 @@ export default function HowItWorksPage() {
                         </div>
 
                         <div className="use-case-card">
-                            <div className="use-case-emoji">⚖️</div>
                             <h4 className="use-case-title">Legal Documents</h4>
                             <p className="use-case-description">
                                 Securely share case files, evidence, client information, and legal correspondence.
@@ -294,7 +297,6 @@ export default function HowItWorksPage() {
                         </div>
 
                         <div className="use-case-card">
-                            <div className="use-case-emoji">🎓</div>
                             <h4 className="use-case-title">Academic Research</h4>
                             <p className="use-case-description">
                                 Share research data, unpublished papers, and confidential academic materials safely.
@@ -302,7 +304,6 @@ export default function HowItWorksPage() {
                         </div>
 
                         <div className="use-case-card">
-                            <div className="use-case-emoji">🏦</div>
                             <h4 className="use-case-title">Financial Data</h4>
                             <p className="use-case-description">
                                 Transmit bank statements, tax documents, and sensitive financial information securely.
@@ -310,7 +311,6 @@ export default function HowItWorksPage() {
                         </div>
 
                         <div className="use-case-card">
-                            <div className="use-case-emoji">👤</div>
                             <h4 className="use-case-title">Personal Information</h4>
                             <p className="use-case-description">
                                 Share ID documents, passwords, private photos, and personal data with confidence.
@@ -329,7 +329,7 @@ export default function HowItWorksPage() {
                             Create your first secure link in less than 60 seconds
                         </p>
                         <div className="how-cta-buttons">
-                            <Link href="/signup" className="btn btn-primary btn-large">
+                            <Link href="/create-link" className="btn btn-primary btn-large">
                                 <span>Create Secure Link Now</span>
                                 <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
                                     <path fillRule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clipRule="evenodd" />
