@@ -15,47 +15,7 @@ interface DecryptedUserData {
     age: number;
 }
 
-// Cache Redis availability check at module load (performance optimization)
-const isRedisConfigured = !!(
-    process.env.UPSTASH_REDIS_REST_URL &&
-    process.env.UPSTASH_REDIS_REST_TOKEN &&
-    !process.env.UPSTASH_REDIS_REST_URL.includes('your-redis')
-);
-
-// Helper to check Redis if configured
-async function tryIsTokenRevoked(token: string): Promise<boolean | null> {
-    if (!isRedisConfigured) return null;
-
-    try {
-        const { isTokenRevoked } = await import('@/lib/redis');
-        return await isTokenRevoked(token);
-    } catch {
-        return null;
-    }
-}
-
-async function tryValidateSession(token: string, sessionId: string): Promise<boolean | null> {
-    if (!isRedisConfigured) return null;
-
-    try {
-        const { validateSession } = await import('@/lib/redis');
-        return await validateSession(token, sessionId);
-    } catch {
-        return null;
-    }
-}
-
-async function tryGetSessionTTL(token: string, sessionId: string, fallback: number): Promise<number> {
-    if (!isRedisConfigured) return fallback;
-
-    try {
-        const { getSessionTTL } = await import('@/lib/redis');
-        const ttl = await getSessionTTL(token, sessionId);
-        return ttl > 0 ? ttl : fallback;
-    } catch {
-        return fallback;
-    }
-}
+import { tryCheckRevoked, tryValidateSession, tryGetSessionTTL } from '@/lib/redis-helpers';
 
 /**
  * Server-Sent Events (SSE) endpoint for streaming decrypted data
@@ -80,12 +40,14 @@ export async function GET(
     }
 
     // Check revocation in Redis (if available)
-    const revokedInRedis = await tryIsTokenRevoked(token);
+    // null = Redis unavailable → fall through to DB check below
+    const revokedInRedis = await tryCheckRevoked(token);
     if (revokedInRedis === true) {
         return new Response('Access revoked', { status: 403 });
     }
 
     // Validate session in Redis (if available)
+    // null = Redis unavailable → fall through to DB-level auth
     const sessionValid = await tryValidateSession(token, sessionId);
     if (sessionValid === false) {
         return new Response('Session invalid or expired', { status: 401 });
@@ -94,7 +56,7 @@ export async function GET(
     // Get secure link and encrypted data
     const secureLink = await prisma.secureLink.findUnique({
         where: { token },
-        include: { 
+        include: {
             UserData: true,
             LinkAccess: {
                 select: {
@@ -176,7 +138,7 @@ export async function GET(
                 expiresAt: secureLink.expiresAt.toISOString(),
                 remainingSeconds: initialSeconds,
             };
-            
+
             try {
                 safeEnqueue(encoder.encode(`data: ${JSON.stringify(initialData)}\n\n`));
             } catch (e) {
@@ -185,7 +147,7 @@ export async function GET(
             }
 
             const startTime = Date.now();
-            
+
             // Track active session presence
             try {
                 await prisma.documentSession.create({
@@ -248,25 +210,25 @@ export async function GET(
 
                 try {
                     // KILL SWITCH: Check Redis first (faster ~10-50ms) before DB
-                    const revokedInRedis = await tryIsTokenRevoked(token);
+                    const revokedInRedis = await tryCheckRevoked(token);
                     if (revokedInRedis === true) {
                         safeEnqueue(encoder.encode(`data: ${JSON.stringify({ type: 'revoked' })}\n\n`));
                         clearInterval(heartbeatInterval);
                         safeClose();
-                        logSessionEnd('revoked');
+                        await logSessionEnd('revoked');
                         return;
                     }
 
                     // Validate session still exists in Redis
+                    // null = Redis unavailable → skip, DB fallback below handles it
                     const sessionValid = await tryValidateSession(token, sessionId);
                     if (sessionValid === false) {
                         safeEnqueue(encoder.encode(`data: ${JSON.stringify({ type: 'session_invalid' })}\n\n`));
                         clearInterval(heartbeatInterval);
                         safeClose();
-                        logSessionEnd('session_invalidated');
+                        await logSessionEnd('session_invalidated');
                         return;
                     }
-
                     // Check DB for revocation (fallback when Redis not configured)
                     const link = await prisma.secureLink.findUnique({
                         where: { token },
@@ -277,7 +239,7 @@ export async function GET(
                         safeEnqueue(encoder.encode(`data: ${JSON.stringify({ type: 'revoked' })}\n\n`));
                         clearInterval(heartbeatInterval);
                         safeClose();
-                        logSessionEnd('revoked');
+                        await logSessionEnd('revoked');
                         // AUTO-CLEANUP: Purge all data when revoked
                         cleanupSingleLink(token).catch(() => { });
                         return;
@@ -291,7 +253,7 @@ export async function GET(
                         safeEnqueue(encoder.encode(`data: ${JSON.stringify({ type: 'expired' })}\n\n`));
                         clearInterval(heartbeatInterval);
                         safeClose();
-                        logSessionEnd('expired');
+                        await logSessionEnd('expired');
                         // AUTO-CLEANUP: Purge all data when time expires
                         cleanupSingleLink(token).catch(() => { });
                         return;
@@ -353,15 +315,15 @@ export async function GET(
                     console.error('Heartbeat error:', error instanceof Error ? error.message : 'Unknown');
                     clearInterval(heartbeatInterval);
                     safeClose();
-                    logSessionEnd('error');
+                    await logSessionEnd('error');
                 }
             }, 3000); // 3 second heartbeat for near-instant kill switch
 
             // Cleanup on abort
-            request.signal.addEventListener('abort', () => {
+            request.signal.addEventListener('abort', async () => {
                 clearInterval(heartbeatInterval);
                 safeClose();
-                logSessionEnd('client_disconnect');
+                await logSessionEnd('client_disconnect');
             });
         },
     });

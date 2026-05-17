@@ -42,22 +42,19 @@ async function logSecurityEvent(action: string, linkId: string | null, metadata:
     }
 }
 
+export type AuthorizeApiOptions = {
+    /** Actual HTTP method from NextRequest.method — required for correct CSRF policy. */
+    httpMethod: string;
+};
+
 /**
- * GOD-LEVEL: Zero-Trust Authorization System
- * Validates completely independent of client trust mechanisms.
- * 
- * Flow:
- * 1. Global Rate Limiting
- * 2. Strict Anti-CSRF (Origin/Host match)
- * 3. Replay Attack Prevention (Nonce + Timestamp)
- * 4. HttpOnly Session Cookie presence
- * 5. Redis Cross-Check (Active Session vs Revoked)
- * 6. Hard DB Verification (Resource Bound Enforcement)
- * 7. Lifecycle Binding (Expiries & Locks)
- * 8. Device Context Binding (Session Hijacking check & force-logout anomaly)
- * 9. Vendor Email Binding (Zero Trust Cloud Identity)
+ * Zero-trust gate for UserFile-scoped APIs (share-token + ephemeral session).
  */
-export async function authorizeApiRequest(fileId: string, token: string) {
+export async function authorizeApiRequest(
+    fileId: string,
+    token: string,
+    options: AuthorizeApiOptions,
+) {
     if (!token || !fileId) {
         return { errorResponse: NextResponse.json({ error: 'Zero-Trust Violation: Missing parameters' }, { status: 400 }) };
     }
@@ -74,17 +71,23 @@ export async function authorizeApiRequest(fileId: string, token: string) {
         return { errorResponse: NextResponse.json({ error: 'Too Many Requests' }, { status: 429 }) };
     }
 
-    // 2. Strict Anti-CSRF (Check Origin / Host alignment)
-    // Only enforced for mutating REST calls (usually POST/PUT/DELETE)
-    const method = _headers.get('x-http-method-override') || 'POST'; // We assume mutations in this context
+    // 2. Anti-CSRF: only state-changing methods require Origin alignment with Host
+    const method = (options.httpMethod || 'GET').toUpperCase();
     const origin = _headers.get('origin');
     const host = _headers.get('host');
-    
-    // In production, ensure origin matches host precisely.
-    if (process.env.NODE_ENV === 'production' && method !== 'GET') {
-        if (origin && host && new URL(origin).host !== host) {
-            await logSecurityEvent('DENIED', null, { ip, reason: 'CSRF Origin mismatch', origin, host });
-            return { errorResponse: NextResponse.json({ error: 'CSRF Violation: Origin mismatch' }, { status: 403 }) };
+    const mutating = !['GET', 'HEAD', 'OPTIONS'].includes(method);
+
+    if (process.env.NODE_ENV === 'production' && mutating) {
+        if (origin && host) {
+            try {
+                if (new URL(origin).host !== host) {
+                    await logSecurityEvent('DENIED', null, { ip, reason: 'CSRF Origin mismatch', origin, host, method });
+                    return { errorResponse: NextResponse.json({ error: 'CSRF Violation: Origin mismatch' }, { status: 403 }) };
+                }
+            } catch {
+                await logSecurityEvent('DENIED', null, { ip, reason: 'Invalid Origin header', origin, method });
+                return { errorResponse: NextResponse.json({ error: 'CSRF Violation: Invalid Origin' }, { status: 403 }) };
+            }
         }
     }
 
@@ -137,8 +140,9 @@ export async function authorizeApiRequest(fileId: string, token: string) {
     const file = await prisma.userFile.findUnique({
         where: { id: fileId },
         include: { 
+            mongoFile: true,
             SecureLink: {
-                include: { VendorAccess: true }
+                include: { VendorAccess: true, LinkAccess: true }
             } 
         }
     });
@@ -187,17 +191,21 @@ export async function authorizeApiRequest(fileId: string, token: string) {
         return { errorResponse: NextResponse.json({ error: 'Forbidden: Environmental Context Changed (Session Hijacked)' }, { status: 403 }) };
     }
 
+    const hasEmailGate =
+        Boolean(secureLink.allowedVendorEmail) ||
+        secureLink.VendorAccess.length > 0 ||
+        (secureLink.LinkAccess?.length ?? 0) > 0;
+
     // 9. Vendor Email Binding (Zero Trust Cloud Identity)
-    if (secureLink.allowedVendorEmail || secureLink.VendorAccess.length > 0) {
-        const vendorEmailCookie = cookieStore.get('vendor_email')?.value;
+    if (hasEmailGate) {
         const session = await auth();
         const userEmail = session?.user?.email;
 
-        const effectiveEmail = vendorEmailCookie || userEmail;
+        const effectiveEmail = userEmail;
 
         if (!effectiveEmail) {
             await logSecurityEvent('DENIED', secureLink.id, { ip, reason: 'Missing Identity' });
-            return { errorResponse: NextResponse.json({ error: 'Unauthorized: Required cloud identity or vendor session missing' }, { status: 401 }) };
+            return { errorResponse: NextResponse.json({ error: 'Unauthorized: Required cloud identity missing' }, { status: 401 }) };
         }
 
         const effectiveEmailLower = effectiveEmail.toLowerCase();
@@ -207,10 +215,19 @@ export async function authorizeApiRequest(fileId: string, token: string) {
         if (secureLink.allowedVendorEmail && secureLink.allowedVendorEmail.toLowerCase() === effectiveEmailLower) {
             isAuthorized = true;
         } else {
-            const vendor = secureLink.VendorAccess.find(v => v.email === effectiveEmailLower);
+            const vendor = secureLink.VendorAccess.find(v => v.email.toLowerCase() === effectiveEmailLower);
             if (vendor && !vendor.isRevoked) {
                 isAuthorized = true;
                 detectedLevel = vendor.level;
+            }
+            if (!isAuthorized && secureLink.LinkAccess?.length) {
+                const access = secureLink.LinkAccess.find(
+                    (l) => l.vendorEmail.toLowerCase() === effectiveEmailLower,
+                );
+                if (access && !access.lockedAt) {
+                    isAuthorized = true;
+                    detectedLevel = access.level;
+                }
             }
         }
 

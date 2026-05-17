@@ -42,7 +42,6 @@ export default function SignupPage() {
     });
     const [files, setFiles] = useState<FileList | null>(null);
     const [generatedLink, setGeneratedLink] = useState('');
-    const [otp, setOtp] = useState('');
     const [ownerUrl, setOwnerUrl] = useState('');
     const [status, setStatus] = useState({ message: '', type: '' });
     const [vendorError, setVendorError] = useState('');
@@ -193,7 +192,6 @@ export default function SignupPage() {
                 router.refresh();
 
                 setGeneratedLink(result.shareUrl);
-                setOtp(result.otp || '');
                 setOwnerUrl(result.ownerUrl || '');
                 setStatus({ message: 'Secure link created! OTP sent to vendor\'s email.', type: 'success' });
 
@@ -265,9 +263,7 @@ export default function SignupPage() {
             }
             setStatus({ message: 'Link copied!', type: 'success' });
             setTimeout(() => {
-                if (otp) {
-                    setStatus({ message: 'Link generated successfully! OTP shown below.', type: 'success' });
-                }
+                setStatus({ message: 'Link generated successfully!', type: 'success' });
             }, 1500);
         } catch (err) {
             console.error('Copy failed:', err);
@@ -485,6 +481,7 @@ export default function SignupPage() {
                                                 className="form-input"
                                                 placeholder="vendor@example.com"
                                                 required={sharingMode === 'individual'}
+                                                autoComplete="off"
                                                 list="vendor-emails"
                                             />
                                             <datalist id="vendor-emails">
@@ -777,7 +774,6 @@ export default function SignupPage() {
                                     onClick={() => {
                                         // Clear all state
                                         setGeneratedLink('');
-                                        setOtp('');
                                         setOwnerUrl('');
                                         setQrDataUrl('');
                                         setCountdown(null);
@@ -793,6 +789,7 @@ export default function SignupPage() {
                                             gender: '',
                                             age: '',
                                             validityMinutes: '',
+                                            validityUnit: 'minutes',
                                             vendors: [{ email: '', level: 1 }],
                                             vendorEmail: '',
                                             topic: '',

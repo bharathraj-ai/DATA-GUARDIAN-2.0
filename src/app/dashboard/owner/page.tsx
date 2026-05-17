@@ -7,7 +7,6 @@ import { useSession } from 'next-auth/react';
 import { getOwnedLinks, DashboardLink, getSendHistory, SendHistoryRecord } from '@/actions/dashboard';
 import { getUnifiedAuditLogs, UnifiedAuditLog } from '@/actions/audit-logs';
 import { revokeAccess } from '@/actions/revoke-access';
-import { downloadFile } from '@/actions/download-file';
 import dynamic from 'next/dynamic';
 
 const LiveActivityModal = dynamic(() => import('@/components/LiveActivityModal'), {
@@ -25,7 +24,6 @@ export default function OwnerDashboardPage() {
     const [revokingId, setRevokingId] = useState<string | null>(null);
     const [confirmRevokeId, setConfirmRevokeId] = useState<string | null>(null);
     const [expandedId, setExpandedId] = useState<string | null>(null);
-    const [downloadingId, setDownloadingId] = useState<string | null>(null);
     const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
     const [activeTab, setActiveTab] = useState<'links' | 'history' | 'audit'>('links');
     const [liveActivityLink, setLiveActivityLink] = useState<{token: string, topic: string} | null>(null);
@@ -194,38 +192,6 @@ export default function OwnerDashboardPage() {
         }
     };
 
-    const handleDownload = async (fileId: string) => {
-        setDownloadingId(fileId);
-        try {
-            const result = await downloadFile(fileId);
-            if (result.success && result.fileContent && result.fileName && result.fileType) {
-                // Convert base64 to binary
-                const binaryString = atob(result.fileContent);
-                const bytes = new Uint8Array(binaryString.length);
-                for (let i = 0; i < binaryString.length; i++) {
-                    bytes[i] = binaryString.charCodeAt(i);
-                }
-
-                // Construct blob & trigger download
-                const blob = new Blob([bytes], { type: result.fileType });
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = result.fileName;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                window.URL.revokeObjectURL(url);
-                setNotification({ message: `✅ Downloaded ${result.fileName}`, type: 'success' });
-            } else {
-                setNotification({ message: result.error || 'Failed to download file.', type: 'error' });
-            }
-        } catch (error) {
-            setNotification({ message: 'An unexpected error occurred during download.', type: 'error' });
-        } finally {
-            setDownloadingId(null);
-        }
-    };
 
     const exportAuditCSV = () => {
         const headers = ['Timestamp', 'Type', 'Action', 'Severity', 'Actor', 'IP', 'Description'];
@@ -945,43 +911,12 @@ export default function OwnerDashboardPage() {
                                                                         : 'Not verified yet'}
                                                                 </span>
                                                             </div>
-                                                            {link.otp && (
-                                                                <div className="detail-row" style={{ gridColumn: '1 / -1' }}>
-                                                                    <span className="detail-label">🔐 OTP Code</span>
-                                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                                        <span className="detail-value" style={{
-                                                                            fontFamily: 'monospace',
-                                                                            fontSize: '1.1rem',
-                                                                            letterSpacing: '4px',
-                                                                            color: '#22d3ee',
-                                                                            background: 'rgba(34, 211, 238, 0.08)',
-                                                                            padding: '4px 12px',
-                                                                            borderRadius: '8px',
-                                                                            border: '1px solid rgba(34, 211, 238, 0.15)',
-                                                                        }}>
-                                                                            {link.otp}
-                                                                        </span>
-                                                                        <button
-                                                                            onClick={(e) => {
-                                                                                e.stopPropagation();
-                                                                                navigator.clipboard.writeText(link.otp!);
-                                                                                setCopiedId('otp-' + link.id);
-                                                                                setTimeout(() => setCopiedId(null), 2000);
-                                                                            }}
-                                                                            style={{
-                                                                                padding: '4px 10px', borderRadius: '6px',
-                                                                                fontSize: '0.7rem', fontWeight: '600',
-                                                                                border: '1px solid rgba(255,255,255,0.1)',
-                                                                                background: copiedId === 'otp-' + link.id ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.05)',
-                                                                                color: copiedId === 'otp-' + link.id ? '#22c55e' : 'var(--text-secondary)',
-                                                                                cursor: 'pointer',
-                                                                            }}
-                                                                        >
-                                                                            {copiedId === 'otp-' + link.id ? '✅ Copied' : '📋 Copy'}
-                                                                        </button>
-                                                                    </div>
-                                                                </div>
-                                                            )}
+                                                            <div className="detail-row" style={{ gridColumn: '1 / -1' }}>
+                                                                <span className="detail-label">🔐 OTP</span>
+                                                                <span className="detail-value" style={{ fontSize: '0.85rem', lineHeight: 1.5 }}>
+                                                                    OTPs are hashed and delivered only by email at link creation. They are not stored in the database for security compliance.
+                                                                </span>
+                                                            </div>
                                                             {link.notificationEmail && (
                                                                 <div className="detail-row">
                                                                     <span className="detail-label">📧 Notify Email</span>
@@ -1027,24 +962,9 @@ export default function OwnerDashboardPage() {
                                                                                 </span>
                                                                                 {file.fileName}
                                                                             </span>
-                                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                                                <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>
+                                                                            <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>
                                                                                     {formatFileSize(file.fileSize)}
                                                                                 </span>
-                                                                                <button
-                                                                                    onClick={() => handleDownload((file as any).id)}
-                                                                                    disabled={downloadingId === (file as any).id}
-                                                                                    style={{
-                                                                                        padding: '4px 10px', borderRadius: '6px', fontSize: '0.7rem',
-                                                                                        fontWeight: '600', border: 'none', cursor: 'pointer',
-                                                                                        background: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6',
-                                                                                        opacity: downloadingId === (file as any).id ? 0.6 : 1,
-                                                                                        display: 'flex', alignItems: 'center', gap: '4px'
-                                                                                    }}
-                                                                                >
-                                                                                    {downloadingId === (file as any).id ? '⏳' : '⬇️'} Download
-                                                                                </button>
-                                                                            </div>
                                                                         </div>
                                                                     ))}
                                                                 </div>

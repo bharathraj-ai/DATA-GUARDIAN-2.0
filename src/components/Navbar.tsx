@@ -30,7 +30,10 @@ export default function Navbar() {
     ];
 
     const isAuthenticated = status === 'authenticated' && session?.user;
-    const userRole = (session?.user as any)?.role as string | undefined;
+    const userRole = (session?.user as { role?: string })?.role as string | undefined;
+    const isOwnerSide = userRole === 'OWNER';
+    const isVendorSide = userRole === 'VENDOR';
+    const roleLabel = userRole === 'OWNER' ? 'Owner' : 'Vendor';
 
     return (
         <nav className={`navbar ${isScrolled ? 'navbar-scrolled' : ''}`}>
@@ -59,7 +62,7 @@ export default function Navbar() {
                         </div>
                     ) : isAuthenticated ? (
                             <>
-                                {userRole === 'OWNER' && (
+                                {isOwnerSide && (
                                     <Link
                                         href="/dashboard/owner"
                                         className={`nav-link ${pathname?.startsWith('/dashboard/owner') ? 'active' : ''}`}
@@ -67,15 +70,15 @@ export default function Navbar() {
                                         Owner
                                     </Link>
                                 )}
-                                {userRole === 'VENDOR' && (
+                                {isVendorSide && (
                                     <Link
                                         href="/dashboard/vendor"
                                         className={`nav-link ${pathname?.startsWith('/dashboard/vendor') ? 'active' : ''}`}
                                     >
-                                        Vendor
+                                        Dashboard
                                     </Link>
                                 )}
-                                {userRole === 'OWNER' && (
+                                {isOwnerSide && (
                                     <Link href="/create-link" className="btn btn-primary btn-sm">
                                         Create Link
                                     </Link>
@@ -99,8 +102,8 @@ export default function Navbar() {
                                                 {session?.user?.name?.[0]?.toUpperCase() || '?'}
                                             </div>
                                         )}
-                                        <span className={`navbar-role-tag ${userRole === 'OWNER' ? 'navbar-role-tag--owner' : 'navbar-role-tag--vendor'}`}>
-                                            {userRole === 'OWNER' ? 'Owner' : 'Vendor'}
+                                        <span className={`navbar-role-tag ${isOwnerSide ? 'navbar-role-tag--owner' : 'navbar-role-tag--vendor'}`}>
+                                            {roleLabel}
                                         </span>
                                     </div>
                                     <button
@@ -161,7 +164,7 @@ export default function Navbar() {
 
                     {isAuthenticated && (
                         <>
-                            {userRole === 'OWNER' && (
+                            {isOwnerSide && (
                                 <Link
                                     href="/dashboard/owner"
                                     className={`nav-link-mobile ${pathname?.startsWith('/dashboard/owner') ? 'active' : ''}`}
@@ -170,13 +173,13 @@ export default function Navbar() {
                                     Owner Dashboard
                                 </Link>
                             )}
-                            {userRole === 'VENDOR' && (
+                            {isVendorSide && (
                                 <Link
                                     href="/dashboard/vendor"
                                     className={`nav-link-mobile ${pathname?.startsWith('/dashboard/vendor') ? 'active' : ''}`}
                                     onClick={() => setIsMobileMenuOpen(false)}
                                 >
-                                    Vendor Dashboard
+                                    Dashboard
                                 </Link>
                             )}
                         </>
@@ -225,17 +228,17 @@ export default function Navbar() {
                                                 fontSize: '0.65rem', fontWeight: '700', textTransform: 'uppercase',
                                                 letterSpacing: '0.5px',
                                                 padding: '2px 6px', borderRadius: '6px',
-                                                background: userRole === 'OWNER'
+                                                background: isOwnerSide
                                                     ? 'linear-gradient(135deg, rgba(99,102,241,0.25), rgba(139,92,246,0.25))'
                                                     : 'rgba(20, 184, 166, 0.2)',
-                                                color: userRole === 'OWNER' ? '#a78bfa' : '#14b8a6',
+                                                color: isOwnerSide ? '#a78bfa' : '#14b8a6',
                                             }}>
-                                                {userRole === 'OWNER' ? 'Owner' : 'Vendor'}
+                                                {roleLabel}
                                             </span>
                                         </div>
                                     </div>
 
-                                    {userRole === 'OWNER' && (
+                                    {isOwnerSide && (
                                         <Link
                                             href="/create-link"
                                             className="btn btn-primary btn-full"
