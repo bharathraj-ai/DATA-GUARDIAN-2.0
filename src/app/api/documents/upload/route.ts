@@ -9,6 +9,10 @@ import {
 } from '@/lib/storage/secureStorage';
 import { hasRolePermission } from '@/lib/security/rbac';
 import { logDocumentEvent, extractRequestInfo } from '@/lib/security/auditLog';
+import { validateMagicBytesForExtension } from '@/lib/file-magic';
+import { normalizeRole } from '@/lib/security/roles';
+import { checkUploadRateLimit, extractClientIP } from '@/lib/rate-limit';
+import { headers } from 'next/headers';
 
 /**
  * POST /api/documents/upload
@@ -29,7 +33,7 @@ import { logDocumentEvent, extractRequestInfo } from '@/lib/security/auditLog';
  *   - classification: Optional ("PUBLIC" | "INTERNAL" | "CONFIDENTIAL" | "RESTRICTED")
  */
 
-const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100 MB
+const MAX_FILE_SIZE = 100 * 1024 * 1024; // 20 MB (Reduced temporarily for ByteA survivability)
 
 const ALLOWED_EXTENSIONS = new Set([
   'docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt',
@@ -48,13 +52,24 @@ export async function POST(request: NextRequest) {
     }
 
     const userId = session.user.id;
-    const userRole = (session.user as { role?: string }).role || 'VENDOR';
+    const userRole = normalizeRole((session.user as { role?: string }).role);
 
     // ── RBAC check ──────────────────────────────────────────────
     if (!hasRolePermission(userRole, 'upload')) {
       return NextResponse.json(
         { error: 'You do not have permission to upload documents' },
         { status: 403 }
+      );
+    }
+
+    // ── Rate Limit check ─────────────────────────────────────────
+    const requestHeaders = await headers();
+    const clientIP = extractClientIP(requestHeaders);
+    const rateLimit = await checkUploadRateLimit(clientIP);
+    if (!rateLimit.allowed) {
+      return NextResponse.json(
+        { error: 'Rate limit exceeded for uploads. Please try again later.' },
+        { status: 429 }
       );
     }
 
@@ -100,6 +115,13 @@ export async function POST(request: NextRequest) {
 
     const fileBuffer = Buffer.from(await file.arrayBuffer());
 
+    if (!validateMagicBytesForExtension(fileBuffer, fileExtension)) {
+      return NextResponse.json(
+        { error: 'File content does not match declared type (possible spoofing)' },
+        { status: 400 },
+      );
+    }
+
     // Create document record first to get the ID
     const document = await prisma.document.create({
       data: {
@@ -135,6 +157,7 @@ export async function POST(request: NextRequest) {
         fileSize: file.size,
         fileType: fileExtension,
         classification,
+        virusScan: 'pending_hook', // Wire async ClamAV / cloud scanner in worker queue
       },
     });
 

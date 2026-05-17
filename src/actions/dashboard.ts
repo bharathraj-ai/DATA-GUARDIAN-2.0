@@ -2,6 +2,7 @@
 
 import { prisma } from '@/lib/prisma';
 import { cleanupExpiredData } from '@/actions/cleanup';
+import { auth } from '@/lib/auth';
 
 export interface DashboardLink {
     id: string;
@@ -14,7 +15,8 @@ export interface DashboardLink {
     allowedVendorEmail: string | null;
     vendorAccess: { email: string; level: number }[];
     status: 'active' | 'expired' | 'revoked' | 'used';
-    otp: string | null;
+    /** Legacy field — OTPs are never persisted; always null. */
+    otp: null;
     // Enhanced fields
     purpose: string | null;
     purposeDetail: string | null;
@@ -24,7 +26,7 @@ export interface DashboardLink {
     otpVerifiedAt: Date | null;
     fileCount: number;
     vendors: { vendorEmail: string; level: number }[];
-    files: { id: string; fileName: string; fileSize: number; fileType: string }[];
+    files: { id: string; fileName: string; fileSize: number; fileType: string; status: string }[];
     auditLogs: { action: string; timestamp: Date; reason: string | null }[];
 }
 
@@ -33,6 +35,12 @@ export interface DashboardLink {
  */
 export async function getOwnedLinks(userId: string): Promise<DashboardLink[]> {
     try {
+        // SECURITY: Verify the caller IS this userId — prevent parameter tampering
+        const session = await auth();
+        if (!session?.user?.id || session.user.id !== userId) {
+            console.error('[SECURITY] getOwnedLinks called with mismatched userId');
+            return [];
+        }
         const links = await prisma.secureLink.findMany({
             where: {
                 ownerId: userId,
@@ -54,7 +62,6 @@ export async function getOwnedLinks(userId: string): Promise<DashboardLink[]> {
                 failedAttempts: true,
                 lockedAt: true,
                 otpVerifiedAt: true,
-                otpPlain: true,
                 LinkAccess: {
                     select: {
                         vendorEmail: true,
@@ -77,7 +84,8 @@ export async function getOwnedLinks(userId: string): Promise<DashboardLink[]> {
                         fileName: true,
                         fileSize: true,
                         fileType: true,
-                    },
+                        status: true,
+                    } as any,
                 },
                 AuditLog: {
                     select: {
@@ -93,11 +101,11 @@ export async function getOwnedLinks(userId: string): Promise<DashboardLink[]> {
             },
         });
 
-        const mappedLinks = links.map((link) => {
+        const mappedLinks = (links as any[]).map((link: any) => {
             const primaryVendor = link.LinkAccess?.[0]?.vendorEmail || (link as any).allowedVendorEmail || null;
             
             // For the owner, the link is "Used" if any vendor has viewed it, or if it was globally used.
-            const anyVendorUsed = link.LinkAccess?.some(a => a.isUsed) || false;
+            const anyVendorUsed = link.LinkAccess?.some((a: any) => a.isUsed) || false;
             const effectiveIsUsed = link.isUsed || anyVendorUsed;
 
             return {
@@ -109,8 +117,8 @@ export async function getOwnedLinks(userId: string): Promise<DashboardLink[]> {
                 auditLogs: link.AuditLog,
                 status: getStatus({ ...link, isUsed: effectiveIsUsed }),
                 fileCount: link.UserFile.length,
-                otp: link.otpPlain,
-            };
+                otp: null,
+            } as DashboardLink;
         });
 
         // AUTO-CLEANUP: If any expired/revoked links exist, trigger background purge
@@ -131,6 +139,12 @@ export async function getOwnedLinks(userId: string): Promise<DashboardLink[]> {
  */
 export async function getReceivedLinks(email: string): Promise<DashboardLink[]> {
     try {
+        // SECURITY: Verify the caller owns this email — prevent parameter tampering
+        const session = await auth();
+        if (!session?.user?.email || session.user.email.toLowerCase() !== email.toLowerCase()) {
+            console.error('[SECURITY] getReceivedLinks called with mismatched email');
+            return [];
+        }
         const links = await prisma.secureLink.findMany({
             where: {
                 OR: [
@@ -156,7 +170,6 @@ export async function getReceivedLinks(email: string): Promise<DashboardLink[]> 
                 failedAttempts: true,
                 lockedAt: true,
                 otpVerifiedAt: true,
-                otpPlain: true,
                 LinkAccess: {
                     select: {
                         vendorEmail: true,
@@ -179,7 +192,8 @@ export async function getReceivedLinks(email: string): Promise<DashboardLink[]> 
                         fileName: true,
                         fileSize: true,
                         fileType: true,
-                    },
+                        status: true,
+                    } as any,
                 },
                 AuditLog: {
                     select: {
@@ -195,7 +209,7 @@ export async function getReceivedLinks(email: string): Promise<DashboardLink[]> 
             },
         });
 
-        const mappedLinks = links.map((link) => {
+        const mappedLinks = (links as any[]).map((link: any) => {
             const primaryVendor = link.LinkAccess?.[0]?.vendorEmail || (link as any).allowedVendorEmail || null;
             
             // For the vendor, the link is "Used" ONLY if THEIR specific LinkAccess record is marked as used.
@@ -211,8 +225,8 @@ export async function getReceivedLinks(email: string): Promise<DashboardLink[]> 
                 auditLogs: link.AuditLog,
                 status: getStatus({ ...link, isUsed: vendorIsUsed }),
                 fileCount: link.UserFile.length,
-                otp: link.otpPlain,
-            };
+                otp: null,
+            } as DashboardLink;
         });
 
         // AUTO-CLEANUP: If any expired/revoked links exist, trigger background purge
@@ -256,6 +270,12 @@ export interface SendHistoryRecord {
  */
 export async function getSendHistory(userId: string): Promise<SendHistoryRecord[]> {
     try {
+        // SECURITY: Verify the caller IS this userId — prevent parameter tampering
+        const session = await auth();
+        if (!session?.user?.id || session.user.id !== userId) {
+            console.error('[SECURITY] getSendHistory called with mismatched userId');
+            return [];
+        }
         const records = await prisma.sendRecord.findMany({
             where: { ownerId: userId },
             orderBy: { createdAt: 'desc' },

@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import { cookies } from 'next/headers';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -10,9 +11,18 @@ export const dynamic = 'force-dynamic';
  * Polls Redis every 3 seconds for link revocation flags.
  * If the link has been revoked, sends { type: "revoked" } and closes.
  * Also sends periodic heartbeats to keep the connection alive.
+ * 
+ * SECURITY: Requires active session cookie.
  */
 export async function GET(req: NextRequest) {
   const token = req.nextUrl.searchParams.get('token');
+
+  // SECURITY: Require session cookie — prevent unauthenticated data leakage
+  const cookieStore = await cookies();
+  const sessionId = cookieStore.get('session_id')?.value;
+  if (!sessionId) {
+    return new Response('Unauthorized', { status: 401 });
+  }
 
   const encoder = new TextEncoder();
 
