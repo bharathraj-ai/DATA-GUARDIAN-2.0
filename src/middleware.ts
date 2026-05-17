@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { getToken } from 'next-auth/jwt';
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
     const response = NextResponse.next();
 
     // CSRF Protection for custom API routes
@@ -47,6 +48,17 @@ export function middleware(request: NextRequest) {
                     );
                 }
             }
+        }
+    }
+
+    // Role-based Access Control for /create-link
+    if (request.nextUrl.pathname.startsWith('/create-link')) {
+        const token = await getToken({ req: request, secret: process.env.NEXTAUTH_SECRET });
+        if (!token) {
+            return NextResponse.redirect(new URL('/auth/signin?callbackUrl=/create-link', request.url));
+        }
+        if (token.role === 'VENDOR') {
+            return NextResponse.redirect(new URL('/dashboard/vendor', request.url));
         }
     }
 
