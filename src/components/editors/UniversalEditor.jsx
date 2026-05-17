@@ -1,7 +1,5 @@
 "use client";
 import { useState, useRef, useCallback, useEffect } from "react";
-import PDFtoDOCX from "./PDFtoDOCX";
-
 const uid = () => Math.random().toString(36).slice(2, 10);
 const FONTS = ["Georgia", "Times New Roman", "Palatino", "Garamond", "Arial", "Helvetica", "Verdana", "Tahoma", "Trebuchet MS", "Courier New", "Lucida Console", "Monaco", "Impact", "Comic Sans MS"];
 const FONT_SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 60, 72];
@@ -33,72 +31,6 @@ function loadScript(src, id, globalName) {
   });
 }
 
-async function parsePDF(file) {
-  return new Promise((resolve) => {
-    const doWork = async () => {
-      await loadScript("https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js", "pdfjs-main", "pdfjsLib");
-      const pdfjsLib = window["pdfjs-dist/build/pdf"] || window["pdfjsLib"];
-      if (!pdfjsLib) { console.error("PDF.js not found"); return; }
-      pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-      const ab = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: ab }).promise;
-      const pages = [];
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const baseScale = 1.0;
-        const vp = page.getViewport({ scale: baseScale });
-        const textContent = await page.getTextContent();
-
-        const pdfWidth = Math.abs(page.view[2] - page.view[0]);
-        const scaleFactor = vp.width / pdfWidth;
-
-        const renderScale = 2.0;
-        const renderVp = page.getViewport({ scale: renderScale });
-        const canvas = document.createElement("canvas");
-        canvas.width = renderVp.width; canvas.height = renderVp.height;
-        const ctx = canvas.getContext("2d");
-        await page.render({ canvasContext: ctx, viewport: renderVp }).promise;
-        const pageImage = canvas.toDataURL("image/png");
-
-        const sortedItems = textContent.items
-          .filter(item => item.str && item.str.trim() !== "")
-          .map(item => {
-            const [vx, vy] = vp.convertToViewportPoint(item.transform[4], item.transform[5]);
-            const tx = pdfjsLib.Util.transform(vp.transform, item.transform);
-            const fontSize = Math.sqrt(tx[0] * tx[0] + tx[1] * tx[1]);
-            return { ...item, vx, vy, fontSize };
-          })
-          .sort((a, b) => (Math.round(a.vy) - Math.round(b.vy)) || (a.vx - b.vx));
-
-        const elements = [];
-        let currentGroup = null;
-        sortedItems.forEach(item => {
-          if (!currentGroup || Math.abs(currentGroup.y - (item.vy - item.fontSize)) > 2 || (item.vx - (currentGroup.x + currentGroup.width) > 5)) {
-            if (currentGroup) elements.push(currentGroup);
-            currentGroup = {
-              id: uid(), type: "text", content: item.str,
-              x: item.vx, y: item.vy - item.fontSize,
-              width: item.width * (vp.width / (page.view[2] - page.view[0])),
-              height: item.fontSize,
-              font: (item.fontName || "Helvetica").replace(/[^a-zA-Z\s]/g, ""),
-              size: Math.round(item.fontSize),
-              bold: /Bold/i.test(item.fontName || ""),
-              italic: /Italic|Oblique/i.test(item.fontName || ""),
-              color: "#000000", selected: false, isFromPDF: true
-            };
-          } else {
-            currentGroup.content += (item.str.startsWith(" ") ? "" : " ") + item.str;
-            currentGroup.width = (item.vx + item.width * (vp.width / (page.view[2] - page.view[0]))) - currentGroup.x;
-          }
-        });
-        if (currentGroup) elements.push(currentGroup);
-        pages.push({ id: uid(), width: Math.round(vp.width), height: Math.round(vp.height), elements, bgImage: pageImage });
-      }
-      resolve({ type: "pdf", name: file.name, pages });
-    };
-    doWork();
-  });
-}
 
 async function parseTXT(file) {
   const text = await file.text();
@@ -157,7 +89,7 @@ async function parseExcel(file) {
 
 async function parseFile(file) {
   const ext = file.name.split(".").pop().toLowerCase();
-  if (ext === "pdf") return parsePDF(file);
+  if (ext === "pdf") throw new Error("PDF files cannot be edited. They are view-only.");
   if (ext === "txt") return parseTXT(file);
   if (["png", "jpg", "jpeg", "gif", "webp"].includes(ext)) return parseImage(file);
   if (["csv"].includes(ext)) return parseCSV(file);
@@ -330,7 +262,18 @@ function Page({ page, scale, selectedId, onSelect, onUpdate, onDelete, showBg })
   );
 }
 
-export default function UniversalEditor({ initialFileProp, onClose, onSave, token, fileId, currentUserLevel = 2, highestAuthorityLevel = 2, forceAutoSave = false, onAutoSaveComplete }) {
+export default function UniversalEditor({ 
+  token, 
+  fileId, 
+  initialFileProp, 
+  currentUserLevel, 
+  highestAuthorityLevel, 
+  onClose, 
+  onSave, 
+  onSubmit,
+  forceAutoSave, 
+  onAutoSaveComplete 
+}) {
   const isReadOnly = currentUserLevel > highestAuthorityLevel;
   const [view, setView] = useState("editor");
   const [doc, setDoc] = useState(null);
@@ -347,6 +290,7 @@ export default function UniversalEditor({ initialFileProp, onClose, onSave, toke
   const [chatTab, setChatTab] = useState('group');
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState("");
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
   const chatEndRef = useRef(null);
   const fileRef = useRef(null);
   const imageRef = useRef(null);
@@ -437,9 +381,8 @@ export default function UniversalEditor({ initialFileProp, onClose, onSave, toke
 
   const handleFile = async (file) => {
     if (isReadOnly) return;
-    if (file.name.toLowerCase().endsWith(".pdf")) {
-      setInitialPdfFile(file);
-      setView("pdf2docx");
+    if (file.name.toLowerCase().endsWith(".pdf") || file.type === "application/pdf") {
+      alert("PDF files are view-only and cannot be edited. Please use the secure viewer.");
       return;
     }
     setLoading(true); setLoadingMsg(`Parsing ${file.name}...`);
@@ -454,7 +397,7 @@ export default function UniversalEditor({ initialFileProp, onClose, onSave, toke
   };
   const deleteElement = (pageId, elId) => {
     if (isReadOnly) return;
-    setDoc(d => { const nd = { ...d, pages: d.pages.map(p => p.id === pageId ? { ...p, elements: p.elements.filter(e => e.id !== elId) } : p) }; pushHistory(nd); return nd; });
+    setDoc(d => { const nd = { ...d, pages: d.pages.map(p => ({ ...p, elements: p.elements.filter(e => e.id !== elId) })) }; pushHistory(nd); return nd; });
     setSelectedId(null);
   };
   const updateSelected = (patch) => {
@@ -483,10 +426,11 @@ export default function UniversalEditor({ initialFileProp, onClose, onSave, toke
     setActivePage(doc.pages.length);
   };
 
-  const handleSaveToLink = async () => {
-    if (!onSave || !doc) return;
+  const handleSaveToLink = async (isSubmit = false) => {
+    const actionFn = isSubmit ? onSubmit : onSave;
+    if (!actionFn || !doc) return;
     setLoading(true);
-    setLoadingMsg("Saving to Secure Link...");
+    setLoadingMsg(isSubmit ? "Submitting Final Document..." : "Saving Draft...");
     try {
       let savedFile;
       if (doc.type === 'pdf') {
@@ -528,11 +472,13 @@ export default function UniversalEditor({ initialFileProp, onClose, onSave, toke
         const text = doc?.pages.flatMap(p => p.elements.filter(e => e.type === "text").map(e => e.content)).join("\n");
         savedFile = new File([text], doc.name || "edited.txt", { type: "text/plain" });
       }
-      await onSave(savedFile);
-    } catch (err) {
-      alert("Error saving: " + err.message);
+      await actionFn(savedFile);
+      setLoading(false);
+    } catch (e) {
+      console.error("Save error:", e);
+      alert("Failed to save: " + e.message);
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   useEffect(() => {
@@ -562,79 +508,104 @@ export default function UniversalEditor({ initialFileProp, onClose, onSave, toke
   }, [selectedId, activePage, doc, historyIdx]);
 
   const css = `
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@700;800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Playfair+Display:wght@700;800&family=DM+Sans:wght@400;500;600;700&display=swap');
     *{box-sizing:border-box;margin:0;padding:0;user-select:none;-webkit-user-select:none;}
     input, textarea, [contenteditable] { user-select: auto;-webkit-user-select:auto; }
-    body{font-family:'Inter',sans-serif;background:#f0f4fb;color:#1a2540;}
-    ::-webkit-scrollbar{width:6px;height:6px;}
-    ::-webkit-scrollbar-track{background:#f1f4f9;}
-    ::-webkit-scrollbar-thumb{background:#c0c8e0;border-radius:10px;}
-    ::-webkit-scrollbar-thumb:hover{background:#3b7cf4;}
-    
-    .btn{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:8px;border:none;cursor:pointer;font-size:13px;font-weight:500;transition:all .2s;white-space:nowrap;font-family:inherit;}
-    .btn-ghost{background:transparent;color:#5a6a8a;}
-    .btn-ghost:hover:not(:disabled){background:#edf2ff;color:#2347a0;}
-    .btn-ghost:disabled{opacity:0.35;cursor:not-allowed;}
-    .btn-primary{background:linear-gradient(135deg, #2347a0, #3b7cf4);color:#fff;box-shadow:0 4px 12px rgba(35,71,160,0.25);}
-    .btn-primary:hover{transform:translateY(-1px);box-shadow:0 6px 16px rgba(35,71,160,0.35);}
-    .btn-danger{background:#fee2e2;color:#dc2626;border:1px solid #fecaca;}
-    .btn-danger:hover{background:#fecaca;}
-    .btn-outline{border:1px solid #e4e9f5;background:#fff;color:#5a6a8a;}
-    .btn-outline:hover{border-color:#3b7cf4;color:#3b7cf4;background:#f8faff;}
-    
-    .sep{width:1px;height:24px;background:#e4e9f5;margin:0 6px;}
-    .tsel{background:#fff;color:#1a2540;border:1px solid #e4e9f5;border-radius:6px;padding:4px 8px;font-size:12px;font-family:inherit;cursor:pointer;outline:none;box-shadow:0 1px 2px rgba(0,0,0,0.05);}
-    .tsel:hover{border-color:#3b7cf4;}
-    
-    .pinput{width:100%;background:#fff;border:1px solid #e4e9f5;color:#1a2540;border-radius:6px;padding:8px 10px;font-size:12px;font-family:inherit;outline:none;transition:border-color .2s;}
-    .pinput:focus{border-color:#3b7cf4;box-shadow:0 0 0 3px rgba(59,124,244,0.1);}
-    
-    .plabel{font-size:10px;color:#8896b0;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;font-weight:600;}
+    body{font-family:'DM Sans','Inter',sans-serif;background:#0f1117;color:#e2e8f0;}
+    ::-webkit-scrollbar{width:5px;height:5px;}
+    ::-webkit-scrollbar-track{background:rgba(15,17,23,0.5);}
+    ::-webkit-scrollbar-thumb{background:rgba(99,102,241,0.4);border-radius:10px;}
+    ::-webkit-scrollbar-thumb:hover{background:rgba(99,102,241,0.7);}
+
+    .btn{display:inline-flex;align-items:center;gap:6px;padding:7px 16px;border-radius:10px;border:none;cursor:pointer;font-size:13px;font-weight:600;transition:all .25s cubic-bezier(.4,0,.2,1);white-space:nowrap;font-family:'DM Sans',inherit;letter-spacing:0.01em;}
+    .btn-ghost{background:transparent;color:#94a3b8;}
+    .btn-ghost:hover:not(:disabled){background:rgba(99,102,241,0.1);color:#a5b4fc;}
+    .btn-ghost:disabled{opacity:0.3;cursor:not-allowed;}
+    .btn-primary{background:linear-gradient(135deg, #6366f1, #8b5cf6);color:#fff;box-shadow:0 4px 16px rgba(99,102,241,0.35);}
+    .btn-primary:hover{transform:translateY(-1px);box-shadow:0 8px 24px rgba(99,102,241,0.45);}
+    .btn-danger{background:rgba(239,68,68,0.12);color:#f87171;border:1px solid rgba(239,68,68,0.25);}
+    .btn-danger:hover{background:rgba(239,68,68,0.2);}
+    .btn-outline{border:1px solid rgba(148,163,184,0.2);background:rgba(255,255,255,0.04);color:#94a3b8;backdrop-filter:blur(8px);}
+    .btn-outline:hover{border-color:rgba(99,102,241,0.5);color:#a5b4fc;background:rgba(99,102,241,0.08);}
+    .btn-finish{background:linear-gradient(135deg, #6366f1, #8b5cf6);color:#fff;box-shadow:0 4px 20px rgba(99,102,241,0.4);font-weight:700;}
+    .btn-finish:hover{transform:translateY(-2px);box-shadow:0 8px 32px rgba(99,102,241,0.5);}
+
+    .sep{width:1px;height:24px;background:rgba(148,163,184,0.15);margin:0 8px;}
+    .tsel{background:rgba(255,255,255,0.06);color:#e2e8f0;border:1px solid rgba(148,163,184,0.15);border-radius:8px;padding:5px 10px;font-size:12px;font-family:inherit;cursor:pointer;outline:none;transition:all .2s;}
+    .tsel:hover{border-color:rgba(99,102,241,0.4);}
+
+    .pinput{width:100%;background:rgba(255,255,255,0.06);border:1px solid rgba(148,163,184,0.15);color:#e2e8f0;border-radius:8px;padding:9px 12px;font-size:12px;font-family:inherit;outline:none;transition:all .2s;}
+    .pinput:focus{border-color:rgba(99,102,241,0.5);box-shadow:0 0 0 3px rgba(99,102,241,0.12);}
+
+    .plabel{font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px;font-weight:700;}
     .psec{margin-bottom:18px;}
-    
-    .thumb{width:100%;aspect-ratio:210/297;background:#fff;border-radius:8px;cursor:pointer;overflow:hidden;margin-bottom:10px;position:relative;border:2px solid transparent;transition:all .2s;box-shadow:0 2px 8px rgba(0,0,0,0.06);}
-    .thumb:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,0.1);}
-    .thumb.active{border-color:#3b7cf4;box-shadow:0 4px 16px rgba(59,124,244,0.2);}
-    
-    .dz{border:2.5px dashed #a0b4d4;border-radius:24px;padding:60px 40px;text-align:center;cursor:pointer;transition:all .25s;background:rgba(255,255,255,0.5);}
-    .dz:hover{border-color:#3b7cf4;background:#fff;transform:scale(1.01);box-shadow:0 12px 40px rgba(35,71,160,0.08);}
-    
-    .panel{background:#fff;border-radius:16px;border:1px solid #e4e9f5;box-shadow:0 4px 20px rgba(35,71,160,0.07);overflow:hidden;}
-    
+
+    .thumb{width:100%;aspect-ratio:210/297;background:rgba(255,255,255,0.03);border-radius:10px;cursor:pointer;overflow:hidden;margin-bottom:10px;position:relative;border:2px solid rgba(148,163,184,0.1);transition:all .25s;box-shadow:0 2px 8px rgba(0,0,0,0.2);}
+    .thumb:hover{transform:translateY(-2px);box-shadow:0 8px 20px rgba(0,0,0,0.3);border-color:rgba(99,102,241,0.3);}
+    .thumb.active{border-color:#6366f1;box-shadow:0 4px 20px rgba(99,102,241,0.3);}
+
+    .dz{border:2px dashed rgba(99,102,241,0.3);border-radius:24px;padding:60px 40px;text-align:center;cursor:pointer;transition:all .3s;background:rgba(99,102,241,0.04);}
+    .dz:hover{border-color:#6366f1;background:rgba(99,102,241,0.08);transform:scale(1.01);box-shadow:0 12px 40px rgba(99,102,241,0.12);}
+
+    .panel{background:rgba(255,255,255,0.04);border-radius:16px;border:1px solid rgba(148,163,184,0.1);box-shadow:0 4px 24px rgba(0,0,0,0.2);backdrop-filter:blur(12px);overflow:hidden;}
+
     @keyframes spin{to{transform:rotate(360deg);}}
     .spin{animation:spin .8s linear infinite;}
-    @keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
-    .fup{animation:fadeUp .4s ease both;}
-    .pulse{animation:pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;}
-    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+    @keyframes fadeUp{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+    .fup{animation:fadeUp .5s cubic-bezier(.4,0,.2,1) both;}
+    .pulse{animation:pulse 2.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+    @keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
+    .glass-bar{background:rgba(15,17,23,0.75);backdrop-filter:blur(16px) saturate(180%);border-bottom:1px solid rgba(148,163,184,0.08);}
+    .confirm-overlay{position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.7);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;}
+    .confirm-card{background:linear-gradient(145deg,#1e1b4b,#1a1a2e);border:1px solid rgba(99,102,241,0.2);border-radius:24px;padding:44px 40px;max-width:480px;width:100%;text-align:center;box-shadow:0 24px 80px rgba(0,0,0,0.5);animation:fadeUp .3s ease both;}
   `;
 
   return (
     <>
       <style>{css}</style>
       <div 
-        style={{ display: "flex", flexDirection: "column", height: "100vh", background: "#f0f4fb", color: "#1a2540", userSelect: "none", WebkitUserSelect: "none" }}
+        style={{ display: "flex", flexDirection: "column", height: "100vh", background: "#0f1117", color: "#e2e8f0", userSelect: "none", WebkitUserSelect: "none" }}
         onContextMenu={e => e.preventDefault()}
         onCopy={e => e.preventDefault()}
       >
 
-        <div style={{ height: 56, background: "#fff", borderBottom: "1px solid #e4e9f5", display: "flex", alignItems: "center", padding: "0 24px", gap: 16, flexShrink: 0, boxShadow: "0 2px 10px rgba(35,71,160,0.06)", zIndex: 100 }}>
+        {/* ═══ Confirmation Modal ═══ */}
+        {showConfirmModal && (
+          <div className="confirm-overlay">
+            <div className="confirm-card">
+              <div style={{ width: 64, height: 64, borderRadius: "50%", background: "linear-gradient(135deg, #6366f1, #8b5cf6)", margin: "0 auto 20px", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 8px 32px rgba(99,102,241,0.4)" }}>
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+              </div>
+              <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: 24, color: "#f1f5f9", marginBottom: 12 }}>Submit Final Document?</h2>
+              <p style={{ fontSize: 14, color: "#94a3b8", lineHeight: 1.7, marginBottom: 32 }}>
+                This will finalize your edits and send the document for owner approval.<br/>You will not be able to make changes until the owner responds.
+              </p>
+              <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
+                <button className="btn btn-outline" onClick={() => setShowConfirmModal(false)} style={{ padding: "12px 28px" }}>Cancel</button>
+                <button className="btn btn-finish" onClick={() => { setShowConfirmModal(false); handleSaveToLink(true); }} style={{ padding: "12px 28px" }}>✅ Submit Final</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="glass-bar" style={{ height: 60, display: "flex", alignItems: "center", padding: "0 24px", gap: 16, flexShrink: 0, zIndex: 100 }}>
           {onClose && (
-            <button className="btn btn-ghost" onClick={onClose} style={{ padding: "4px 8px" }}>← Back</button>
+            <button className="btn btn-ghost" onClick={onClose} style={{ padding: "4px 10px" }}>← Back</button>
           )}
           <div style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }} onClick={() => { setDoc(null); setInitialPdfFile(null); setView("editor"); }}>
-            <div style={{ width: 34, height: 34, borderRadius: 10, background: "linear-gradient(135deg, #2347a0, #3b7cf4)", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 4px 12px rgba(35,71,160,0.25)" }}>
+            <div style={{ width: 36, height: 36, borderRadius: 10, background: "linear-gradient(135deg, #6366f1, #8b5cf6)", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 4px 16px rgba(99,102,241,0.35)" }}>
               <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M10 2L3 6v8l7 4 7-4V6L10 2z" stroke="#fff" strokeWidth="1.5" fill="rgba(255,255,255,0.15)" /><path d="M10 2v16M3 6l7 4 7-4" stroke="#fff" strokeWidth="1.5" /></svg>
             </div>
-            <span style={{ fontFamily: "'Playfair Display', serif", fontWeight: 800, fontSize: 18, color: "#1a2540", letterSpacing: "-0.01em" }}>UniEdit</span>
-            <span style={{ fontSize: 10, color: "#3b7cf4", background: "#edf2ff", borderRadius: 5, padding: "2px 8px", fontWeight: 700, letterSpacing: "0.05em", border: "1px solid rgba(59,124,244,0.15)" }}>PRO</span>
+            <span style={{ fontFamily: "'Playfair Display', serif", fontWeight: 800, fontSize: 18, color: "#f1f5f9", letterSpacing: "-0.01em" }}>UniEdit</span>
+            <span style={{ fontSize: 9, color: "#a5b4fc", background: "rgba(99,102,241,0.15)", borderRadius: 6, padding: "3px 8px", fontWeight: 700, letterSpacing: "0.08em", border: "1px solid rgba(99,102,241,0.2)" }}>PRO</span>
           </div>
           
           <div style={{ flex: 1 }} />
 
-          {doc && view === "editor" && <div style={{ marginRight: "auto", display: "flex", alignItems: "center", gap: 10, padding: "4px 16px", background: "#f5f7ff", borderRadius: 10, fontSize: 13, color: "#5a6a8a" }}>
+          {doc && view === "editor" && <div style={{ marginRight: "auto", display: "flex", alignItems: "center", gap: 10, padding: "5px 16px", background: "rgba(255,255,255,0.05)", borderRadius: 10, fontSize: 13, color: "#94a3b8", border: "1px solid rgba(148,163,184,0.08)" }}>
             <span>{getFileIcon(doc.name)}</span>
-            <span style={{ fontWeight: 600 }}>{doc.name}</span>
+            <span style={{ fontWeight: 600, color: "#e2e8f0" }}>{doc.name}</span>
           </div>}
 
           {doc && view === "editor" && <>
@@ -645,13 +616,13 @@ export default function UniversalEditor({ initialFileProp, onClose, onSave, toke
             <div className="sep" />
             {onSave && (
               <div style={{ display: "flex", gap: "8px" }}>
-                <button className="btn btn-outline" disabled={isReadOnly} style={{ background: "#fff", borderColor: "#a0b4d4", color: "#2347a0", gap: "6px", opacity: isReadOnly ? 0.5 : 1, cursor: isReadOnly ? "not-allowed" : "pointer" }} onClick={() => replaceFileRef.current?.click()}>
+                <button className="btn btn-outline" disabled={isReadOnly} style={{ gap: "6px", opacity: isReadOnly ? 0.5 : 1, cursor: isReadOnly ? "not-allowed" : "pointer" }} onClick={() => replaceFileRef.current?.click()}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
                   Upload Replace
                 </button>
                 <input ref={replaceFileRef} type="file" accept=".pdf,.txt,.png,.jpg,.jpeg,.gif,.webp,.csv,.xlsx,.xls,.zip" style={{ display: "none" }} onChange={(e) => { handleUploadReplace(e); e.target.value = ""; }} />
-                <button className="btn btn-primary" disabled={isReadOnly} style={{ opacity: isReadOnly ? 0.5 : 1, cursor: isReadOnly ? "not-allowed" : "pointer", background: "linear-gradient(135deg, #10b981, #059669)", boxShadow: "0 4px 12px rgba(16, 185, 129, 0.25)" }} onClick={handleSaveToLink}>
-                  💾 Save Replace
+                <button className="btn btn-finish" disabled={isReadOnly} style={{ opacity: isReadOnly ? 0.5 : 1, cursor: isReadOnly ? "not-allowed" : "pointer", padding: "8px 22px" }} onClick={() => setShowConfirmModal(true)}>
+                  ✅ Finish Editing
                 </button>
               </div>
             )}
@@ -667,20 +638,20 @@ export default function UniversalEditor({ initialFileProp, onClose, onSave, toke
         </div>
 
         {isReadOnly && doc && view === "editor" && (
-            <div className="fup" style={{ padding: "10px 16px", background: "#fee2e2", borderBottom: "1px solid #fecaca", color: "#dc2626", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, zIndex: 99, flexShrink: 0 }}>
+            <div className="fup" style={{ padding: "10px 16px", background: "rgba(239,68,68,0.1)", borderBottom: "1px solid rgba(239,68,68,0.2)", color: "#f87171", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, zIndex: 99, flexShrink: 0 }}>
                 ⚠️ Editing is disabled. A higher authority Team Leader (Level {highestAuthorityLevel}) is currently active in this session.
             </div>
         )}
 
-        {doc && view === "editor" && <div style={{ height: 48, background: "#fff", borderBottom: "1px solid #e4e9f5", display: "flex", alignItems: "center", padding: "0 16px", gap: 6, flexShrink: 0, overflowX: "auto" }}>
+        {doc && view === "editor" && <div style={{ height: 48, background: "rgba(15,17,23,0.6)", borderBottom: "1px solid rgba(148,163,184,0.08)", display: "flex", alignItems: "center", padding: "0 16px", gap: 6, flexShrink: 0, overflowX: "auto", backdropFilter: "blur(8px)" }}>
           <button className="btn btn-ghost" onClick={() => fileRef.current?.click()}>📂 Open File</button>
-          <input ref={fileRef} type="file" disabled={isReadOnly} accept=".pdf,.txt,.png,.jpg,.jpeg,.gif,.webp,.csv,.xlsx,.xls,.zip" style={{ display: "none" }} onChange={e => {
+          <input ref={fileRef} type="file" disabled={isReadOnly} accept=".txt,.png,.jpg,.jpeg,.gif,.webp,.csv,.xlsx,.xls,.zip" style={{ display: "none" }} onChange={e => {
             const f = e.target.files?.[0];
             if (f) handleFile(f);
             e.target.value = "";
           }} />
           <div className="sep" />
-          <button className="btn btn-ghost" style={{ background: showBg ? "#edf2ff" : "transparent", color: showBg ? "#2347a0" : "#5a6a8a" }} onClick={() => setShowBg(!showBg)}>{showBg ? "👁 Background: On" : "👁 Background: Off" } </button>
+          <button className="btn btn-ghost" style={{ background: showBg ? "rgba(99,102,241,0.15)" : "transparent", color: showBg ? "#a5b4fc" : "#94a3b8" }} onClick={() => setShowBg(!showBg)}>{showBg ? "👁 Background: On" : "👁 Background: Off" } </button>
           <div className="sep" />
           <button className="btn btn-ghost" disabled={isReadOnly} onClick={addText}>＋ Text</button>
           <button className="btn btn-ghost" disabled={isReadOnly} onClick={() => imageRef.current?.click()}>🖼 Image</button>
@@ -691,18 +662,18 @@ export default function UniversalEditor({ initialFileProp, onClose, onSave, toke
           {selectedEl?.type === "text" && <>
             <select className="tsel" value={selectedEl.font || "Georgia"} onChange={e => updateSelected({ font: e.target.value })} style={{ width: 130 }}>{FONTS.map(f => <option key={f} value={f}>{f}</option>)}</select>
             <select className="tsel" value={selectedEl.size || 12} onChange={e => updateSelected({ size: Number(e.target.value) })}>{FONT_SIZES.map(s => <option key={s} value={s}>{s}</option>)}</select>
-            <button className="btn btn-ghost" style={{ fontWeight: "bold", background: selectedEl.bold ? "#1e2235" : "transparent" }} onClick={() => updateSelected({ bold: !selectedEl.bold })}>B</button>
-            <button className="btn btn-ghost" style={{ fontStyle: "italic", background: selectedEl.italic ? "#1e2235" : "transparent" }} onClick={() => updateSelected({ italic: !selectedEl.italic })}>I</button>
-            <button className="btn btn-ghost" style={{ textDecoration: "underline", background: selectedEl.underline ? "#1e2235" : "transparent" }} onClick={() => updateSelected({ underline: !selectedEl.underline })}>U</button>
+            <button className="btn btn-ghost" style={{ fontWeight: "bold", background: selectedEl.bold ? "rgba(99,102,241,0.2)" : "transparent", color: selectedEl.bold ? "#a5b4fc" : "#94a3b8" }} onClick={() => updateSelected({ bold: !selectedEl.bold })}>B</button>
+            <button className="btn btn-ghost" style={{ fontStyle: "italic", background: selectedEl.italic ? "rgba(99,102,241,0.2)" : "transparent", color: selectedEl.italic ? "#a5b4fc" : "#94a3b8" }} onClick={() => updateSelected({ italic: !selectedEl.italic })}>I</button>
+            <button className="btn btn-ghost" style={{ textDecoration: "underline", background: selectedEl.underline ? "rgba(99,102,241,0.2)" : "transparent", color: selectedEl.underline ? "#a5b4fc" : "#94a3b8" }} onClick={() => updateSelected({ underline: !selectedEl.underline })}>U</button>
             <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-              <span style={{ fontSize: 11, color: "#4a5268" }}>Color</span>
+              <span style={{ fontSize: 11, color: "#94a3b8" }}>Color</span>
               <input type="color" value={selectedEl.color || "#000000"} onChange={e => updateSelected({ color: e.target.value })} style={{ width: 28, height: 24, border: "none", borderRadius: 4, background: "none", cursor: "pointer", padding: 0 }} />
             </div>
             <div className="sep" />
           </>}
           <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 5 }}>
             <button className="btn btn-ghost" style={{ padding: "4px 9px" }} onClick={() => setScale(s => Math.max(0.4, +(s - 0.1).toFixed(2)))}>−</button>
-            <span style={{ fontSize: 12, color: "#4a5268", minWidth: 40, textAlign: "center" }}>{Math.round(scale * 100)}%</span>
+            <span style={{ fontSize: 12, color: "#94a3b8", minWidth: 40, textAlign: "center" }}>{Math.round(scale * 100)}%</span>
             <button className="btn btn-ghost" style={{ padding: "4px 9px" }} onClick={() => setScale(s => Math.min(2.5, +(s + 0.1).toFixed(2)))}>＋</button>
             <select className="tsel" value={scale} onChange={e => setScale(Number(e.target.value))}>
               {[0.5, 0.75, 1, 1.25, 1.5, 2].map(v => <option key={v} value={v}>{Math.round(v * 100)}%</option>)}
@@ -713,46 +684,46 @@ export default function UniversalEditor({ initialFileProp, onClose, onSave, toke
         <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
           {view === "editor" && (
             <>
-              {doc && <div style={{ width: 140, background: "#fff", borderRight: "1px solid #e4e9f5", padding: "16px 12px", overflowY: "auto", flexShrink: 0, display: "flex", flexDirection: "column", gap: 12 }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: "#8896b0", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>Pages</div>
+              {doc && <div style={{ width: 140, background: "rgba(15,17,23,0.5)", borderRight: "1px solid rgba(148,163,184,0.08)", padding: "16px 12px", overflowY: "auto", flexShrink: 0, display: "flex", flexDirection: "column", gap: 12 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>Pages</div>
                 {doc.pages.map((page, idx) => (
                   <div key={page.id} className={`thumb ${idx === activePage ? "active" : ""}`} onClick={() => setActivePage(idx)}>
-                    {page.bgImage ? <img src={page.bgImage} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <div style={{ background: "#f8faff", width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "#c0c8e0", fontSize: 14, fontWeight: 700 }}>{idx + 1}</div>}
+                    {page.bgImage ? <img src={page.bgImage} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <div style={{ background: "rgba(255,255,255,0.03)", width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "#475569", fontSize: 14, fontWeight: 700 }}>{idx + 1}</div>}
                     <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, textAlign: "center", fontSize: 10, color: "#fff", background: "linear-gradient(transparent, rgba(26,37,64,0.6))", padding: "8px 0", fontWeight: 600 }}>{idx + 1}</div>
                   </div>
                 ))}
                 <button className="btn btn-outline" disabled={isReadOnly} style={{ borderStyle: "dashed", width: "100%", fontSize: 12, padding: "8px", cursor: isReadOnly ? "not-allowed" : "pointer" }} onClick={addPage}>＋ Add Page</button>
               </div>}
 
-              <div style={{ flex: 1, overflowY: "auto", overflowX: "auto", display: "flex", flexDirection: "column", alignItems: "center", padding: "48px 24px", background: "linear-gradient(135deg, #f8faff 0%, #edf2ff 100%)", position: "relative" }}>
-                {loading && <div style={{ position: "fixed", inset: 0, background: "rgba(255,255,255,0.85)", backdropFilter: "blur(4px)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", zIndex: 1000, gap: 20 }}>
-                  <div className="spin" style={{ width: 56, height: 56, borderRadius: "50%", border: "3px solid #e0e7ff", borderTopColor: "#3b7cf4" }} />
-                  <div style={{ color: "#2347a0", fontSize: 16, fontWeight: 600 }}>{loadingMsg}</div>
+              <div style={{ flex: 1, overflowY: "auto", overflowX: "auto", display: "flex", flexDirection: "column", alignItems: "center", padding: "48px 24px", background: "linear-gradient(145deg, #0f1117 0%, #131525 50%, #0f1117 100%)", position: "relative" }}>
+                {loading && <div style={{ position: "fixed", inset: 0, background: "rgba(15,17,23,0.9)", backdropFilter: "blur(8px)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", zIndex: 1000, gap: 20 }}>
+                  <div className="spin" style={{ width: 56, height: 56, borderRadius: "50%", border: "3px solid rgba(99,102,241,0.2)", borderTopColor: "#6366f1" }} />
+                  <div style={{ color: "#a5b4fc", fontSize: 16, fontWeight: 600 }}>{loadingMsg}</div>
                 </div>}
 
                 {!doc && !loading && <div className="fup" style={{ maxWidth: 640, width: "100%", marginTop: 32 }}>
                   <div style={{ textAlign: "center", marginBottom: 48 }}>
-                    <div className="pulse" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 84, height: 84, borderRadius: 24, background: "linear-gradient(135deg, #2347a0, #3b7cf4)", boxShadow: "0 8px 32px rgba(35,71,160,0.25)", marginBottom: 28 }}>
+                    <div className="pulse" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 84, height: 84, borderRadius: 24, background: "linear-gradient(135deg, #6366f1, #8b5cf6)", boxShadow: "0 12px 40px rgba(99,102,241,0.35)", marginBottom: 28 }}>
                       <svg width="40" height="40" viewBox="0 0 20 20" fill="none"><path d="M10 2L3 6v8l7 4 7-4V6L10 2z" stroke="#fff" strokeWidth="1.5" fill="rgba(255,255,255,0.15)" /><path d="M10 2v16M3 6l7 4 7-4" stroke="#fff" strokeWidth="1.5" /></svg>
                     </div>
-                    <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: 42, fontWeight: 800, color: "#1a2540", letterSpacing: "-0.02em", marginBottom: 12 }}>Universal Editor</h1>
-                    <p style={{ color: "#5a6a8a", fontSize: 16, lineHeight: 1.6 }}>Edit PDFs, Documents, and Media with precision.<br />Professional tools for your daily workflow.</p>
+                    <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: 42, fontWeight: 800, color: "#f1f5f9", letterSpacing: "-0.02em", marginBottom: 12 }}>Universal Editor</h1>
+                    <p style={{ color: "#64748b", fontSize: 16, lineHeight: 1.6 }}>Edit PDFs, Documents, and Media with precision.<br />Professional tools for your daily workflow.</p>
                   </div>
 
                   <div className="dz" onClick={() => fileRef.current?.click()} onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) handleFile(f); }}>
                     <div style={{ fontSize: 52, marginBottom: 16 }}>📄</div>
-                    <div style={{ fontSize: 20, fontWeight: 700, color: "#1a2540", marginBottom: 8 }}>Drop your file here</div>
-                    <div style={{ fontSize: 14, color: "#8896b0", marginBottom: 28 }}>PDF · DOCX · PNG · CSV · XLSX · ZIP · TXT</div>
+                    <div style={{ fontSize: 20, fontWeight: 700, color: "#e2e8f0", marginBottom: 8 }}>Drop your file here</div>
+                    <div style={{ fontSize: 14, color: "#64748b", marginBottom: 28 }}>TXT · PNG · CSV · XLSX · ZIP</div>
                     <button className="btn btn-primary" style={{ fontSize: 14, padding: "12px 32px" }}>Browse Files</button>
                   </div>
-                  <input ref={fileRef} type="file" accept=".pdf,.txt,.png,.jpg,.jpeg,.gif,.webp,.csv,.xlsx,.xls,.zip" style={{ display: "none" }} onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }} />
+                  <input ref={fileRef} type="file" accept=".txt,.png,.jpg,.jpeg,.gif,.webp,.csv,.xlsx,.xls,.zip" style={{ display: "none" }} onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }} />
 
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 16, marginTop: 40 }}>
-                    {[["📑", "PDF Edit", "Full text & layout extraction"], ["✍️", "Structured Docs", "Export to DOCX or PDF"], ["📊", "Data Cells", "Directly edit CSV & XLSX"], ["🖼️", "Media Studio", "Reposition & annotate images"], ["📦", "ZIP Explorer", "Browse & edit zipped docs"], ["🎨", "Premium UI", "Modern workspace aesthetic"]].map(([icon, title, desc]) => (
-                      <div key={title} className="panel" style={{ padding: "20px 16px", background: "#fff" }}>
+                    {[["✍️", "Structured Docs", "Export to DOCX or PDF"], ["📊", "Data Cells", "Directly edit CSV & XLSX"], ["🖼️", "Media Studio", "Reposition & annotate images"], ["📦", "ZIP Explorer", "Browse & edit zipped docs"], ["🎨", "Premium UI", "Modern workspace aesthetic"]].map(([icon, title, desc]) => (
+                      <div key={title} className="panel" style={{ padding: "20px 16px" }}>
                         <div style={{ fontSize: 28, marginBottom: 8 }}>{icon}</div>
-                        <div style={{ fontSize: 14, fontWeight: 700, color: "#1a2540", marginBottom: 4 }}>{title}</div>
-                        <div style={{ fontSize: 12, color: "#8896b0", lineHeight: 1.5 }}>{desc}</div>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: "#e2e8f0", marginBottom: 4 }}>{title}</div>
+                        <div style={{ fontSize: 12, color: "#64748b", lineHeight: 1.5 }}>{desc}</div>
                       </div>
                     ))}
                   </div>

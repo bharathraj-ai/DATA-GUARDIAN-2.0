@@ -21,7 +21,7 @@ export async function POST(
     if (!token || !message) return NextResponse.json({ error: 'Missing fields' }, { status: 400 });
 
     // Auth (Zero-Trust Session + API Security)
-    const authResult = await authorizeApiRequest(fileId, token);
+    const authResult = await authorizeApiRequest(fileId, token, { httpMethod: req.method });
     if (authResult.errorResponse) {
       return authResult.errorResponse;
     }
@@ -65,7 +65,7 @@ export async function GET(
 
     if (!token) return NextResponse.json({ error: 'Missing token' }, { status: 400 });
 
-    const authResult = await authorizeApiRequest(fileId, token);
+    const authResult = await authorizeApiRequest(fileId, token, { httpMethod: req.method });
     if (authResult.errorResponse) {
       return authResult.errorResponse;
     }

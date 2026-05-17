@@ -16,18 +16,24 @@ export default function DashboardPage() {
         }
     }, [sessionStatus, router]);
 
-    const userRole = (session?.user as any)?.role as string | undefined;
+    const userRole = (session?.user as { role?: string })?.role as string | undefined;
+    const roleSelected = (session?.user as any)?.roleSelected;
 
     // Auto-redirect based on role
     useEffect(() => {
         if (sessionStatus === 'authenticated') {
+            // If role hasn't been selected yet, send to role-select
+            if (!roleSelected) {
+                router.push('/auth/role-select');
+                return;
+            }
             if (userRole === 'VENDOR') {
                 router.push('/dashboard/vendor');
             } else {
                 router.push('/dashboard/owner');
             }
         }
-    }, [sessionStatus, userRole, router]);
+    }, [sessionStatus, userRole, roleSelected, router]);
 
     return (
         <main className="app-page">

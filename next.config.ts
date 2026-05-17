@@ -19,11 +19,11 @@ const nextConfig: NextConfig = {
 
   // Experimental features
   // ONLYOFFICE JWT uses Node.js crypto — must be external
-  serverExternalPackages: ['jsonwebtoken'],
+  serverExternalPackages: [],
 
   experimental: {
     serverActions: {
-      bodySizeLimit: '150mb',
+      bodySizeLimit: '10mb',
     },
     // Tree-shake these packages for faster cold starts
     optimizePackageImports: [
@@ -69,50 +69,26 @@ const nextConfig: NextConfig = {
           { key: 'X-XSS-Protection', value: '1; mode=block' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
           { key: 'X-DNS-Prefetch-Control', value: 'on' },
+          { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+          { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains; preload' },
+          {
+            key: 'Content-Security-Policy',
+            value: [
+              "default-src 'self'",
+              "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+              "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+              "font-src 'self' https://fonts.gstatic.com",
+              "img-src 'self' data: blob: https://lh3.googleusercontent.com https://avatars.githubusercontent.com",
+              "connect-src 'self' https://*.upstash.io https://*.neon.tech",
+              "frame-ancestors 'none'",
+            ].join('; '),
+          },
         ],
       },
-      // NO CACHE for dynamic/secure routes
-      {
-        source: '/signup/:path*',
-        headers: [
-          { key: 'Cache-Control', value: 'no-store, no-cache, must-revalidate, max-age=0' },
-          { key: 'Pragma', value: 'no-cache' },
-        ],
-      },
-      {
-        source: '/share/:path*',
-        headers: [
-          { key: 'Cache-Control', value: 'no-store, no-cache, must-revalidate, max-age=0' },
-          { key: 'Pragma', value: 'no-cache' },
-        ],
-      },
-      {
-        source: '/view/:path*',
-        headers: [
-          { key: 'Cache-Control', value: 'no-store, no-cache, must-revalidate, max-age=0' },
-          { key: 'Pragma', value: 'no-cache' },
-        ],
-      },
-      {
-        source: '/revoke/:path*',
-        headers: [
-          { key: 'Cache-Control', value: 'no-store, no-cache, must-revalidate, max-age=0' },
-          { key: 'Pragma', value: 'no-cache' },
-        ],
-      },
-      {
-        source: '/api/:path*',
-        headers: [
-          { key: 'Cache-Control', value: 'no-store, no-cache, must-revalidate, max-age=0' },
-          { key: 'Pragma', value: 'no-cache' },
-        ],
-      },
-      // ONLYOFFICE editor — no-cache + CSP allowing ONLYOFFICE iframe
+      // ONLYOFFICE editor — CSP allowing ONLYOFFICE iframe
       {
         source: '/editor/:path*',
         headers: [
-          { key: 'Cache-Control', value: 'no-store, no-cache, must-revalidate, max-age=0' },
-          { key: 'Pragma', value: 'no-cache' },
           {
             key: 'Content-Security-Policy',
             value: `frame-src 'self' ${process.env.ONLYOFFICE_SERVER_URL || 'http://localhost:8080'}; script-src 'self' 'unsafe-inline' 'unsafe-eval' ${process.env.ONLYOFFICE_SERVER_URL || 'http://localhost:8080'}`,

@@ -12,36 +12,7 @@ import { auth } from '@/lib/auth';
 // Anti-Phishing Configuration
 const OTP_VERIFY_WINDOW_MINUTES = 3;  // OTP valid for 3 minutes (reduced from 5 for tighter security)
 
-// Cache Redis availability check at module load (performance optimization)
-const isRedisConfigured = !!(
-    process.env.UPSTASH_REDIS_REST_URL &&
-    process.env.UPSTASH_REDIS_REST_TOKEN &&
-    !process.env.UPSTASH_REDIS_REST_URL.includes('your-redis')
-);
-
-// Conditionally import Redis functions only if configured
-async function tryCreateSession(token: string, sessionId: string, ttlSeconds: number): Promise<boolean> {
-    if (!isRedisConfigured) return false;
-
-    try {
-        const { createSession } = await import('@/lib/redis');
-        await createSession(token, sessionId, ttlSeconds);
-        return true;
-    } catch {
-        return false;
-    }
-}
-
-async function tryCheckRevoked(token: string): Promise<boolean | null> {
-    if (!isRedisConfigured) return null;
-
-    try {
-        const { isTokenRevoked } = await import('@/lib/redis');
-        return await isTokenRevoked(token);
-    } catch {
-        return null;
-    }
-}
+import { tryCheckRevoked, tryCreateSession } from '@/lib/redis-helpers';
 
 export type VerifyOTPResult = {
     success: boolean;
@@ -107,6 +78,10 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
         }
 
         // Check if token is revoked in Redis (if available)
+        // NOTE: For OTP verification (the auth entry point), we only block on
+        // explicit Redis confirmation of revocation. If Redis is unavailable,
+        // we fall through to the authoritative DB check at secureLink.isRevoked
+        // below. This prevents locking out ALL users when Redis is offline.
         const revokedInRedis = await tryCheckRevoked(token);
         if (revokedInRedis === true) {
             return {
@@ -492,12 +467,18 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
             if (vendorAccess) {
                 await tx.linkAccess.update({
                     where: { id: vendorAccess.id },
-                    data: updateData,
+                    data: {
+                        ...updateData,
+                        otpHash: null,  // SECURITY: Clear OTP hash — single-use enforcement
+                    },
                 });
             } else {
                 await tx.secureLink.update({
                     where: { id: secureLink.id },
-                    data: updateData,
+                    data: {
+                        ...updateData,
+                        otpHash: '',  // SECURITY: Clear OTP hash — single-use enforcement (required field, use empty string)
+                    },
                 });
             }
 
@@ -506,7 +487,7 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
                     where: { id: vendor.id },
                     data: {
                         loginCount: { increment: 1 },
-                        otpHash: null, // clear OTP
+                        otpHash: null, // SECURITY: Clear OTP hash — single-use enforcement
                     }
                 });
             }
@@ -561,7 +542,8 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
         return {
             success: true,
             accessGranted: true,
-            sessionId,
+            // SECURITY: sessionId intentionally NOT returned in response body
+            // It's already set as an httpOnly cookie — the only safe channel
         };
     } catch (error) {
         console.error('Error verifying OTP:', error instanceof Error ? error.message : 'Unknown');
