@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { encryptBytes, decryptBytes } from '@/lib/encryptionService';
+import { encryptBuffer, decryptBuffer, generateDek, encryptDek, decryptDek } from '@/lib/crypto';
 import { authorizeApiRequest } from '@/lib/api-auth';
-
-export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /**
@@ -29,7 +27,7 @@ export async function POST(
     }
 
     // Auth (Zero-Trust Session + API Security)
-    const authResult = await authorizeApiRequest(fileId, token);
+    const authResult = await authorizeApiRequest(fileId, token, { httpMethod: req.method });
     if (authResult.errorResponse) {
       return authResult.errorResponse;
     }
@@ -39,11 +37,13 @@ export async function POST(
     }
 
     // Decrypt existing PDF
-    const originalBytes = decryptBytes({
-      encryptedContent: file.encryptedContent,
-      iv: file.iv,
-      authTag: file.authTag,
-    });
+    const dek = (file as any).encryptedDek ? decryptDek((file as any).encryptedDek) : undefined;
+    const originalBytes = decryptBuffer(
+      file.encryptedContent!,
+      file.iv!,
+      file.authTag!,
+      dek
+    );
 
     // Use pdf-lib to replace the page
     const { PDFDocument } = await import('pdf-lib');
@@ -65,9 +65,9 @@ export async function POST(
       data: {
         fileId,
         versionNumber: versionCount + 1,
-        encryptedContent: file.encryptedContent,
-        iv: file.iv,
-        authTag: file.authTag,
+        encryptedContent: file.encryptedContent!,
+        iv: file.iv!,
+        authTag: file.authTag!,
         fileSize: file.fileSize,
         changeType: 'page_replace',
         changeDescription: `Replaced page ${pageNumber}`,
@@ -75,13 +75,16 @@ export async function POST(
     });
 
     // Encrypt and save new bytes
-    const encrypted = encryptBytes(newBuf);
+    const newDek = generateDek();
+    const encrypted = encryptBuffer(newBuf, newDek);
+    const encryptedDekStr = encryptDek(newDek);
     await prisma.userFile.update({
       where: { id: fileId },
       data: {
         encryptedContent: encrypted.encryptedContent,
         iv: encrypted.iv,
         authTag: encrypted.authTag,
+        encryptedDek: encryptedDekStr,
         fileSize: newBuf.length,
       },
     });

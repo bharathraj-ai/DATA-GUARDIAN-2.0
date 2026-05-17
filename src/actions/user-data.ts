@@ -16,7 +16,6 @@ export type CreateSecureLinkResult = {
     success: boolean;
     shareUrl?: string;
     ownerUrl?: string; // URL for kill switch
-    otp?: string;
     expiresAt?: Date;
     error?: string;
 };
@@ -32,6 +31,14 @@ export type CreateSecureLinkResult = {
  */
 export async function createSecureLink(input: UserDataInput): Promise<CreateSecureLinkResult> {
     try {
+        // SECURITY: This is a legacy action superseded by createSecureLinkWithFiles.
+        // Kept for backward compatibility but MUST require authentication.
+        const { auth } = await import('@/lib/auth');
+        const session = await auth();
+        if (!session?.user?.id) {
+            return { success: false, error: 'Authentication required.' };
+        }
+
         // Validate input on server side (Zero Trust)
         const validatedData = userDataSchema.safeParse(input);
 
@@ -103,15 +110,14 @@ export async function createSecureLink(input: UserDataInput): Promise<CreateSecu
         const ownerUrl = `${baseUrl}/revoke/${ownerToken}`;
 
         // In production, send OTP via email/SMS here
-        // For now, we return it for demonstration
-        // SECURITY: In production, remove otp from response
+        // SECURITY: OTP is NEVER returned in API response
         console.log(`[SECURE] Link created. ID: ${result.secureLink.id}`);
 
         return {
             success: true,
             shareUrl,
             ownerUrl,
-            otp, // In production, send via email/SMS instead
+            // SECURITY: OTP is NEVER returned — must be delivered via email only
             expiresAt,
         };
     } catch (error) {

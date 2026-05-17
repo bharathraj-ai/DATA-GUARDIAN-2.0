@@ -8,20 +8,21 @@ import {
     calculateExpiry,
     encryptData,
     generateDataHash,
-    generateOwnerToken,
-    encryptBuffer,
-    generateDek,
-    encryptDek
+    generateOwnerToken
 } from '@/lib/crypto';
-import { userDataSchema, fileSchema, ACCEPTED_FILE_TYPES } from '@/lib/validations';
+import { userDataSchema } from '@/lib/validations';
+import { validateMimeType, ALLOWED_EXTENSIONS } from '@/lib/security/file-validator';
 import { z } from 'zod';
 import { auth } from '@/lib/auth';
+import { canCreateSecureLinks } from '@/lib/security/roles';
+import { checkUploadRateLimit, extractClientIP, formatRateLimitError } from '@/lib/rate-limit';
+import { headers } from 'next/headers';
+import path from 'path';
 
 export type CreateSecureLinkResult = {
     success: boolean;
     shareUrl?: string;
     ownerUrl?: string;
-    otp?: string;
     expiresAt?: Date;
     purpose?: string;  // V2.1: Return purpose for confirmation
     error?: string;
@@ -34,9 +35,17 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
         if (!session?.user) {
             return { success: false, error: 'Authentication required.' };
         }
-        const userRole = (session.user as any)?.role;
-        if (userRole === 'VENDOR') {
-            return { success: false, error: 'Vendors cannot create secure links. Only owners can create links.' };
+        const userRole = (session.user as { role?: string })?.role;
+        if (!canCreateSecureLinks(userRole)) {
+            return { success: false, error: 'You do not have permission to create secure links.' };
+        }
+
+        // SECURITY: Rate limit uploads to prevent storage exhaustion
+        const _headers = await headers();
+        const clientIP = extractClientIP(_headers);
+        const rateLimit = await checkUploadRateLimit(clientIP);
+        if (!rateLimit.allowed) {
+            return { success: false, error: formatRateLimitError(rateLimit) };
         }
 
         // 1. Extract and Validate Text Data
@@ -120,13 +129,43 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
             };
         }
 
-        // Validate all files first (fast check)
+        // Validate all files: extension allowlist + magic byte verification
+        // SECURITY: NEVER trust file.type — it's set by the client/browser and trivially spoofable
+        const MAX_SINGLE_FILE_SIZE = 15 * 1024 * 1024; // 15MB per file
         for (const file of files) {
-            const validation = fileSchema.safeParse({ size: file.size, type: file.type });
-            if (!validation.success) {
+            if (file.size > MAX_SINGLE_FILE_SIZE) {
                 return {
                     success: false,
-                    error: `File ${file.name}: ${validation.error.issues[0]?.message}`,
+                    error: `File "${file.name}" exceeds 15MB limit.`,
+                };
+            }
+
+            // SECURITY: Reject null bytes in filenames (path traversal/injection)
+            if (file.name.includes('\0')) {
+                return { success: false, error: 'Invalid filename.' };
+            }
+
+            // SECURITY: Detect double extensions (e.g., "malware.pdf.exe")
+            const nameParts = file.name.split('.');
+            if (nameParts.length > 2) {
+                // Check if any intermediate extension is dangerous
+                for (let i = 1; i < nameParts.length - 1; i++) {
+                    const intermediateExt = '.' + nameParts[i].toLowerCase();
+                    if (ALLOWED_EXTENSIONS.has(intermediateExt)) {
+                        // A known-good extension is NOT the final extension — suspicious
+                        return {
+                            success: false,
+                            error: `File "${file.name}" has a suspicious double extension. Rename the file and try again.`,
+                        };
+                    }
+                }
+            }
+
+            const ext = path.extname(file.name).toLowerCase();
+            if (!ALLOWED_EXTENSIONS.has(ext)) {
+                return {
+                    success: false,
+                    error: `File "${file.name}": type "${ext}" is not allowed. Permitted: PDF, Excel, CSV, Images, Text.`,
                 };
             }
         }
@@ -170,18 +209,65 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
             Promise.resolve(generateDataHash(userData)),
             Promise.all(
                 files.map(async (file) => {
-                    const buffer = Buffer.from(await file.arrayBuffer());
+                    // SECURITY: Stream only small chunk for magic bytes (prevents memory exhaustion)
+                    const magicBytesBuffer = Buffer.from(await file.slice(0, 4100).arrayBuffer());
+                    const ext = path.extname(file.name).toLowerCase();
+                    const mimeCheck = validateMimeType(magicBytesBuffer, ext);
+                    if (!mimeCheck.valid) {
+                        throw new Error(`File "${file.name}": ${mimeCheck.error}`);
+                    }
+                    const trustedMimeType = mimeCheck.mimeType!;
+
+                    // Sanitize filename: strip path components, limit length
+                    const sanitizedName = path.basename(file.name).substring(0, 255);
+
+                    // Use streams for crypto and GridFS upload
+                    const { createEncryptionStream, generateDek, encryptDek } = await import('@/lib/crypto');
+                    const { uploadStreamToMongo } = await import('@/lib/mongo/operations');
+                    const { Readable } = await import('stream');
+                    
                     const dek = generateDek();
-                    const { iv, authTag, encryptedContent } = encryptBuffer(buffer, dek);
-                    const encryptedDek = encryptDek(dek);
+                    const { cipher, iv, getAuthTag } = createEncryptionStream(dek);
+                    const encryptedDekStr = encryptDek(dek);
+                    
+                    // Web Stream -> Node Readable Stream -> Encryption Transform
+                    const nodeStream = Readable.fromWeb(file.stream() as any);
+                    const encryptedStream = nodeStream.pipe(cipher);
+
+                    // Upload directly to Mongo GridFS using streams (fast, no memory spikes)
+                    const uploadResult = await uploadStreamToMongo({
+                        stream: encryptedStream,
+                        originalFileName: sanitizedName,
+                        mimeType: trustedMimeType,
+                        fileExtension: ext.replace('.', ''),
+                        folder: 'vendor-uploads',
+                        uploadedBy: session.user.id,
+                        classification: 'INTERNAL',
+                    });
+
+                    // Auth tag is available ONLY after the cipher stream finishes
+                    const authTag = getAuthTag();
+
                     return {
-                        fileName: file.name,
-                        fileType: file.type,
-                        fileSize: file.size,
-                        encryptedContent,
+                        fileName: sanitizedName,
+                        fileType: trustedMimeType,
+                        fileSize: uploadResult.fileSize,
                         iv,
                         authTag,
-                        encryptedDek,
+                        encryptedDek: encryptedDekStr,
+                        mongoFile: {
+                            create: {
+                                gridFSId: uploadResult.gridFSId,
+                                originalFileName: sanitizedName,
+                                mimeType: trustedMimeType,
+                                fileExtension: ext.replace('.', ''),
+                                fileSize: uploadResult.fileSize,
+                                checksum: uploadResult.checksum,
+                                folder: 'vendor-uploads',
+                                uploadedBy: session.user.id,
+                                classification: 'INTERNAL',
+                            }
+                        }
                     };
                 })
             ),
@@ -203,7 +289,6 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
                     token,
                     ownerToken,
                     otpHash: globalOtpHash,
-                    otpPlain: globalOtp,
                     expiresAt,
                     userId: userDataRecord.id,
                     // OWNER BINDING: Associate link with authenticated user
@@ -219,7 +304,6 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
                             vendorEmail: v.email, 
                             level: v.level,
                             otpHash: v.otpHash,
-                            otpPlain: v.otp
                         })),
                     },
                     UserFile: {
@@ -254,8 +338,8 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
             timeout: 60000  // Reduced from 5min - most operations should complete quickly
         });
 
-        // Audit log AFTER transaction (non-blocking, fire-and-forget for speed)
-        prisma.auditLog.create({
+        // Audit log AFTER transaction
+        await prisma.auditLog.create({
             data: {
                 action: 'CREATED',
                 linkId: result.id,
@@ -288,7 +372,7 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
             success: true,
             shareUrl,
             ownerUrl,
-            otp: globalOtp,
+            // SECURITY: OTP is NEVER returned in API response — delivered via email only
             expiresAt,
             purpose: purpose || undefined,  // V2.1: Return for UI confirmation
         };
