@@ -33,8 +33,7 @@ model AuditLog {
   linkId     String?
   metadata   String?
   reason     String?
-  SecureLink SecureLink? @relation(fields: [linkId], references: [id])
-
+  SecureLink SecureLink? @relation(fields: [linkId], references: [id], onDelete: SetNull)
   @@index([action])
   @@index([linkId])
   @@index([timestamp])
@@ -60,8 +59,9 @@ model SecureLink {
   otpVerifiedAt      DateTime?
   allowedVendorEmail String?
   allowEditing       Boolean    @default(false)
+  allowDownload      Boolean    @default(true)
+  allowComment       Boolean    @default(true)
   ownerId            String?
-  otpPlain           String?
   AuditLog           AuditLog[]
   User               User?      @relation(fields: [ownerId], references: [id])
   UserData           UserData      @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -69,7 +69,6 @@ model SecureLink {
   LinkAccess         LinkAccess[]
   ChatMessage        ChatMessage[]
   VendorAccess       VendorAccess[]
-
   @@index([expiresAt])
   @@index([ownerId])
   @@index([ownerToken])
@@ -82,7 +81,6 @@ model VendorAccess {
   email          String
   level          Int        @default(2) // 1 = Team leader
   otpHash        String?
-  otpPlain       String?
   loginCount     Int        @default(0)
   maxLogins      Int        @default(3)
   failedAttempts Int        @default(0)
@@ -120,6 +118,7 @@ model User {
   Session       Session[]
   SendRecord    SendRecord[]
   Document      Document[]
+  documentGrants DocumentGrant[] @relation("DocumentGrantee")
 }
 
 model UserData {
@@ -135,17 +134,27 @@ model UserFile {
   fileName         String
   fileType         String
   fileSize         Int
-  encryptedContent Bytes
-  iv               String
-  authTag          String
+  version          Int           @default(1)
+  eTag             String        @default(cuid()) // Conflict detection
+  lockedBy         String?       // ID of user currently holding the lock
+  encryptedContent Bytes?
+  iv               String?
+  authTag          String?
   encryptedDek     String?
-  secureLinkId     String
-  createdAt        DateTime      @default(now())
-  SecureLink       SecureLink    @relation(fields: [secureLinkId], references: [id], onDelete: Cascade)
-  FileVersion      FileVersion[]
-  Annotation       Annotation[]
+  mongoFileId      String?       @unique
+  mongoFile        MongoFile?    @relation(fields: [mongoFileId], references: [id])
+  status               String        @default("draft") // draft | editing | submitted | approved | rejected | revoked
+  submittedAt          DateTime?
+  submittedBy          String?
+  editingLocked        Boolean       @default(false)
+  vendorDownloadBlocked Boolean      @default(true)
+  secureLinkId         String
+  SecureLink           SecureLink    @relation(fields: [secureLinkId], references: [id], onDelete: Cascade)
+  FileVersion          FileVersion[]
+  Annotation           Annotation[]
 
   @@index([secureLinkId])
+  @@index([status])
 }
 
 model FileVersion {
@@ -162,6 +171,7 @@ model FileVersion {
   createdAt         DateTime @default(now())
   UserFile          UserFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
 
+  @@unique([fileId, versionNumber])
   @@index([fileId])
   @@index([createdAt])
 }
@@ -246,7 +256,6 @@ model LinkAccess {
   vendorEmail  String
   level            Int        @default(2) // 1 = Team Leader, 2+ = Member
   otpHash          String?    // Per-vendor unique OTP hash
-  otpPlain         String?    // Per-vendor plain OTP (for email sending)
   isUsed           Boolean    @default(false)
   otpVerifiedAt    DateTime?
   deviceHash       String?
@@ -295,11 +304,26 @@ model Document {
   owner          User               @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   versions       DocumentVersion[]
   auditLogs      DocumentAuditLog[]
+  grants         DocumentGrant[]
 
   @@index([ownerId])
   @@index([classification])
   @@index([createdAt])
   @@index([isDeleted])
+}
+
+/// Explicit grant for non-owner access to ONLYOFFICE-backed documents (deny-by-default).
+model DocumentGrant {
+  id          String   @id @default(cuid())
+  documentId  String
+  granteeId   String
+  permission  String   @default("view") // view | edit
+  createdAt   DateTime @default(now())
+  document    Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  grantee     User     @relation("DocumentGrantee", fields: [granteeId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, granteeId])
+  @@index([granteeId])
 }
 
 /// Version history entry — stores path to previous version on disk.
@@ -351,4 +375,90 @@ model DocumentChatMessage {
 
   @@index([fileId])
   @@index([createdAt])
+}
+
+// ============================================
+// MONGODB FILE MANAGEMENT
+// ============================================
+
+/// Mongo-stored file metadata. Actual files live in MongoDB GridFS.
+model MongoFile {
+  id               String        @id @default(cuid())
+  gridFSId         String        @unique    // GridFS file _id
+  originalFileName String                   // User-facing filename
+  mimeType         String                   // Server-validated MIME type
+  fileExtension    String                   // e.g. "pdf", "docx"
+  fileSize         Int                      // Bytes
+  checksum         String                   // SHA-256 of file content
+  folder           String        @default("vendor-uploads") // vendor-uploads | final-submissions | temp | audit
+  projectId        String?                  // Project scoping
+  vendorId         String?                  // Vendor scoping
+  uploadedBy       String                   // User ID who uploaded
+  classification   String        @default("INTERNAL") // PUBLIC | INTERNAL | CONFIDENTIAL | RESTRICTED
+  status           String        @default("active")   // active | submitted | access-revoked | archived
+  scanStatus       String        @default("pending")  // pending | clean | infected | error
+  scanResult       String?                  // JSON — scanner output
+  isDeleted        Boolean       @default(false)
+  deletedAt        DateTime?
+  deletedBy        String?
+  deletionReason   String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  uploadLogs       MongoUploadLog[]
+  accessLogs       MongoAccessLog[]
+  userFile         UserFile?
+
+  @@index([uploadedBy])
+  @@index([projectId])
+  @@index([vendorId])
+  @@index([folder])
+  @@index([classification])
+  @@index([status])
+  @@index([scanStatus])
+  @@index([isDeleted])
+  @@index([createdAt])
+}
+
+/// Append-only upload audit log. One entry per upload attempt (success or failure).
+model MongoUploadLog {
+  id             String   @id @default(cuid())
+  mongoFileId    String
+  uploadedBy     String
+  ipAddress      String?
+  userAgent      String?
+  fileSize       Int
+  checksum       String
+  classification String
+  status         String   @default("success") // success | failed | rejected
+  errorMessage   String?
+  createdAt      DateTime @default(now())
+
+  mongoFile      MongoFile @relation(fields: [mongoFileId], references: [id], onDelete: Cascade)
+
+  @@index([mongoFileId])
+  @@index([uploadedBy])
+  @@index([createdAt])
+}
+
+/// Append-only access log for every file interaction.
+/// Tracks downloads, presigned URL generation, grants, and revocations.
+model MongoAccessLog {
+  id          String    @id @default(cuid())
+  mongoFileId String
+  accessedBy  String                 // User ID
+  accessType  String                 // download | presign | grant | revoke | delete | view
+  ipAddress   String?
+  userAgent   String?
+  metadata    String?                // JSON — extra context
+  revokedAt   DateTime?              // For grant records: when access was revoked
+  createdAt   DateTime  @default(now())
+
+  mongoFile   MongoFile @relation(fields: [mongoFileId], references: [id], onDelete: Cascade)
+
+  @@index([mongoFileId])
+  @@index([accessedBy])
+  @@index([accessType])
+  @@index([createdAt])
+  @@index([revokedAt])
 }

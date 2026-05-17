@@ -2,6 +2,7 @@ import { NextAuthOptions, getServerSession } from 'next-auth';
 import GoogleProvider from 'next-auth/providers/google';
 import { PrismaAdapter } from '@next-auth/prisma-adapter';
 import { prisma } from '@/lib/prisma';
+import { normalizeRole } from '@/lib/security/roles';
 
 /**
  * NextAuth Configuration for Data Guardian (v4 Compatible)
@@ -115,18 +116,15 @@ export const authOptions: NextAuthOptions = {
             // Always use NEXTAUTH_URL as the baseUrl to prevent port mismatches
             const canonicalBase = process.env.NEXTAUTH_URL || baseUrl;
 
-            // Don't redirect if already going to role-select
-            if (url.includes('/auth/role-select')) {
+            // Don't redirect if already going to role-select or auth pages
+            if (url.includes('/auth/role-select') || url.includes('/auth/signin')) {
+                if (url.startsWith('/')) return `${canonicalBase}${url}`;
                 return url;
             }
-            // For relative URLs or same-origin URLs, allow them
-            if (url.startsWith('/')) {
-                return `${canonicalBase}${url}`;
-            }
-            if (url.startsWith(canonicalBase)) {
-                return url;
-            }
-            return canonicalBase;
+
+            // For all post-sign-in redirects, force through role-select
+            // (the role-select page itself will auto-redirect if role is already chosen)
+            return `${canonicalBase}/auth/role-select`;
         },
 
         /**
@@ -138,7 +136,7 @@ export const authOptions: NextAuthOptions = {
                 session.user.id = user.id;
                 // NextAuth PrismaAdapter already fetches the full user object from the database.
                 // We can access custom fields directly without an extra database query.
-                session.user.role = ((user as any).role as 'OWNER' | 'VENDOR') || 'VENDOR';
+                session.user.role = normalizeRole((user as { role?: string }).role);
                 session.user.roleSelected = (user as any).roleSelected ?? false;
             }
             return session;

@@ -107,6 +107,104 @@ export async function sendOTPEmail(
 }
 
 // ============================================
+// COMPLETED WORK EMAIL WITH ATTACHMENT
+// ============================================
+
+export interface FileAttachment {
+    filename: string;
+    content: Buffer;
+    contentType: string;
+}
+
+/**
+ * Sends the completed/edited files directly to the owner's email as attachments.
+ * This eliminates the need for a manual download step — the owner receives
+ * files in their inbox automatically when the vendor marks work as completed.
+ */
+export async function sendCompletedWorkEmail(
+    ownerEmail: string,
+    vendorEmail: string,
+    purpose: string,
+    attachments: FileAttachment[]
+): Promise<void> {
+    const senderName = process.env.EMAIL_FROM_NAME || "Data Guardian Security";
+    const fileList = attachments.map(a => `• ${a.filename}`).join('<br>');
+    const fileCount = attachments.length;
+
+    await transporter.sendMail({
+        from: `"${senderName}" <${process.env.EMAIL_USER}>`,
+        to: ownerEmail,
+        subject: `✅ Data Guardian: Completed Work Delivered (${fileCount} file${fileCount > 1 ? 's' : ''})`,
+        html: `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Completed Work Delivered</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f3f4f6;">
+  <div style="max-width: 600px; margin: 40px auto; background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); overflow: hidden;">
+    
+    <!-- Header -->
+    <div style="background: linear-gradient(135deg, #059669 0%, #10b981 100%); padding: 32px 24px; text-align: center;">
+      <div style="width: 56px; height: 56px; background-color: #ffffff; border-radius: 50%; margin: 0 auto 16px; display: flex; align-items: center; justify-content: center; font-size: 28px;">
+        ✅
+      </div>
+      <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 600;">Work Completed & Delivered</h1>
+    </div>
+    
+    <!-- Content -->
+    <div style="padding: 32px 24px;">
+      <p style="margin: 0 0 16px; color: #374151; font-size: 16px; line-height: 1.6;">
+        The vendor has completed their work and the edited files are attached to this email.
+      </p>
+
+      <!-- Vendor Info -->
+      <div style="background-color: #f0fdf4; border-left: 4px solid #10b981; padding: 16px; margin: 0 0 24px; border-radius: 4px;">
+        <p style="margin: 0; color: #166534; font-size: 14px;">
+          <strong>Vendor:</strong> ${vendorEmail}<br>
+          <strong>Purpose:</strong> ${purpose || 'N/A'}<br>
+          <strong>Files Delivered:</strong> ${fileCount}
+        </p>
+      </div>
+
+      <!-- File List -->
+      <div style="background-color: #f9fafb; border-left: 4px solid #6366f1; padding: 16px; margin: 0 0 24px; border-radius: 4px;">
+        <p style="margin: 0 0 8px; color: #6b7280; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">Attached Files</p>
+        <p style="margin: 0; color: #374151; font-size: 14px; line-height: 1.8;">${fileList}</p>
+      </div>
+
+      <!-- Security Notice -->
+      <div style="background-color: #fef3c7; border-left: 4px solid #f59e0b; padding: 16px; margin: 0; border-radius: 4px;">
+        <p style="margin: 0; color: #92400e; font-size: 14px;">
+          🔒 <strong>Security:</strong> The vendor's access has been permanently revoked. All shared data and the secure link have been deleted from our servers.
+        </p>
+      </div>
+    </div>
+    
+    <!-- Footer -->
+    <div style="background-color: #f9fafb; padding: 24px; border-top: 1px solid #e5e7eb; text-align: center;">
+      <p style="margin: 0; color: #9ca3af; font-size: 12px;">
+        Data Guardian V2.1 - Enterprise Secure Sharing<br>
+        <span style="color: #d1d5db;">•</span> Privacy-First <span style="color: #d1d5db;">•</span> Zero-Trust <span style="color: #d1d5db;">•</span> Audit-Ready
+      </p>
+    </div>
+    
+  </div>
+</body>
+</html>
+        `.trim(),
+        text: `Work Completed & Delivered\n\nThe vendor (${vendorEmail}) has completed their work.\nPurpose: ${purpose || 'N/A'}\nFiles: ${fileCount}\n\nThe edited files are attached to this email.\nVendor access has been permanently revoked.\n\n---\nData Guardian V2.1 - Enterprise Secure Sharing`,
+        attachments: attachments.map(a => ({
+            filename: a.filename,
+            content: a.content,
+            contentType: a.contentType,
+        })),
+    });
+}
+
+// ============================================
 // GENERIC NOTIFICATION EMAIL SENDER
 // ============================================
 

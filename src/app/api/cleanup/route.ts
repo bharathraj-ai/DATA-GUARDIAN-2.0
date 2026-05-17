@@ -1,37 +1,38 @@
 import { NextResponse } from 'next/server';
 import { cleanupExpiredData } from '@/actions/cleanup';
+import { authorizeCronRequest } from '@/lib/security/cron-auth';
 
-export const dynamic = 'force-dynamic'; // Prevent static generation during build
-
-// This endpoint can be called by a cron job service (e.g., Vercel Cron, external cron)
-// Add authorization in production
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
-    // In production, verify cron secret
-    const authHeader = request.headers.get('authorization');
-    const cronSecret = process.env.CRON_SECRET;
+  const cron = authorizeCronRequest(request);
+  if (!cron.ok) {
+    return NextResponse.json(
+      { error: cron.message },
+      { status: cron.status },
+    );
+  }
 
-    if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+  const result = await cleanupExpiredData();
 
-    const result = await cleanupExpiredData();
+  const headers = {
+    'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
+    Pragma: 'no-cache',
+    Expires: '0',
+  };
 
-    const headers = {
-        'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
-        'Pragma': 'no-cache',
-        'Expires': '0',
-    };
+  if (result.success) {
+    return NextResponse.json(
+      {
+        message: 'Cleanup completed — all expired data permanently deleted',
+        deletedLinks: result.deletedLinks,
+        deletedUserData: result.deletedUserData,
+        deletedFiles: result.deletedFiles,
+        deletedAuditLogs: result.deletedAuditLogs,
+      },
+      { headers },
+    );
+  }
 
-    if (result.success) {
-        return NextResponse.json({
-            message: 'Cleanup completed — all expired data permanently deleted',
-            deletedLinks: result.deletedLinks,
-            deletedUserData: result.deletedUserData,
-            deletedFiles: result.deletedFiles,
-            deletedAuditLogs: result.deletedAuditLogs,
-        }, { headers });
-    }
-
-    return NextResponse.json({ error: result.error }, { status: 500, headers });
+  return NextResponse.json({ error: result.error }, { status: 500, headers });
 }
