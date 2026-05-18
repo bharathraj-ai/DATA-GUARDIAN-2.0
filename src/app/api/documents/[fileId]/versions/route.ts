@@ -23,7 +23,7 @@ export async function GET(
     const token = req.nextUrl.searchParams.get('token');
     if (!token) return NextResponse.json({ error: 'Missing token' }, { status: 401 });
 
-    const authResult = await authorizeApiRequest(fileId, token);
+    const authResult = await authorizeApiRequest(fileId, token, { httpMethod: req.method });
     if (authResult.errorResponse) {
       return authResult.errorResponse;
     }
@@ -59,7 +59,7 @@ export async function POST(
 
     if (!token || !versionId) return NextResponse.json({ error: 'Missing fields' }, { status: 400 });
 
-    const authResult = await authorizeApiRequest(fileId, token);
+    const authResult = await authorizeApiRequest(fileId, token, { httpMethod: req.method });
     if (authResult.errorResponse) {
       return authResult.errorResponse;
     }
@@ -76,9 +76,9 @@ export async function POST(
       data: {
         fileId,
         versionNumber: versionCount + 1,
-        encryptedContent: file.encryptedContent,
-        iv: file.iv,
-        authTag: file.authTag,
+        encryptedContent: file.encryptedContent!,
+        iv: file.iv!,
+        authTag: file.authTag!,
         fileSize: file.fileSize,
         changeType: 'restore',
         changeDescription: `Pre-restore snapshot before restoring v${version.versionNumber}`,

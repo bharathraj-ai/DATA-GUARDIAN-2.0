@@ -7,7 +7,7 @@ export const userDataSchema = z.object({
     phone: z.string().max(15, 'Phone number too long').optional().or(z.literal('')),
     gender: z.string().optional().or(z.literal('')),
     age: z.number().int().max(150, 'Invalid age').optional().or(z.literal(0)),
-    validityMinutes: z.number().int().min(1, 'Validity must be at least 1 minute').max(1440, 'Validity cannot exceed 24 hours'),
+    validityMinutes: z.number().int().min(1, 'Validity must be at least 1 minute').max(10080, 'Validity cannot exceed 7 days'),
 });
 
 export type UserDataInput = z.infer<typeof userDataSchema>;

@@ -1,101 +1,68 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-/**
- * Known search engine referrer domains
- * If a request to a secure route comes from any of these, block it
- */
-const SEARCH_ENGINE_DOMAINS = [
-    'google.com', 'google.co', 'google.',
-    'bing.com',
-    'yahoo.com',
-    'duckduckgo.com',
-    'baidu.com',
-    'yandex.com', 'yandex.ru',
-    'ecosia.org',
-    'ask.com',
-    'aol.com',
-    'search.',
-];
-
-/**
- * Check if the referrer is from a search engine
- */
-function isFromSearchEngine(referer: string | null): boolean {
-    if (!referer) return false;
-    const lowerRef = referer.toLowerCase();
-    return SEARCH_ENGINE_DOMAINS.some(domain => lowerRef.includes(domain));
-}
-
-/**
- * Middleware for Secure Protocol
- * 
- * Security layers:
- * 1. Disables caching for all dynamic routes
- * 2. Sets X-Robots-Tag to prevent search engine indexing of secure routes
- * 3. Blocks access from search engine referrers (prevents link discovery via search)
- * 4. Sets Referrer-Policy to prevent token leakage in outbound requests
- * 
- * NOTE: Authentication is handled at page level using auth() wrapper
- * because Edge middleware doesn't support Prisma (database sessions)
- * 
- * IMPORTANT: /api/auth/* routes are excluded from middleware to prevent
- * interference with NextAuth's cookie handling (state, PKCE, session cookies)
- */
 export function middleware(request: NextRequest) {
-    const pathname = request.nextUrl.pathname;
+    const response = NextResponse.next();
 
-    // NEVER intercept NextAuth API routes - they manage their own cookies
-    if (pathname.startsWith('/api/auth')) {
-        return NextResponse.next();
-    }
+    // CSRF Protection for custom API routes
+    if (request.nextUrl.pathname.startsWith('/api/')) {
+        const method = request.method;
+        const isMutating = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
 
-    // Check if this is a secure route (share/view/revoke)
-    const isSecureRoute =
-        pathname.startsWith('/share/') ||
-        pathname.startsWith('/view/') ||
-        pathname.startsWith('/revoke/') ||
-        pathname.startsWith('/editor/');
+        if (isMutating) {
+            // Origin validation (Fail-closed on origin mismatch)
+            const origin = request.headers.get('origin');
+            const host = request.headers.get('host');
 
-    // SECURITY: Block access from search engine referrers
-    if (isSecureRoute) {
-        const referer = request.headers.get('referer');
-        if (isFromSearchEngine(referer)) {
-            return new NextResponse(
-                JSON.stringify({
-                    error: 'Access Denied',
-                    message: 'Secure links cannot be accessed from search engines. Please paste the link directly in your browser address bar.',
-                }),
-                {
-                    status: 403,
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-Robots-Tag': 'noindex, nofollow, noarchive, nosnippet',
-                    },
+            if (!origin || !host) {
+                // Allow server actions (Next.js sets x-action-id header)
+                const isServerAction = request.headers.get('next-action') !== null;
+                if (!isServerAction) {
+                    console.warn('[CSRF] Blocked: Missing Origin/Host', {
+                        path: request.nextUrl.pathname,
+                        method,
+                    });
+                    return NextResponse.json(
+                        { error: 'CSRF Violation: Missing Origin/Host' },
+                        { status: 403 }
+                    );
                 }
-            );
+            } else {
+                try {
+                    const originHost = new URL(origin).host;
+                    if (originHost !== host) {
+                        console.warn('[CSRF] Blocked: Origin mismatch', {
+                            origin: originHost,
+                            host,
+                        });
+                        return NextResponse.json(
+                            { error: 'CSRF Violation: Origin mismatch' },
+                            { status: 403 }
+                        );
+                    }
+                } catch {
+                    return NextResponse.json(
+                        { error: 'CSRF Violation: Invalid Origin' },
+                        { status: 403 }
+                    );
+                }
+            }
         }
     }
 
-    const response = NextResponse.next();
+    // Security headers (applied to all responses)
+    response.headers.set('X-Content-Type-Options', 'nosniff');
+    response.headers.set('X-Frame-Options', 'DENY');
+    response.headers.set('X-XSS-Protection', '1; mode=block');
+    response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+    response.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
 
-    // SECURITY: Prevent search engines from indexing secure routes
-    if (isSecureRoute) {
-        response.headers.set('X-Robots-Tag', 'noindex, nofollow, noarchive, nosnippet');
-        response.headers.set('Referrer-Policy', 'no-referrer');
-    }
-
-    // Disable caching for all dynamic routes
-    if (
-        isSecureRoute ||
-        pathname.startsWith('/create-link') ||
-        pathname.startsWith('/api/') ||
-        pathname.startsWith('/auth/')
-    ) {
-        response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-        response.headers.set('Pragma', 'no-cache');
-        response.headers.set('Expires', '0');
-        response.headers.set('Surrogate-Control', 'no-store');
+    // HSTS — only in production (HTTPS)
+    if (process.env.NODE_ENV === 'production') {
+        response.headers.set(
+            'Strict-Transport-Security',
+            'max-age=63072000; includeSubDomains; preload'
+        );
     }
 
     return response;
@@ -103,13 +70,12 @@ export function middleware(request: NextRequest) {
 
 export const config = {
     matcher: [
-        '/share/:path*',
-        '/view/:path*',
-        '/revoke/:path*',
-        '/create-link',
-        '/api/((?!auth).*)',
-        '/auth/:path*',
-        '/editor/:path*',
+        /*
+         * Match all request paths except for the ones starting with:
+         * - _next/static (static files)
+         * - _next/image (image optimization files)
+         * - favicon.ico (favicon file)
+         */
+        '/((?!_next/static|_next/image|favicon.ico).*)',
     ],
 };
-
