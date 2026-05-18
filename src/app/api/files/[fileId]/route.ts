@@ -55,15 +55,13 @@ export async function GET(
       );
     }
 
-    // ── RBAC check ─
-    if (userId) {
-      const permission = await checkDocumentPermission(userId, fileId, 'view');
-      if (!permission.allowed) {
-        return NextResponse.json(
-          { error: permission.reason || 'Access denied' },
-          { status: 403 }
-        );
-      }
+    // ── RBAC check (deny-by-default; owner, explicit grant, or break-glass staff) ─
+    const permission = await checkDocumentPermission(userId, fileId, 'view');
+    if (!permission.allowed) {
+      return NextResponse.json(
+        { error: permission.reason || 'Access denied' },
+        { status: 403 }
+      );
     }
 
     // ── Stream file from secure storage ─────────────────────────
@@ -84,6 +82,9 @@ export async function GET(
       action: isDownload ? 'download' : 'view',
       ipAddress,
       userAgent,
+      metadata: permission.elevatedBreakGlass
+        ? { elevatedBreakGlassAccess: true, reason: 'Break-glass document access' }
+        : undefined,
     });
 
     // ── Return file with security headers ───────────────────────

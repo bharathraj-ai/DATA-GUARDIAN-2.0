@@ -97,7 +97,7 @@ function createEmailTemplate(payload: NotificationPayload): { subject: string; h
             subject = '🚨 Data Guardian: Invalid OTP - Link Revoked';
             heading = 'Link Revoked Due to Invalid OTP';
             const attempts = metadata?.failedAttempts || 1;
-            message = `Your secure link was permanently revoked after ${attempts} invalid OTP attempt at ${formattedTime}. This is a security measure to prevent unauthorized access.`;
+            message = `Your secure link was permanently revoked after ${attempts} invalid OTP attempt${attempts === 1 ? '' : 's'} at ${formattedTime}. This is a security measure to prevent unauthorized access.`;
             iconColor = '#ef4444'; // red
             break;
 

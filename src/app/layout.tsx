@@ -4,8 +4,8 @@ import Link from 'next/link';
 import Image from 'next/image';
 import "./globals.css";
 import "./anthropic.css";
-import Navbar from "@/components/Navbar";
 import Providers from "@/components/Providers";
+import ClientAppShell from "@/components/ClientAppShell";
 
 // next/font: Self-hosts Inter, preloads it, eliminates render-blocking requests
 const inter = Inter({
@@ -65,42 +65,46 @@ export default function RootLayout({
       <body className={inter.className}>
         <a href="#main-content" className="skip-to-content">Skip to main content</a>
         <Providers>
-          <Navbar />
-          <div id="main-content">{children}</div>
-          <footer className="footer">
-            <div className="container">
-              <div className="footer-grid">
-                <div className="footer-brand">
-                  <Link href="/" className="footer-logo">
-                    <Image src="/logo.svg" alt="Secure Protocol" width={24} height={24} style={{ opacity: 0.9 }}/>
-                    <span className="gradient-text" style={{ fontWeight: 600, letterSpacing: '-0.02em', fontSize: '18px' }}>Secure Protocol</span>
-                  </Link>
-                  <p className="footer-motto">
-                    Protecting your sensitive data with military-grade encryption and self-destructing links.
-                  </p>
-                </div>
-                <div>
-                  <h4 className="footer-col-title">Platform</h4>
-                  <div className="footer-links">
-                    <Link href="/services" className="footer-link">Services</Link>
-                    <Link href="/how-it-works" className="footer-link">How it Works</Link>
-                    <Link href="/create-link" className="footer-link">Create Link</Link>
+          <ClientAppShell
+            footer={
+              <footer className="footer">
+                <div className="container">
+                  <div className="footer-grid">
+                    <div className="footer-brand">
+                      <Link href="/" className="footer-logo">
+                        <Image src="/logo.svg" alt="Secure Protocol" width={24} height={24} style={{ opacity: 0.9 }}/>
+                        <span className="gradient-text" style={{ fontWeight: 600, letterSpacing: '-0.02em', fontSize: '18px' }}>Secure Protocol</span>
+                      </Link>
+                      <p className="footer-motto">
+                        Protecting your sensitive data with military-grade encryption and self-destructing links.
+                      </p>
+                    </div>
+                    <div>
+                      <h4 className="footer-col-title">Platform</h4>
+                      <div className="footer-links">
+                        <Link href="/services" className="footer-link">Services</Link>
+                        <Link href="/how-it-works" className="footer-link">How it Works</Link>
+                        <Link href="/create-link" className="footer-link">Create Link</Link>
+                      </div>
+                    </div>
+                    <div>
+                      <h4 className="footer-col-title">Legal</h4>
+                      <div className="footer-links">
+                        <Link href="/legal/privacy" className="footer-link">Privacy Policy</Link>
+                        <Link href="/legal/terms" className="footer-link">Terms of Service</Link>
+                        <Link href="/legal/cookies" className="footer-link">Cookie Policy</Link>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="footer-bottom">
+                    <p>&copy; 2026 Secure Protocol. All rights reserved.</p>
                   </div>
                 </div>
-                <div>
-                  <h4 className="footer-col-title">Legal</h4>
-                  <div className="footer-links">
-                    <Link href="/legal/privacy" className="footer-link">Privacy Policy</Link>
-                    <Link href="/legal/terms" className="footer-link">Terms of Service</Link>
-                    <Link href="/legal/cookies" className="footer-link">Cookie Policy</Link>
-                  </div>
-                </div>
-              </div>
-              <div className="footer-bottom">
-                <p>&copy; 2026 Secure Protocol. All rights reserved.</p>
-              </div>
-            </div>
-          </footer>
+              </footer>
+            }
+          >
+            {children}
+          </ClientAppShell>
         </Providers>
       </body>
     </html>

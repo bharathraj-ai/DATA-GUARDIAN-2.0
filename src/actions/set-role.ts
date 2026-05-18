@@ -2,41 +2,58 @@
 
 import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import {
+  SELF_SERVICE_ROLES,
+  normalizeRole,
+  type AppRole,
+} from '@/lib/security/roles';
 
 /**
- * Server action to set a user's role during initial signup.
- * Only allows setting role if roleSelected is still false (first-time selection).
+ * First-time onboarding only.
+ * Any new user can pick OWNER or VENDOR — this choice is permanent.
  */
-export async function setUserRole(role: 'OWNER' | 'VENDOR') {
-    const session = await auth();
+export async function setUserRole(role: AppRole) {
+  const session = await auth();
 
-    if (!session?.user?.id) {
-        return { success: false, error: 'Not authenticated' };
-    }
+  if (!session?.user?.id || !session.user.email) {
+    return { success: false, error: 'Not authenticated' };
+  }
 
-    // Validate role value
-    if (role !== 'OWNER' && role !== 'VENDOR') {
-        return { success: false, error: 'Invalid role' };
-    }
+  const normalized = normalizeRole(role);
 
-    // Check if user has already selected a role
-    const user = await prisma.user.findUnique({
-        where: { id: session.user.id },
-        select: { roleSelected: true },
-    });
+  // Only OWNER and VENDOR are valid choices
+  if (!SELF_SERVICE_ROLES.includes(normalized)) {
+    return { success: false, error: 'Invalid role selection' };
+  }
 
-    if (user?.roleSelected) {
-        return { success: false, error: 'Role has already been selected' };
-    }
+  // Check if role was already selected (one-time only)
+  const user = await prisma.user.findUnique({
+    where: { id: session.user.id },
+    select: { roleSelected: true },
+  });
 
-    // Update user role
-    await prisma.user.update({
-        where: { id: session.user.id },
-        data: {
-            role,
-            roleSelected: true,
-        },
-    });
+  if (user?.roleSelected) {
+    return { success: false, error: 'Role has already been selected' };
+  }
 
-    return { success: true, role };
+  await prisma.user.update({
+    where: { id: session.user.id },
+    data: {
+      role: normalized,
+      roleSelected: true,
+    },
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      action: 'ROLE_SELECTED',
+      reason: 'User completed first-time role selection',
+      metadata: JSON.stringify({
+        role: normalized,
+        userId: session.user.id,
+      }),
+    },
+  });
+
+  return { success: true, role: normalized };
 }
