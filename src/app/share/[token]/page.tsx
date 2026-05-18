@@ -7,7 +7,7 @@ import { validateShareAccess } from '@/actions/validate-share-access';
 import { useSession, signIn } from 'next-auth/react';
 
 interface SharePageProps {
-    params: Promise<{ token: string }>;
+    params: any;
 }
 
 type VerificationState = 'idle' | 'loading' | 'success' | 'error';
@@ -51,12 +51,12 @@ export default function SharePage({ params }: SharePageProps) {
 
     // Resolve params
     useEffect(() => {
-        params.then((p) => {
+        params.then((p: any) => {
             console.log('Token resolved:', p.token);
             // Remove any query parameters (like timestamp) from token
             const cleanToken = p.token.split('?')[0];
             setToken(cleanToken);
-        }).catch((err) => {
+        }).catch((err: any) => {
             console.error('Failed to resolve params:', err);
             setIsLoading(false);
         });
@@ -182,9 +182,6 @@ export default function SharePage({ params }: SharePageProps) {
             setTimeout(() => setState('idle'), 2000);
         }
     };
-
-    // Email is sourced from the authenticated session (vendor signed in with Google)
-    const email = sessionData?.user?.email || '';
 
     const handleSubmit = useCallback(async () => {
         const otpString = otp.join('');
