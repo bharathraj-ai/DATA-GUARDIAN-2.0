@@ -1,23 +1,23 @@
 import { DefaultSession, DefaultUser } from 'next-auth';
-import { AdapterUser } from 'next-auth/adapters';
+
+export type SessionAppRole = 'OWNER' | 'VENDOR';
 
 declare module 'next-auth' {
-    interface Session {
-        user: {
-            id: string;
-            role: 'OWNER' | 'VENDOR';
-            roleSelected: boolean;
-        } & DefaultSession['user'];
-    }
+  interface Session {
+    user: {
+      id: string;
+      role: SessionAppRole;
+      roleSelected: boolean;
+    } & DefaultSession['user'];
+  }
 
-    // Role is optional here since Prisma adapter creates users without it initially
-    interface User extends DefaultUser {
-        role?: 'OWNER' | 'VENDOR';
-    }
+  interface User extends DefaultUser {
+    role?: string;
+  }
 }
 
 declare module 'next-auth/adapters' {
-    interface AdapterUser {
-        role?: 'OWNER' | 'VENDOR';
-    }
+  interface AdapterUser {
+    role?: string;
+  }
 }

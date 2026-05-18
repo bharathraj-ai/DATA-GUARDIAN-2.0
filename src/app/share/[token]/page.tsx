@@ -183,7 +183,8 @@ export default function SharePage({ params }: SharePageProps) {
         }
     };
 
-
+    // Email is sourced from the authenticated session (vendor signed in with Google)
+    const email = sessionData?.user?.email || '';
 
     const handleSubmit = useCallback(async () => {
         const otpString = otp.join('');

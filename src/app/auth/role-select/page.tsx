@@ -23,7 +23,7 @@ export default function RoleSelectPage() {
     // If user already selected a role, redirect them
     useEffect(() => {
         if (sessionStatus === 'authenticated' && (session?.user as any)?.roleSelected) {
-            const role = (session?.user as any)?.role;
+            const role = (session?.user as { role?: string })?.role;
             router.push(role === 'OWNER' ? '/dashboard' : '/dashboard/vendor');
         }
     }, [sessionStatus, session, router]);
@@ -37,9 +37,7 @@ export default function RoleSelectPage() {
             const result = await setUserRole(role);
 
             if (result.success) {
-                // Refresh the session to pick up the new role
                 await update();
-                // Redirect to appropriate dashboard
                 router.push(role === 'OWNER' ? '/dashboard' : '/dashboard/vendor');
             } else {
                 setError(result.error || 'Failed to set role');
@@ -122,7 +120,7 @@ export default function RoleSelectPage() {
                                     flexDirection: 'column' as const,
                                     alignItems: 'center',
                                     gap: '16px',
-                                    opacity: isLoading && selected !== 'OWNER' ? 0.5 : 1,
+                                    opacity: (isLoading && selected !== 'OWNER') ? 0.5 : 1,
                                 }}
                             >
                                 <div style={{
@@ -134,7 +132,7 @@ export default function RoleSelectPage() {
                                     alignItems: 'center',
                                     justifyContent: 'center',
                                 }}>
-                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#a855f7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                         <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
                                     </svg>
                                 </div>
@@ -150,7 +148,7 @@ export default function RoleSelectPage() {
                                         color: 'var(--color-text-secondary)',
                                         lineHeight: '1.5',
                                     }}>
-                                        Create &amp; share encrypted secure links. Control access with OTP, time limits, and kill switches.
+                                        Create secure links, manage data lifecycle, and monitor vendor access.
                                     </p>
                                 </div>
                                 {isLoading && selected === 'OWNER' && (
@@ -230,7 +228,7 @@ export default function RoleSelectPage() {
                                         This choice is permanent
                                     </p>
                                     <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.8rem', lineHeight: '1.5' }}>
-                                        Your role determines what features you can access. Owners create secure links, Vendors view shared data.
+                                        Your role determines what features you can access. Owners create secure links and share data; Vendors receive and review shared data securely.
                                     </p>
                                 </div>
                             </div>

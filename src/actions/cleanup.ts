@@ -1,6 +1,7 @@
 'use server';
 
 import { prisma } from '@/lib/prisma';
+import { auth } from '@/lib/auth';
 
 export type CleanupResult = {
     success: boolean;
@@ -26,120 +27,133 @@ export type CleanupResult = {
  */
 export async function cleanupExpiredData(): Promise<CleanupResult> {
     try {
+        // SECURITY: Only authenticated OWNER users can trigger bulk cleanup
+        // (Cron jobs use the API route with cron-auth, not this server action)
+        const session = await auth();
+        if (!session?.user?.id) {
+            return { success: false, deletedLinks: 0, deletedUserData: 0, deletedFiles: 0, deletedAuditLogs: 0, error: 'Authentication required' };
+        }
         const now = new Date();
 
-        // Find all expired or revoked secure links
-        const linksToClean = await prisma.secureLink.findMany({
-            where: {
-                OR: [
-                    { expiresAt: { lt: now } },
-                    { isRevoked: true },
-                ],
-            },
-            select: {
-                id: true,
-                userId: true,
-                isRevoked: true,
-                ownerId: true,
-                purpose: true,
-                LinkAccess: {
-                    select: {
-                        vendorEmail: true,
-                    }
+        // Implement Batching/Pagination
+        const BATCH_SIZE = 100;
+        let totalDeletedLinks = 0;
+        let totalDeletedUserData = 0;
+        let totalDeletedFiles = 0;
+        const totalDeletedAuditLogs = 0; // Audit logs are preserved
+
+        let hasMore = true;
+
+        while (hasMore) {
+            // Find a batch of expired or revoked secure links
+            const linksBatch = await prisma.secureLink.findMany({
+                where: {
+                    OR: [
+                        { expiresAt: { lt: now } },
+                        { isRevoked: true },
+                    ],
                 },
-                expiresAt: true,
-                createdAt: true,
-                UserFile: { select: { id: true } },
-            },
-        });
+                select: {
+                    id: true,
+                    userId: true,
+                    isRevoked: true,
+                    ownerId: true,
+                    purpose: true,
+                    LinkAccess: {
+                        select: {
+                            vendorEmail: true,
+                        }
+                    },
+                    expiresAt: true,
+                    createdAt: true,
+                },
+                take: BATCH_SIZE,
+            });
 
-        if (linksToClean.length === 0) {
-            return {
-                success: true,
-                deletedLinks: 0,
-                deletedUserData: 0,
-                deletedFiles: 0,
-                deletedAuditLogs: 0,
-            };
-        }
-
-        const userDataIds = linksToClean.map(link => link.userId);
-        const linkIds = linksToClean.map(link => link.id);
-
-        // Delete EVERYTHING in a transaction (order matters for foreign keys)
-        const result = await prisma.$transaction(async (tx) => {
-            // 0. Update SendRecord statuses (these survive deletion)
-            for (const link of linksToClean) {
-                if (link.ownerId) {
-                    const status = link.isRevoked ? 'revoked' : 'expired';
-                    const isGroupShare = link.LinkAccess.length > 1;
-                    const vendorEmailToMatch = isGroupShare 
-                        ? `Group Share (${link.LinkAccess.length} members)`
-                        : (link.LinkAccess[0]?.vendorEmail || null);
-
-                    // Update matching SendRecords by owner + topic + vendor
-                    await tx.sendRecord.updateMany({
-                        where: {
-                            ownerId: link.ownerId,
-                            topic: link.purpose || '',
-                            vendorEmail: vendorEmailToMatch,
-                            status: 'active',
-                        },
-                        data: {
-                            status,
-                            expiredAt: now,
-                        },
-                    });
-                }
+            if (linksBatch.length === 0) {
+                hasMore = false;
+                break;
             }
 
-            // 1. Delete audit logs first (they reference SecureLink)
-            const deletedAuditLogs = await tx.auditLog.deleteMany({
-                where: {
-                    linkId: { in: linkIds },
-                },
+            const userDataIds = linksBatch.map(link => link.userId);
+            const linkIds = linksBatch.map(link => link.id);
+
+            // Delete batch in a transaction
+            const result = await prisma.$transaction(async (tx) => {
+                // 0. Update SendRecord statuses (these survive deletion)
+                for (const link of linksBatch) {
+                    if (link.ownerId) {
+                        const status = link.isRevoked ? 'revoked' : 'expired';
+                        const isGroupShare = link.LinkAccess.length > 1;
+                        const vendorEmailToMatch = isGroupShare 
+                            ? `Group Share (${link.LinkAccess.length} members)`
+                            : (link.LinkAccess[0]?.vendorEmail || null);
+
+                        await tx.sendRecord.updateMany({
+                            where: {
+                                ownerId: link.ownerId,
+                                topic: link.purpose || '',
+                                vendorEmail: vendorEmailToMatch,
+                                status: 'active',
+                            },
+                            data: {
+                                status,
+                                expiredAt: now,
+                            },
+                        });
+                    }
+                }
+
+                // 1. Delete attached files
+                const deletedFiles = await tx.userFile.deleteMany({
+                    where: {
+                        secureLinkId: { in: linkIds },
+                    },
+                });
+
+                // 2. Delete secure links
+                const deletedLinks = await tx.secureLink.deleteMany({
+                    where: {
+                        id: { in: linkIds },
+                    },
+                });
+
+                // 3. Delete encrypted user data
+                const deletedUserData = await tx.userData.deleteMany({
+                    where: {
+                        id: { in: userDataIds },
+                    },
+                });
+
+                return {
+                    deletedLinks: deletedLinks.count,
+                    deletedUserData: deletedUserData.count,
+                    deletedFiles: deletedFiles.count,
+                };
             });
 
-            // 2. Delete attached files (they reference SecureLink)
-            const deletedFiles = await tx.userFile.deleteMany({
-                where: {
-                    secureLinkId: { in: linkIds },
-                },
-            });
+            totalDeletedLinks += result.deletedLinks;
+            totalDeletedUserData += result.deletedUserData;
+            totalDeletedFiles += result.deletedFiles;
 
-            // 3. Delete secure links (they reference UserData)
-            const deletedLinks = await tx.secureLink.deleteMany({
-                where: {
-                    id: { in: linkIds },
-                },
-            });
-
-            // 4. Delete encrypted user data (now safe, no references left)
-            const deletedUserData = await tx.userData.deleteMany({
-                where: {
-                    id: { in: userDataIds },
-                },
-            });
-
-            return {
-                deletedLinks: deletedLinks.count,
-                deletedUserData: deletedUserData.count,
-                deletedFiles: deletedFiles.count,
-                deletedAuditLogs: deletedAuditLogs.count,
-            };
-        });
+            // Optional: small delay to yield event loop and reduce DB pressure
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
 
         // SECURITY: Log only counts, never data content
         console.log(
-            `[CLEANUP] Purged ${result.deletedLinks} links, ` +
-            `${result.deletedUserData} encrypted records, ` +
-            `${result.deletedFiles} files, ` +
-            `${result.deletedAuditLogs} audit logs`
+            `[CLEANUP] Purged ${totalDeletedLinks} links, ` +
+            `${totalDeletedUserData} encrypted records, ` +
+            `${totalDeletedFiles} files, ` +
+            `${totalDeletedAuditLogs} audit logs`
         );
 
         return {
             success: true,
-            ...result,
+            deletedLinks: totalDeletedLinks,
+            deletedUserData: totalDeletedUserData,
+            deletedFiles: totalDeletedFiles,
+            deletedAuditLogs: totalDeletedAuditLogs,
         };
     } catch (error) {
         console.error('Cleanup error:', error instanceof Error ? error.message : 'Unknown');
@@ -173,6 +187,11 @@ export async function cleanupSingleLink(token: string): Promise<{ success: boole
                 userId: true,
                 expiresAt: true,
                 isRevoked: true,
+                ownerId: true,
+                purpose: true,
+                LinkAccess: {
+                    select: { vendorEmail: true }
+                }
             },
         });
 
@@ -189,10 +208,30 @@ export async function cleanupSingleLink(token: string): Promise<{ success: boole
 
         // Delete EVERYTHING for this single link
         await prisma.$transaction(async (tx) => {
-            // 1. Delete audit logs
-            await tx.auditLog.deleteMany({
-                where: { linkId: secureLink.id },
-            });
+            // 0. Update SendRecord statuses (these survive deletion)
+            if (secureLink.ownerId) {
+                const status = secureLink.isRevoked ? 'revoked' : 'expired';
+                const isGroupShare = secureLink.LinkAccess.length > 1;
+                const vendorEmailToMatch = isGroupShare 
+                    ? `Group Share (${secureLink.LinkAccess.length} members)`
+                    : (secureLink.LinkAccess[0]?.vendorEmail || null);
+
+                await tx.sendRecord.updateMany({
+                    where: {
+                        ownerId: secureLink.ownerId,
+                        topic: secureLink.purpose || '',
+                        vendorEmail: vendorEmailToMatch,
+                        status: 'active',
+                    },
+                    data: {
+                        status,
+                        expiredAt: now,
+                    },
+                });
+            }
+
+            // 1. SECURITY/COMPLIANCE: DO NOT delete audit logs.
+            // Audit logs must survive data deletion for forensic retention.
 
             // 2. Delete attached files
             await tx.userFile.deleteMany({
@@ -228,6 +267,11 @@ export async function getCleanupStats(): Promise<{
     revokedLinks: number;
     activeLinks: number;
 }> {
+    // SECURITY: Require authentication to view infrastructure stats
+    const session = await auth();
+    if (!session?.user?.id) {
+        return { pendingCleanup: 0, totalLinks: 0, expiredLinks: 0, revokedLinks: 0, activeLinks: 0 };
+    }
     const now = new Date();
 
     const [total, expired, revoked] = await Promise.all([

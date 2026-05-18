@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { decryptBytes, bytesToDataUrl } from '@/lib/encryptionService';
+import { decryptBuffer, decryptDek } from '@/lib/crypto';
 import { authorizeApiRequest } from '@/lib/api-auth';
-import { decryptDek } from '@/lib/crypto';
+
+function bytesToDataUrl(bytes: Buffer, mimeType: string): string {
+  return `data:${mimeType};base64,${bytes.toString('base64')}`;
+}
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -24,18 +27,29 @@ export async function GET(
     if (!token) return NextResponse.json({ error: 'Missing token' }, { status: 401 });
 
     // Verify token → session → link → file ownership
-    const authResult = await authorizeApiRequest(fileId, token);
+    const authResult = await authorizeApiRequest(fileId, token, { httpMethod: req.method });
     if (authResult.errorResponse) {
       return authResult.errorResponse;
     }
     const { file } = authResult;
 
+    let encryptedBytes = file.encryptedContent;
+    if (!encryptedBytes && (file as any).mongoFile?.gridFSId) {
+        const { downloadFromMongo } = await import('@/lib/mongo/operations');
+        encryptedBytes = await downloadFromMongo((file as any).mongoFile.gridFSId);
+    }
+
+    if (!encryptedBytes) {
+        return NextResponse.json({ error: 'File content not found in any storage backend' }, { status: 404 });
+    }
+
     const dek = (file as any).encryptedDek ? decryptDek((file as any).encryptedDek) : undefined;
-    const decrypted = decryptBytes({
-      encryptedContent: file.encryptedContent,
-      iv: file.iv,
-      authTag: file.authTag,
-    }, dek);
+    const decrypted = decryptBuffer(
+      encryptedBytes,
+      file.iv!,
+      file.authTag!,
+      dek
+    );
 
     const dataUrl = bytesToDataUrl(decrypted, file.fileType || 'application/octet-stream');
 

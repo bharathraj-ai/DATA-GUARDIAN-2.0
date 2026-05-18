@@ -2,67 +2,98 @@
 
 import { prisma } from '@/lib/prisma';
 import { decryptBuffer, decryptDek } from '@/lib/crypto';
-import { cookies } from 'next/headers';
-import { tryCheckRevoked, tryValidateSession } from '@/lib/redis-helpers';
+import { authorizeSecureLink } from '@/lib/linkAuthorization';
+import { downloadFromMongo } from '@/lib/mongo/operations';
 
 export type RawFileData = {
     success: boolean;
     base64Content?: string;
     mimeType?: string;
     fileName?: string;
+    version?: number;
     error?: string;
 };
 
 export async function getRawFileForEdit(token: string, fileId: string): Promise<RawFileData> {
     try {
-        const cookieStore = await cookies();
-        const sessionId = cookieStore.get('session_id')?.value;
-
-        if (await tryCheckRevoked(token)) {
-            return { success: false, error: 'Access revoked' };
+        const authResult = await authorizeSecureLink(token, 'edit', fileId);
+        if (!authResult.success) {
+            throw new Error(authResult.error);
         }
 
-        if (sessionId) {
-            const isValid = await tryValidateSession(token, sessionId);
-            if (isValid === false) return { success: false, error: 'Session invalid' };
-        } else {
-            return { success: false, error: 'Session required' };
-        }
+        const secureLink = authResult.context.secureLink;
+        const fileRecord = secureLink.UserFile.find((f: any) => f.id === fileId);
 
-        const fileRecord = await prisma.userFile.findUnique({
-            where: { id: fileId },
-            include: { SecureLink: true },
-        });
-
-        if (!fileRecord || fileRecord.SecureLink.token !== token) {
+        if (!fileRecord) {
             return { success: false, error: 'File not found' };
         }
 
-        if (fileRecord.SecureLink.isRevoked || fileRecord.SecureLink.expiresAt < new Date()) {
-            return { success: false, error: 'Access expired or revoked' };
-        }
-
-        if (!fileRecord.SecureLink.allowEditing) {
+        if (!secureLink.allowEditing) {
             return { success: false, error: 'Editing is not permitted by the owner' };
         }
 
+        if ((fileRecord as any).editingLocked) {
+            return { success: false, error: 'Editing is locked for this file.' };
+        }
+
+        // Transition status to 'editing' if it's currently 'draft'
+        if ((fileRecord as any).status === 'draft') {
+            await prisma.userFile.update({
+                where: { id: fileId },
+                data: { status: 'editing' } as any
+            });
+        }
+
         let buffer: Buffer;
-        try {
-            const dek = (fileRecord as any).encryptedDek ? decryptDek((fileRecord as any).encryptedDek) : undefined;
-            buffer = decryptBuffer(
-                fileRecord.encryptedContent,
-                fileRecord.iv,
-                fileRecord.authTag,
-                dek
-            );
-        } catch (e) {
-            return { success: false, error: 'Decryption failed' };
+
+        // Priority: inline encrypted content (draft saves) → S3 (original upload)
+        if (fileRecord.encryptedContent) {
+            // ── Inline path: decrypt DB-stored content (latest draft) ──
+            try {
+                const dek = (fileRecord as any).encryptedDek ? decryptDek((fileRecord as any).encryptedDek) : undefined;
+                buffer = decryptBuffer(
+                    fileRecord.encryptedContent,
+                    fileRecord.iv!,
+                    fileRecord.authTag!,
+                    dek
+                );
+            } catch (e) {
+                return { success: false, error: 'Decryption failed' };
+            }
+        } else if ((fileRecord as any).mongoFileId) {
+            // ── Mongo fallback: download original file from Mongo ─────────
+            try {
+                const mongoFileRecord = await prisma.mongoFile.findUnique({
+                    where: { id: (fileRecord as any).mongoFileId, isDeleted: false },
+                    select: { gridFSId: true, mimeType: true },
+                });
+
+                if (!mongoFileRecord) {
+                    return { success: false, error: 'Mongo file record not found' };
+                }
+
+                const encryptedBuffer = await downloadFromMongo(mongoFileRecord.gridFSId);
+
+                const dek = (fileRecord as any).encryptedDek ? decryptDek((fileRecord as any).encryptedDek) : undefined;
+                buffer = decryptBuffer(
+                    encryptedBuffer,
+                    fileRecord.iv!,
+                    fileRecord.authTag!,
+                    dek
+                );
+            } catch (e) {
+                console.error('[MONGO_EDIT] Download/Decrypt failed:', e);
+                return { success: false, error: 'Failed to retrieve or decrypt file from storage' };
+            }
+        } else {
+            return { success: false, error: 'File has no content available' };
         }
 
         return {
             success: true,
             mimeType: fileRecord.fileType,
             fileName: fileRecord.fileName,
+            version: fileRecord.version,
             base64Content: buffer.toString('base64'),
         };
 

@@ -12,36 +12,7 @@ import { auth } from '@/lib/auth';
 // Anti-Phishing Configuration
 const OTP_VERIFY_WINDOW_MINUTES = 3;  // OTP valid for 3 minutes (reduced from 5 for tighter security)
 
-// Cache Redis availability check at module load (performance optimization)
-const isRedisConfigured = !!(
-    process.env.UPSTASH_REDIS_REST_URL &&
-    process.env.UPSTASH_REDIS_REST_TOKEN &&
-    !process.env.UPSTASH_REDIS_REST_URL.includes('your-redis')
-);
-
-// Conditionally import Redis functions only if configured
-async function tryCreateSession(token: string, sessionId: string, ttlSeconds: number): Promise<boolean> {
-    if (!isRedisConfigured) return false;
-
-    try {
-        const { createSession } = await import('@/lib/redis');
-        await createSession(token, sessionId, ttlSeconds);
-        return true;
-    } catch {
-        return false;
-    }
-}
-
-async function tryCheckRevoked(token: string): Promise<boolean | null> {
-    if (!isRedisConfigured) return null;
-
-    try {
-        const { isTokenRevoked } = await import('@/lib/redis');
-        return await isTokenRevoked(token);
-    } catch {
-        return null;
-    }
-}
+import { tryCheckRevoked, tryCreateSession } from '@/lib/redis-helpers';
 
 export type VerifyOTPResult = {
     success: boolean;
@@ -56,7 +27,7 @@ export type VerifyOTPResult = {
  * 
  * ZERO TRUST Security Features:
  * - Email Binding (allowedVendorEmail must match authenticated user)
- * - SINGLE-ATTEMPT OTP (wrong OTP = permanent link revocation)
+ * - 3-ATTEMPTS OTP (wrong OTP 3 times = permanent link revocation)
  * - Device Binding (User-Agent/Platform hash)
  * - Server-side OTP validation (Zero Trust)
  * - Redis session with TTL (auto-expire)
@@ -107,6 +78,10 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
         }
 
         // Check if token is revoked in Redis (if available)
+        // NOTE: For OTP verification (the auth entry point), we only block on
+        // explicit Redis confirmation of revocation. If Redis is unavailable,
+        // we fall through to the authoritative DB check at secureLink.isRevoked
+        // below. This prevents locking out ALL users when Redis is offline.
         const revokedInRedis = await tryCheckRevoked(token);
         if (revokedInRedis === true) {
             return {
@@ -191,11 +166,11 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
             };
         }
 
-        // 2. ZERO TRUST: Check max attempts (SINGLE ATTEMPT POLICY)
-        if (failedAttempts >= 1) {
+        // 2. ZERO TRUST: Check max attempts (3 ATTEMPTS POLICY)
+        if (failedAttempts >= 3) {
             return {
                 success: false,
-                error: 'This link has been permanently revoked due to an invalid OTP attempt.',
+                error: 'This link has been permanently revoked due to invalid OTP attempts.',
                 errorType: 'LOCKED',
             };
         }
@@ -402,53 +377,70 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
         const isValidOTP = await verifyOTPHash(otp, targetHash);
 
         if (!isValidOTP) {
-            // ZERO TRUST: SINGLE ATTEMPT - Wrong OTP = Permanent Revocation
-            // This is the strictest security policy for enterprise-grade protection
+            // ZERO TRUST: 3 ATTEMPTS - Wrong OTP = Increment Failed Attempts
+            // After 3 failed attempts, permanent revocation
+            let attemptsRemaining = 0;
             await prisma.$transaction(async (tx) => {
+                let shouldLock = false;
+
                 if (vendorAccess) {
-                    await tx.linkAccess.update({
+                    const updated = await tx.linkAccess.update({
                         where: { id: vendorAccess.id },
-                        data: {
-                            failedAttempts: 1,
-                            lockedAt: new Date(),
-                        },
+                        data: { failedAttempts: { increment: 1 } },
                     });
+                    attemptsRemaining = 3 - updated.failedAttempts;
+                    if (updated.failedAttempts >= 3) {
+                        await tx.linkAccess.update({
+                            where: { id: vendorAccess.id },
+                            data: { lockedAt: new Date() },
+                        });
+                        shouldLock = true;
+                    }
                 } else if (vendor) {
-                    await tx.vendorAccess.update({
+                    const updated = await tx.vendorAccess.update({
                         where: { id: vendor.id },
-                        data: {
-                            failedAttempts: { increment: 1 },
-                        }
+                        data: { failedAttempts: { increment: 1 } },
                     });
-                    if (vendor.failedAttempts + 1 >= 3) {
+                    attemptsRemaining = 3 - updated.failedAttempts;
+                    if (updated.failedAttempts >= 3) {
                          await tx.vendorAccess.update({
                             where: { id: vendor.id },
                             data: { isRevoked: true },
                         });
+                        shouldLock = true;
                     }
                 } else {
-                    await tx.secureLink.update({
+                    const updated = await tx.secureLink.update({
                         where: { id: secureLink.id },
-                        data: {
-                            failedAttempts: 1,
-                            lockedAt: new Date(),
-                            isRevoked: true, // Immediate revocation for individual links
-                        },
+                        data: { failedAttempts: { increment: 1 } },
                     });
+                    attemptsRemaining = 3 - updated.failedAttempts;
+                    if (updated.failedAttempts >= 3) {
+                        await tx.secureLink.update({
+                            where: { id: secureLink.id },
+                            data: {
+                                lockedAt: new Date(),
+                                isRevoked: true, // Immediate revocation for individual links
+                            },
+                        });
+                        shouldLock = true;
+                    }
                 }
 
                 await tx.auditLog.create({
                     data: {
-                        action: 'LOCKED',
+                        action: shouldLock ? 'LOCKED' : 'DENIED',
                         linkId: secureLink.id,
-                        reason: 'Single-attempt OTP policy: Wrong OTP entered',
+                        reason: shouldLock ? 'Max OTP attempts reached: Locked' : 'Invalid OTP entered',
                     },
                 });
             });
 
             return {
                 success: false,
-                error: 'Invalid OTP.',
+                error: attemptsRemaining > 0 
+                    ? `Invalid OTP. You have ${attemptsRemaining} attempt${attemptsRemaining === 1 ? '' : 's'} remaining.`
+                    : 'Invalid OTP. Maximum attempts reached.',
                 errorType: 'INVALID_OTP',
             };
         }
@@ -475,12 +467,18 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
             if (vendorAccess) {
                 await tx.linkAccess.update({
                     where: { id: vendorAccess.id },
-                    data: updateData,
+                    data: {
+                        ...updateData,
+                        otpHash: null,  // SECURITY: Clear OTP hash — single-use enforcement
+                    },
                 });
             } else {
                 await tx.secureLink.update({
                     where: { id: secureLink.id },
-                    data: updateData,
+                    data: {
+                        ...updateData,
+                        otpHash: '',  // SECURITY: Clear OTP hash — single-use enforcement (required field, use empty string)
+                    },
                 });
             }
 
@@ -489,7 +487,7 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
                     where: { id: vendor.id },
                     data: {
                         loginCount: { increment: 1 },
-                        otpHash: null, // clear OTP
+                        otpHash: null, // SECURITY: Clear OTP hash — single-use enforcement
                     }
                 });
             }
@@ -544,7 +542,8 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
         return {
             success: true,
             accessGranted: true,
-            sessionId,
+            // SECURITY: sessionId intentionally NOT returned in response body
+            // It's already set as an httpOnly cookie — the only safe channel
         };
     } catch (error) {
         console.error('Error verifying OTP:', error instanceof Error ? error.message : 'Unknown');

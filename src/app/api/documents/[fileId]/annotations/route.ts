@@ -20,7 +20,7 @@ export async function GET(
     const token = req.nextUrl.searchParams.get('token');
     if (!token) return NextResponse.json({ error: 'Missing token' }, { status: 401 });
 
-    const authResult = await authorizeApiRequest(fileId, token);
+    const authResult = await authorizeApiRequest(fileId, token, { httpMethod: req.method });
     if (authResult.errorResponse) {
       return authResult.errorResponse;
     }
@@ -58,7 +58,7 @@ export async function POST(
     const { token, annotation } = body;
     if (!token || !annotation) return NextResponse.json({ error: 'Missing fields' }, { status: 400 });
 
-    const authResult = await authorizeApiRequest(fileId, token);
+    const authResult = await authorizeApiRequest(fileId, token, { httpMethod: req.method });
     if (authResult.errorResponse) {
       return authResult.errorResponse;
     }
@@ -105,7 +105,7 @@ export async function DELETE(
     const id = req.nextUrl.searchParams.get('id');
     if (!token || !id) return NextResponse.json({ error: 'Missing token/id' }, { status: 400 });
 
-    const authResult = await authorizeApiRequest(fileId, token);
+    const authResult = await authorizeApiRequest(fileId, token, { httpMethod: req.method });
     if (authResult.errorResponse) {
       return authResult.errorResponse;
     }

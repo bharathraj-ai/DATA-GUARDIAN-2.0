@@ -16,6 +16,7 @@ interface FormDataState {
     gender: string;
     age: string;
     validityMinutes: string;
+    validityUnit: 'minutes' | 'hours' | 'days';
     vendors: { email: string; level: number }[]; // Multi-vendor with levels
     vendorEmail: string; 
     topic: string; // Mandatory: describe what data is being shared
@@ -33,6 +34,7 @@ export default function SignupPage() {
         gender: '',
         age: '',
         validityMinutes: '',
+        validityUnit: 'minutes',
         vendors: [{ email: '', level: 1 }],
         vendorEmail: '',
         topic: '',
@@ -40,7 +42,6 @@ export default function SignupPage() {
     });
     const [files, setFiles] = useState<FileList | null>(null);
     const [generatedLink, setGeneratedLink] = useState('');
-    const [otp, setOtp] = useState('');
     const [ownerUrl, setOwnerUrl] = useState('');
     const [status, setStatus] = useState({ message: '', type: '' });
     const [vendorError, setVendorError] = useState('');
@@ -115,6 +116,14 @@ export default function SignupPage() {
         if (!formData.topic.trim()) return 'Topic is required — describe what data you are sharing';
         const minutes = parseInt(formData.validityMinutes);
         if (isNaN(minutes) || minutes <= 0) return 'Time must be a positive number';
+        
+        // Check total minutes based on units
+        let totalMinutes = minutes;
+        if (formData.validityUnit === 'hours') totalMinutes *= 60;
+        if (formData.validityUnit === 'days') totalMinutes *= 1440;
+        
+        if (totalMinutes > 10080) return 'Total validity cannot exceed 7 days (10,080 minutes)';
+
         if (sharingMode === 'individual') {
             if (!formData.vendorEmail) return 'Vendor email is required — specify who you are sending data to';
             if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.vendorEmail)) {
@@ -142,8 +151,15 @@ export default function SignupPage() {
         try {
             const data = new FormData();
             Object.entries(formData).forEach(([key, value]) => {
-                if (key === 'vendors' || key === 'vendorEmail') {
+                if (key === 'vendors' || key === 'vendorEmail' || key === 'validityUnit') {
                     return; // Skip — appended separately below with correct data
+                } else if (key === 'validityMinutes') {
+                    // Convert to total minutes based on selected unit
+                    const mins = parseInt(formData.validityMinutes);
+                    let totalMins = mins;
+                    if (formData.validityUnit === 'hours') totalMins = mins * 60;
+                    else if (formData.validityUnit === 'days') totalMins = mins * 1440;
+                    data.append(key, totalMins.toString());
                 } else {
                     data.append(key, value as string);
                 }
@@ -176,7 +192,6 @@ export default function SignupPage() {
                 router.refresh();
 
                 setGeneratedLink(result.shareUrl);
-                setOtp(result.otp || '');
                 setOwnerUrl(result.ownerUrl || '');
                 setStatus({ message: 'Secure link created! OTP sent to vendor\'s email.', type: 'success' });
 
@@ -248,9 +263,7 @@ export default function SignupPage() {
             }
             setStatus({ message: 'Link copied!', type: 'success' });
             setTimeout(() => {
-                if (otp) {
-                    setStatus({ message: 'Link generated successfully! OTP shown below.', type: 'success' });
-                }
+                setStatus({ message: 'Link generated successfully!', type: 'success' });
             }, 1500);
         } catch (err) {
             console.error('Copy failed:', err);
@@ -405,18 +418,32 @@ export default function SignupPage() {
                                     </div>
 
                                     <div className="form-group">
-                                        <label className="form-label">Link Expiration (Minutes)</label>
-                                        <input
-                                            type="number"
-                                            name="validityMinutes"
-                                            value={formData.validityMinutes}
-                                            onChange={handleChange}
-                                            className="form-input"
-                                            placeholder="15"
-                                            min={1}
-                                        />
+                                        <label className="form-label">Link Expiration</label>
+                                        <div style={{ display: 'flex', gap: '8px' }}>
+                                            <input
+                                                type="number"
+                                                name="validityMinutes"
+                                                value={formData.validityMinutes}
+                                                onChange={handleChange}
+                                                className="form-input"
+                                                placeholder="15"
+                                                min={1}
+                                                style={{ flex: 1 }}
+                                            />
+                                            <select
+                                                name="validityUnit"
+                                                value={formData.validityUnit}
+                                                onChange={handleChange}
+                                                className="form-select"
+                                                style={{ width: '120px' }}
+                                            >
+                                                <option value="minutes">Minutes</option>
+                                                <option value="hours">Hours</option>
+                                                <option value="days">Days</option>
+                                            </select>
+                                        </div>
                                         <small className="form-hint">
-                                            Link will automatically expire after this duration
+                                            Link will automatically expire after this duration (Max 7 days)
                                         </small>
                                     </div>
 
@@ -454,6 +481,7 @@ export default function SignupPage() {
                                                 className="form-input"
                                                 placeholder="vendor@example.com"
                                                 required={sharingMode === 'individual'}
+                                                autoComplete="off"
                                                 list="vendor-emails"
                                             />
                                             <datalist id="vendor-emails">
@@ -746,7 +774,6 @@ export default function SignupPage() {
                                     onClick={() => {
                                         // Clear all state
                                         setGeneratedLink('');
-                                        setOtp('');
                                         setOwnerUrl('');
                                         setQrDataUrl('');
                                         setCountdown(null);
@@ -762,6 +789,7 @@ export default function SignupPage() {
                                             gender: '',
                                             age: '',
                                             validityMinutes: '',
+                                            validityUnit: 'minutes',
                                             vendors: [{ email: '', level: 1 }],
                                             vendorEmail: '',
                                             topic: '',

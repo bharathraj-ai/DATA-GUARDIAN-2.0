@@ -2,9 +2,10 @@
 
 import { prisma } from '@/lib/prisma';
 import { decryptBuffer, decryptDek } from '@/lib/crypto';
-import { cookies } from 'next/headers';
 import * as XLSX from 'xlsx';
-import { tryCheckRevoked, tryValidateSession } from '@/lib/redis-helpers';
+import { authorizeSecureLink } from '@/lib/linkAuthorization';
+import { checkUploadRateLimit, extractClientIP, formatRateLimitError } from '@/lib/rate-limit';
+import { headers } from 'next/headers';
 
 export type FilePreviewResult = {
     success: boolean;
@@ -19,38 +20,23 @@ export type FilePreviewResult = {
 
 export async function getFilePreview(token: string, fileId: string): Promise<FilePreviewResult> {
     try {
-        // 1. Session & Access Validation
-        const cookieStore = await cookies();
-        const sessionId = cookieStore.get('session_id')?.value;
-        const deviceHashHeader = (await cookies()).get('device_hash')?.value; // Or check cookies/headers
-
-        // Check revocation
-        if (await tryCheckRevoked(token)) {
-            return { success: false, error: 'Access revoked' };
+        const authResult = await authorizeSecureLink(token, 'preview', fileId);
+        if (!authResult.success) {
+            throw new Error(authResult.error);
         }
 
-        // Check session
-        if (sessionId) {
-            const isValid = await tryValidateSession(token, sessionId);
-            if (isValid === false) return { success: false, error: 'Session invalid' };
-        } else {
-            // If no session, reject (Files only viewable in session)
-            return { success: false, error: 'Session required' };
+        const requestHeaders = await headers();
+        const clientIP = extractClientIP(requestHeaders);
+        const rateLimit = await checkUploadRateLimit(clientIP);
+        if (!rateLimit.allowed) {
+            return { success: false, error: formatRateLimitError(rateLimit) };
         }
 
-        // 2. Fetch File Metadata
-        const fileRecord = await prisma.userFile.findUnique({
-            where: { id: fileId },
-            include: { SecureLink: true },
-        });
+        const secureLink = authResult.context.secureLink;
+        const fileRecord = secureLink.UserFile.find((f: any) => f.id === fileId);
 
-        if (!fileRecord || fileRecord.SecureLink.token !== token) {
+        if (!fileRecord) {
             return { success: false, error: 'File not found' };
-        }
-
-        // Check DB revocation/expiry again
-        if (fileRecord.SecureLink.isRevoked || fileRecord.SecureLink.expiresAt < new Date()) {
-            return { success: false, error: 'Access expired or revoked' };
         }
 
         // 3. Decrypt Content
@@ -58,9 +44,9 @@ export async function getFilePreview(token: string, fileId: string): Promise<Fil
         try {
             const dek = (fileRecord as any).encryptedDek ? decryptDek((fileRecord as any).encryptedDek) : undefined;
             buffer = decryptBuffer(
-                fileRecord.encryptedContent,
-                fileRecord.iv,
-                fileRecord.authTag,
+                fileRecord.encryptedContent!,
+                fileRecord.iv!,
+                fileRecord.authTag!,
                 dek
             );
         } catch (e) {
@@ -75,7 +61,7 @@ export async function getFilePreview(token: string, fileId: string): Promise<Fil
             await prisma.auditLog.create({
                 data: {
                     action: 'PREVIEW_RESTRICTED',
-                    linkId: fileRecord.SecureLink.id,
+                    linkId: secureLink.id,
                     reason: `Preview restricted: ${fileRecord.fileName}`,
                     metadata: JSON.stringify({
                         fileId: fileRecord.id,
