@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { verifyOTP } from '@/actions/verify-otp';
 import { validateShareAccess } from '@/actions/validate-share-access';
-import { signIn } from 'next-auth/react';
+import { useSession, signIn } from 'next-auth/react';
 
 interface SharePageProps {
     params: Promise<{ token: string }>;
@@ -15,6 +15,7 @@ type AccessState = 'checking' | 'allowed' | 'denied' | 'requires_auth';
 
 export default function SharePage({ params }: SharePageProps) {
     const router = useRouter();
+    const { data: session, status } = useSession();
     const [token, setToken] = useState<string>('');
     const [step, setStep] = useState<'email' | 'otp'>('email');
     const [email, setEmail] = useState<string>('');
@@ -39,6 +40,14 @@ export default function SharePage({ params }: SharePageProps) {
             }
         }
     }, []);
+
+    // Auto-detect session email to auto-fill and skip to OTP step
+    useEffect(() => {
+        if (accessState === 'allowed' && session?.user?.email) {
+            setEmail(session.user.email);
+            setStep('otp');
+        }
+    }, [accessState, session]);
 
     // Resolve params
     useEffect(() => {
@@ -231,7 +240,7 @@ export default function SharePage({ params }: SharePageProps) {
     }, [otp, state, handleSubmit, accessState, step]);
 
     // Loading state
-    if (isLoading || accessState === 'checking') {
+    if (isLoading || accessState === 'checking' || status === 'loading') {
         return (
             <main className="otp-wrapper">
                 <div className="otp-card">
@@ -360,6 +369,9 @@ export default function SharePage({ params }: SharePageProps) {
         );
     }
 
+    // Dynamic Step Resolver to prevent rendering flash/race conditions
+    const isStepOtp = step === 'otp' || (status === 'authenticated' && !!session?.user?.email);
+
     // ACCESS GRANTED — Show OTP form (only reaches here if accessState === 'allowed')
     return (
         <main className="otp-wrapper">
@@ -412,7 +424,7 @@ export default function SharePage({ params }: SharePageProps) {
                 )}
 
                 {/* Step 1: Email Input */}
-                {step === 'email' && state !== 'success' && (
+                {!isStepOtp && state !== 'success' && (
                     <div className={`otp-input-container ${shake ? 'shake' : ''}`}>
                         <label className="otp-label">Email Address</label>
                         <input
@@ -456,7 +468,7 @@ export default function SharePage({ params }: SharePageProps) {
                 )}
 
                 {/* Step 2: OTP Input */}
-                {step === 'otp' && state !== 'success' && (
+                {isStepOtp && state !== 'success' && (
                     <div className={`otp-input-container ${shake ? 'shake' : ''}`}>
                         <label className="otp-label">Enter OTP sent to {email}</label>
                         <div className="otp-boxes">
