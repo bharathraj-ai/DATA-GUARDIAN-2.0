@@ -14,13 +14,12 @@ export function generateSecureToken(): string {
 }
 
 /**
- * Generates a 6-digit OTP using crypto for better randomness
+ * Generates a cryptographically secure 6-digit OTP.
+ * Uses crypto.randomInt for uniform distribution (no modulo bias).
+ * SECURITY: The returned value must NEVER be logged, stored in plaintext, or returned in API responses.
  */
 export function generateOTP(): string {
-    const buffer = crypto.randomBytes(4);
-    const num = buffer.readUInt32BE(0);
-    const otp = (num % 900000) + 100000;
-    return otp.toString();
+    return crypto.randomInt(100000, 999999).toString();
 }
 
 /**
@@ -242,25 +241,33 @@ export function decryptDek(encryptedDekString: string): Buffer {
  * @param buffer - The raw data to encrypt
  * @param explicitKey - Optional per-file DEK. If omitted, falls back to Master KEK (for backwards compatibility).
  */
-export function encryptBuffer(buffer: Buffer, explicitKey?: Buffer): { iv: string; authTag: string; encryptedContent: Buffer } {
-    const key = explicitKey || getEncryptionKey();
+export function encryptBuffer(buffer: Buffer, dek: Buffer): { iv: string; authTag: string; encryptedContent: Buffer } {
     const iv = crypto.randomBytes(IV_LENGTH);
-
-    const cipher = crypto.createCipheriv(ALGORITHM, key, iv, {
-        authTagLength: AUTH_TAG_LENGTH,
-    });
-
-    const encryptedContent = Buffer.concat([
+    const cipher = crypto.createCipheriv(ALGORITHM, dek, iv);
+    
+    const encrypted = Buffer.concat([
         cipher.update(buffer),
-        cipher.final(),
+        cipher.final()
     ]);
-
-    const authTag = cipher.getAuthTag();
-
+    
     return {
         iv: iv.toString('hex'),
-        authTag: authTag.toString('hex'),
-        encryptedContent,
+        authTag: cipher.getAuthTag().toString('hex'),
+        encryptedContent: encrypted
+    };
+}
+
+/**
+ * Creates an encryption stream for large files to avoid memory exhaustion
+ */
+export function createEncryptionStream(dek: Buffer) {
+    const iv = crypto.randomBytes(IV_LENGTH);
+    const cipher = crypto.createCipheriv(ALGORITHM, dek, iv);
+    
+    return {
+        iv: iv.toString('hex'),
+        cipher, // This is a Transform stream
+        getAuthTag: () => cipher.getAuthTag().toString('hex')
     };
 }
 

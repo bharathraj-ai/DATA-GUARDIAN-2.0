@@ -6,36 +6,8 @@ import { maskEmail, maskPhone } from '@/lib/masking';
 import { cookies } from 'next/headers';
 import { auth } from '@/lib/auth';
 import { cleanupSingleLink } from '@/actions/cleanup';
-
-// Cache Redis availability check at module load (performance optimization)
-const isRedisConfigured = !!(
-    process.env.UPSTASH_REDIS_REST_URL &&
-    process.env.UPSTASH_REDIS_REST_TOKEN &&
-    !process.env.UPSTASH_REDIS_REST_URL.includes('your-redis')
-);
-
-// Conditionally check Redis if configured
-async function tryValidateSession(token: string, sessionId: string): Promise<boolean | null> {
-    if (!isRedisConfigured) return null;
-
-    try {
-        const { validateSession } = await import('@/lib/redis');
-        return await validateSession(token, sessionId);
-    } catch {
-        return null;
-    }
-}
-
-async function tryCheckRevoked(token: string): Promise<boolean | null> {
-    if (!isRedisConfigured) return null;
-
-    try {
-        const { isTokenRevoked } = await import('@/lib/redis');
-        return await isTokenRevoked(token);
-    } catch {
-        return null;
-    }
-}
+import { authorizeSecureLink, CapabilityFlags } from '@/lib/linkAuthorization';
+import { tryCheckRevoked, tryValidateSession } from '@/lib/redis-helpers';
 
 // Decrypted user data type
 interface DecryptedUserData {
@@ -52,6 +24,7 @@ export type FileMetadata = {
     fileName: string;
     fileType: string;
     fileSize: number;
+    status: string;
 };
 
 export type MaskedUserData = {
@@ -63,15 +36,15 @@ export type MaskedUserData = {
     age: number;
     expiresAt: Date;
     remainingSeconds: number;
-    allowEditing: boolean;
-    level: number;
+    capabilities: CapabilityFlags;
     files: FileMetadata[];
     // Sender & purpose info
     purpose: string | null;
     purposeDetail: string | null;
     ownerName: string | null;
     ownerEmail: string | null;
-    myAssignedLevel?: number;
+    isOwner: boolean;
+
 };
 
 export type GetUserDataResult = {
@@ -93,35 +66,20 @@ export type GetUserDataResult = {
  */
 export async function getUserData(token: string): Promise<GetUserDataResult> {
     try {
-        // Get session ID from cookie
-        const cookieStore = await cookies();
-        const sessionId = cookieStore.get('session_id')?.value;
-
-        // Check if token is revoked in Redis (if available)
-        const revokedInRedis = await tryCheckRevoked(token);
-        if (revokedInRedis === true) {
+        const authResult = await authorizeSecureLink(token, 'view');
+        if (!authResult.success) {
+            const err = authResult.error.toLowerCase();
             return {
                 success: false,
-                error: 'Access has been revoked by the data owner.',
-                errorType: 'REVOKED',
+                error: authResult.error,
+                errorType: err.includes('revoked') ? 'REVOKED' : err.includes('expired') ? 'EXPIRED' : err.includes('otp') || err.includes('verification') ? 'NOT_VERIFIED' : err.includes('session') ? 'SESSION_INVALID' : 'NOT_FOUND',
             };
         }
 
-        // Validate session if we have a session ID and Redis is available
-        if (sessionId) {
-            const isValid = await tryValidateSession(token, sessionId);
-            if (isValid === false) {
-                return {
-                    success: false,
-                    error: 'Your session has expired or been invalidated.',
-                    errorType: 'SESSION_INVALID',
-                };
-            }
-            // isValid === null means Redis not available, continue with DB-only validation
-        }
+        const authSession = await auth(); // Get session for role checks
+        const capabilities = authResult.context.capabilities;
 
-        // Find the secure link with user data
-        const secureLink = await prisma.secureLink.findUnique({
+        const fullLink = await prisma.secureLink.findUnique({
             where: { token },
             include: {
                 UserData: true,
@@ -131,27 +89,19 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
                         fileName: true,
                         fileType: true,
                         fileSize: true,
-                    }
+                        status: true,
+                    } as any
                 },
                 User: {
                     select: {
                         name: true,
                         email: true,
                     }
-                },
-                LinkAccess: {
-                    select: {
-                        vendorEmail: true,
-                        level: true,
-                        isUsed: true,
-                    }
-                },
-                VendorAccess: true
+                }
             },
         });
 
-        // Link not found
-        if (!secureLink || !secureLink.UserData) {
+        if (!fullLink || !fullLink.UserData) {
             return {
                 success: false,
                 error: 'This link is invalid or has been deleted.',
@@ -159,36 +109,8 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
             };
         }
 
-        // Check if link is revoked in DB (backup check)
-        if (secureLink.isRevoked) {
-            return {
-                success: false,
-                error: 'Access has been revoked by the data owner.',
-                errorType: 'REVOKED',
-            };
-        }
-
-        // Get effective access state (Per-vendor if available, otherwise global legacy)
-        const authSession = await auth();
-        const userEmail = authSession?.user?.email;
-        const vendorAccess = secureLink.LinkAccess?.find(
-            a => userEmail && a.vendorEmail.toLowerCase() === userEmail.toLowerCase()
-        );
-        const isUsed = vendorAccess ? vendorAccess.isUsed : secureLink.isUsed;
-
-        // Check if link was verified (must be used to view data)
-        if (!isUsed) {
-            return {
-                success: false,
-                error: 'Please verify with OTP first.',
-                errorType: 'NOT_VERIFIED',
-            };
-        }
-
-        // Check if link is expired (backend enforcement - Zero Trust)
         const now = new Date();
-        if (secureLink.expiresAt < now) {
-            // AUTO-CLEANUP: Delete all data when expired
+        if (fullLink.expiresAt < now) {
             cleanupSingleLink(token).catch(() => { });
             return {
                 success: false,
@@ -197,14 +119,12 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
             };
         }
 
-        // Calculate remaining time
-        const remainingMs = secureLink.expiresAt.getTime() - now.getTime();
+        const remainingMs = fullLink.expiresAt.getTime() - now.getTime();
         const remainingSeconds = Math.max(0, Math.floor(remainingMs / 1000));
 
-        // Decrypt user data
         let decryptedData: DecryptedUserData;
         try {
-            decryptedData = decryptData<DecryptedUserData>(secureLink.UserData.encryptedData);
+            decryptedData = decryptData<DecryptedUserData>((fullLink as any).UserData.encryptedData);
         } catch (decryptError) {
             console.error('Decryption failed');
             return {
@@ -214,20 +134,6 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
             };
         }
 
-        // Determine the vendor's assigned level from either LinkAccess or VendorAccess
-        let currentUserLevel = 2; // default member
-        const vendorEmailStore = cookieStore.get('vendor_email')?.value;
-        
-        if (vendorAccess) {
-            currentUserLevel = vendorAccess.level;
-        } else if (vendorEmailStore && secureLink.VendorAccess) {
-             const vendor = secureLink.VendorAccess.find(v => v.email === vendorEmailStore.toLowerCase());
-             if (vendor) {
-                 currentUserLevel = vendor.level;
-             }
-        }
-
-        // Return masked user data (never expose full PII to frontend)
         return {
             success: true,
             data: {
@@ -237,16 +143,16 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
                 maskedPhone: maskPhone(decryptedData.phone),
                 gender: decryptedData.gender,
                 age: decryptedData.age,
-                expiresAt: secureLink.expiresAt,
+                expiresAt: fullLink.expiresAt,
                 remainingSeconds,
-                allowEditing: secureLink.allowEditing,
-                level: currentUserLevel,
-                files: secureLink.UserFile || [],
-                purpose: secureLink.purpose,
-                purposeDetail: secureLink.purposeDetail,
-                ownerName: secureLink.User?.name || null,
-                ownerEmail: secureLink.User?.email || null,
-                myAssignedLevel: currentUserLevel,
+                capabilities,
+                files: (fullLink as any).UserFile || [],
+                purpose: fullLink.purpose,
+                purposeDetail: fullLink.purposeDetail,
+                ownerName: fullLink.User?.name || null,
+                ownerEmail: fullLink.User?.email || null,
+                isOwner: authResult.context.isOwner,
+
             },
         };
     } catch (error) {
@@ -271,12 +177,14 @@ export async function getFullUserData(token: string, sessionId: string): Promise
 }> {
     try {
         // Check revocation in Redis if available
+        // null = Redis unavailable → fall through to DB check below
         const revokedInRedis = await tryCheckRevoked(token);
         if (revokedInRedis === true) {
             return { success: false, error: 'Revoked' };
         }
 
         // Validate session if Redis is available
+        // null = Redis unavailable → fall through to DB-level auth
         const isValid = await tryValidateSession(token, sessionId);
         if (isValid === false) {
             return { success: false, error: 'Invalid session' };

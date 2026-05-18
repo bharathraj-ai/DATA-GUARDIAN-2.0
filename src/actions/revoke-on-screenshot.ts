@@ -2,6 +2,7 @@
 
 import { prisma } from '@/lib/prisma';
 import { sendAccessNotification } from '@/lib/notifications';
+import { cookies } from 'next/headers';
 
 // Cache Redis availability check at module load (performance optimization)
 const isRedisConfigured = !!(
@@ -32,14 +33,17 @@ export type ScreenshotRevokeResult = {
 /**
  * Revokes access due to a screenshot attempt.
  * 
- * This action:
- * 1. Immediately invalidates any active Redis session
- * 2. Marks the link as revoked in the database
- * 3. Creates an audit log entry for SCREENSHOT_ATTEMPT
- * 4. Notifies the owner if an email is configured
+ * SECURITY: Only callers with an active session cookie can trigger this.
+ * This prevents external attackers from revoking arbitrary links.
  */
 export async function revokeOnScreenshot(token: string, displayMessage?: string): Promise<ScreenshotRevokeResult> {
     try {
+        // SECURITY: Verify the caller has an active session for this token
+        const cookieStore = await cookies();
+        const sessionId = cookieStore.get('session_id')?.value;
+        if (!sessionId) {
+            return { success: false, error: 'No active session.' };
+        }
         // Find the secure link by share token
         const secureLink = await prisma.secureLink.findUnique({
             where: { token },

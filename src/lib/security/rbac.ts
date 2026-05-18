@@ -1,48 +1,44 @@
 import { prisma } from '@/lib/prisma';
+import { isElevatedStaff, normalizeRole } from '@/lib/security/roles';
 
 /**
- * Role-Based Access Control (RBAC) for Document Operations
+ * Role-Based Access Control for ONLYOFFICE `Document` records (filesystem-backed).
  *
- * Permission matrix:
- * ┌──────────┬────────┬──────┬──────┬──────────┬────────┐
- * │ Role     │ Upload │ Edit │ View │ Download │ Delete │
- * ├──────────┼────────┼──────┼──────┼──────────┼────────┤
- * │ OWNER    │   ✓    │  ✓   │  ✓   │    ✓     │   ✓    │
- * │ VENDOR   │   ✗    │  ✗   │  ✓   │    ✓     │   ✗    │
- * └──────────┴────────┴──────┴──────┴──────────┴────────┘
+ * Deny-by-default:
+ * - Owner may perform actions allowed by their app role on **their** documents only.
+ * - Non-owners require an explicit `DocumentGrant` row.
+ * - SUPER_ADMIN / ADMIN may access any document for break-glass support (audit at call site).
  */
 
 export type DocumentAction = 'upload' | 'view' | 'edit' | 'download' | 'delete';
 
-// Permission matrix — which roles can perform which actions
 const PERMISSION_MATRIX: Record<string, DocumentAction[]> = {
   OWNER: ['upload', 'view', 'edit', 'download', 'delete'],
   VENDOR: ['view', 'download'],
 };
 
-/**
- * Check if a user role has permission for a given action.
- */
 export function hasRolePermission(role: string, action: DocumentAction): boolean {
-  const allowedActions = PERMISSION_MATRIX[role];
-  if (!allowedActions) return false;
-  return allowedActions.includes(action);
+  const r = normalizeRole(role);
+  const allowed = PERMISSION_MATRIX[r];
+  if (!allowed) return false;
+  return allowed.includes(action);
 }
 
+export type DocumentAccessResult = {
+  allowed: boolean;
+  reason?: string;
+  /** True when SUPER_ADMIN/ADMIN bypassed ownership (caller must audit). */
+  elevatedBreakGlass?: boolean;
+};
+
 /**
- * Check if a specific user has permission to perform an action on a document.
- *
- * Rules:
- * 1. Check user's role against permission matrix
- * 2. For edit/delete: only the document OWNER (creator) can perform these
- * 3. For view/download: any authenticated user with the right role
+ * Enforce object-level authorization for `Document` by id.
  */
 export async function checkDocumentPermission(
   userId: string,
   documentId: string,
-  action: DocumentAction
-): Promise<{ allowed: boolean; reason?: string }> {
-  // Fetch user role
+  action: DocumentAction,
+): Promise<DocumentAccessResult> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: { role: true },
@@ -52,48 +48,63 @@ export async function checkDocumentPermission(
     return { allowed: false, reason: 'User not found' };
   }
 
-  // Check role-level permission
   if (!hasRolePermission(user.role, action)) {
     return {
       allowed: false,
-      reason: `Role '${user.role}' does not have '${action}' permission`,
+      reason: `Role '${normalizeRole(user.role)}' cannot perform '${action}'`,
     };
   }
 
-  // For destructive/modification actions, verify document ownership
-  if (['edit', 'delete'].includes(action)) {
-    const document = await prisma.document.findUnique({
-      where: { id: documentId },
-      select: { ownerId: true, isDeleted: true },
-    });
+  const document = await prisma.document.findUnique({
+    where: { id: documentId },
+    select: { ownerId: true, isDeleted: true },
+  });
 
-    if (!document) {
-      return { allowed: false, reason: 'Document not found' };
-    }
-
-    if (document.isDeleted) {
-      return { allowed: false, reason: 'Document has been deleted' };
-    }
-
-    if (document.ownerId !== userId) {
-      return {
-        allowed: false,
-        reason: 'Only the document owner can perform this action',
-      };
-    }
+  if (!document) {
+    return { allowed: false, reason: 'Document not found' };
   }
 
-  return { allowed: true };
+  if (document.isDeleted && action !== 'delete') {
+    return { allowed: false, reason: 'Document has been deleted' };
+  }
+
+  if (isElevatedStaff(user.role)) {
+    return { allowed: true, elevatedBreakGlass: true };
+  }
+
+  if (document.ownerId === userId) {
+    return { allowed: true };
+  }
+
+  const grant = await prisma.documentGrant.findUnique({
+    where: {
+      documentId_granteeId: { documentId, granteeId: userId },
+    },
+    select: { permission: true },
+  });
+
+  if (!grant) {
+    return { allowed: false, reason: 'No document access grant' };
+  }
+
+  const canRead = grant.permission === 'view' || grant.permission === 'edit';
+  const canMutate = grant.permission === 'edit';
+
+  if ((action === 'view' || action === 'download') && canRead) {
+    return { allowed: true };
+  }
+
+  if (action === 'edit' && canMutate) {
+    return { allowed: true };
+  }
+
+  return { allowed: false, reason: 'Grant does not permit this action' };
 }
 
-/**
- * Require permission — throws if not allowed.
- * Convenience wrapper for use in API routes.
- */
 export async function requireDocumentPermission(
   userId: string,
   documentId: string,
-  action: DocumentAction
+  action: DocumentAction,
 ): Promise<void> {
   const result = await checkDocumentPermission(userId, documentId, action);
   if (!result.allowed) {

@@ -49,7 +49,7 @@ export async function validateShareAccess(token: string): Promise<ValidateShareA
         }
 
         // Check if link is locked
-        if (secureLink.lockedAt || secureLink.failedAttempts >= 1) {
+        if (secureLink.lockedAt || secureLink.failedAttempts >= 3) {
             return {
                 allowed: false,
                 requiresAuth: false,

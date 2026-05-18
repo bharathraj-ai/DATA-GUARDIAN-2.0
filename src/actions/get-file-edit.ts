@@ -2,9 +2,8 @@
 
 import { prisma } from '@/lib/prisma';
 import { decryptBuffer } from '@/lib/crypto';
-import { cookies } from 'next/headers';
 import * as XLSX from 'xlsx';
-import { tryCheckRevoked, tryValidateSession } from '@/lib/redis-helpers';
+import { authorizeSecureLink } from '@/lib/linkAuthorization';
 import mammoth from 'mammoth';
 
 
@@ -23,39 +22,24 @@ export type FileEditData = {
  */
 export async function getFileForEdit(token: string, fileId: string): Promise<FileEditData> {
     try {
-        const cookieStore = await cookies();
-        const sessionId = cookieStore.get('session_id')?.value;
-
-        if (await tryCheckRevoked(token)) {
-            return { success: false, error: 'Access revoked' };
+        const authResult = await authorizeSecureLink(token, 'edit', fileId);
+        if (!authResult.success) {
+            throw new Error(authResult.error);
         }
 
-        if (sessionId) {
-            const isValid = await tryValidateSession(token, sessionId);
-            if (isValid === false) return { success: false, error: 'Session invalid' };
-        } else {
-            return { success: false, error: 'Session required' };
-        }
+        const secureLink = authResult.context.secureLink;
+        const fileRecord = secureLink.UserFile.find((f: any) => f.id === fileId);
 
-        const fileRecord = await prisma.userFile.findUnique({
-            where: { id: fileId },
-            include: { SecureLink: true },
-        });
-
-        if (!fileRecord || fileRecord.SecureLink.token !== token) {
+        if (!fileRecord) {
             return { success: false, error: 'File not found' };
-        }
-
-        if (fileRecord.SecureLink.isRevoked || fileRecord.SecureLink.expiresAt < new Date()) {
-            return { success: false, error: 'Access expired or revoked' };
         }
 
         let buffer: Buffer;
         try {
             buffer = decryptBuffer(
-                fileRecord.encryptedContent,
-                fileRecord.iv,
-                fileRecord.authTag
+                fileRecord.encryptedContent!,
+                fileRecord.iv!,
+                fileRecord.authTag!
             );
         } catch (e) {
             return { success: false, error: 'Decryption failed' };
