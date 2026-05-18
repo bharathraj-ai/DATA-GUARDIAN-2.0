@@ -15,7 +15,7 @@ type AccessState = 'checking' | 'allowed' | 'denied' | 'requires_auth';
 
 export default function SharePage({ params }: SharePageProps) {
     const router = useRouter();
-    const { data: session, status } = useSession();
+    const { data: sessionData, status } = useSession();
     const [token, setToken] = useState<string>('');
     const [step, setStep] = useState<'email' | 'otp'>('email');
     const [email, setEmail] = useState<string>('');
@@ -43,11 +43,11 @@ export default function SharePage({ params }: SharePageProps) {
 
     // Auto-detect session email to auto-fill and skip to OTP step
     useEffect(() => {
-        if (accessState === 'allowed' && session?.user?.email) {
-            setEmail(session.user.email);
+        if (accessState === 'allowed' && sessionData?.user?.email) {
+            setEmail(sessionData.user.email);
             setStep('otp');
         }
-    }, [accessState, session]);
+    }, [accessState, sessionData]);
 
     // Resolve params
     useEffect(() => {
@@ -183,6 +183,8 @@ export default function SharePage({ params }: SharePageProps) {
         }
     };
 
+
+
     const handleSubmit = useCallback(async () => {
         const otpString = otp.join('');
 
@@ -201,7 +203,7 @@ export default function SharePage({ params }: SharePageProps) {
         setError('');
 
         try {
-            const result = await verifyOTP({ token, otp: otpString, email });
+            const result = await verifyOTP({ token, otp: otpString, email: email || undefined });
 
             if (result.success) {
                 setState('success');
@@ -230,14 +232,14 @@ export default function SharePage({ params }: SharePageProps) {
             triggerShake();
             setTimeout(() => setState('idle'), 2000);
         }
-    }, [otp, token, countdown, router]);
+    }, [otp, token, countdown, router, email]);
 
     // Auto-submit when all 6 digits entered
     useEffect(() => {
-        if (step === 'otp' && otp.every((digit) => digit !== '') && state === 'idle' && accessState === 'allowed') {
+        if (otp.every((digit) => digit !== '') && state === 'idle' && accessState === 'allowed') {
             handleSubmit();
         }
-    }, [otp, state, handleSubmit, accessState, step]);
+    }, [otp, state, handleSubmit, accessState]);
 
     // Loading state
     if (isLoading || accessState === 'checking' || status === 'loading') {
@@ -370,7 +372,7 @@ export default function SharePage({ params }: SharePageProps) {
     }
 
     // Dynamic Step Resolver to prevent rendering flash/race conditions
-    const isStepOtp = step === 'otp' || (status === 'authenticated' && !!session?.user?.email);
+    const isStepOtp = step === 'otp' || (status === 'authenticated' && !!sessionData?.user?.email);
 
     // ACCESS GRANTED — Show OTP form (only reaches here if accessState === 'allowed')
     return (
@@ -470,7 +472,7 @@ export default function SharePage({ params }: SharePageProps) {
                 {/* Step 2: OTP Input */}
                 {isStepOtp && state !== 'success' && (
                     <div className={`otp-input-container ${shake ? 'shake' : ''}`}>
-                        <label className="otp-label">Enter OTP sent to {email}</label>
+                        <label className="otp-label">{email ? `Enter OTP sent to ${email}` : 'Enter the 6-digit OTP from your email'}</label>
                         <div className="otp-boxes">
                             {otp.map((digit, index) => (
                                 <input
