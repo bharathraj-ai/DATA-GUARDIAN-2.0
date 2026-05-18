@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { verifyOTP } from '@/actions/verify-otp';
 import { validateShareAccess } from '@/actions/validate-share-access';
+import { sendVendorOTP } from '@/actions/send-vendor-otp';
 import { useSession, signIn } from 'next-auth/react';
 
 interface SharePageProps {
@@ -162,7 +163,6 @@ export default function SharePage({ params }: SharePageProps) {
         setError('');
 
         try {
-            const { sendVendorOTP } = await import('@/actions/send-vendor-otp');
             const result = await sendVendorOTP({ token, email });
 
             if (result.success) {
