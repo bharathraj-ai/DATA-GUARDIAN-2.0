@@ -18,7 +18,7 @@ export const ROLE_RANK: Record<string, number> = {
 
 export function normalizeRole(role: string | null | undefined): AppRole {
   const r = (role || 'VENDOR').toUpperCase();
-  if ((APP_ROLES as readonly string[]).includes(r as any)) return r as AppRole;
+  if ((APP_ROLES as readonly string[]).includes(r)) return r as AppRole;
   return 'VENDOR';
 }
 
