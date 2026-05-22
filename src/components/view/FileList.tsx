@@ -176,9 +176,9 @@ export const FileList = memo(function FileList({ token, files, isOwner }: FileLi
                                 <div style={{ width: '100%', overflowX: 'auto' }}>
                                     <table style={{ width: '100%', borderCollapse: 'collapse', color: '#fff', fontSize: '13px' }}>
                                         <tbody>
-                                            {previewData.content.map((row: any[], i: number) => (
+                                            {(previewData.content as unknown[][]).map((row: unknown[], i: number) => (
                                                 <tr key={i} style={{ borderBottom: '1px solid #333', background: i === 0 ? '#222' : 'transparent', fontWeight: i === 0 ? 600 : 400 }}>
-                                                    {row.map((cell: any, j: number) => (
+                                                    {row.map((cell: unknown, j: number) => (
                                                         <td key={j} style={{ padding: '8px 12px', whiteSpace: 'nowrap', borderRight: '1px solid #333' }}>
                                                             {cell !== null && cell !== undefined ? String(cell) : ''}
                                                         </td>

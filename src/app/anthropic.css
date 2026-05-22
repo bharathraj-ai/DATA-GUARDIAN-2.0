@@ -319,3 +319,310 @@ body, html {
   border-color: #E5E7EB !important;
   color: #111111 !important;
 }
+
+/* 9. Services Page Card Overrides */
+.service-card-large {
+  background: #FFFFFF !important;
+  border: 1px solid #E5E7EB !important;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.02) !important;
+}
+.service-card-large:hover {
+  border-color: #D1D5DB !important;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05) !important;
+}
+.service-card-title {
+  color: #111111 !important;
+}
+.service-card-description, .service-feature-item span {
+  color: #4B5563 !important;
+}
+.form-input:focus, .form-select:focus {
+  border-color: #111111 !important;
+  box-shadow: 0 0 0 1px #111111 !important;
+}
+.form-label, .form-section-title {
+  color: #111111 !important;
+  font-weight: 500 !important;
+}
+.form-section-title svg {
+  color: #111111 !important;
+}
+
+/* Sections */
+.features-section, .stats-section, .cta-section, .how-cta-section, .security-section, .main-services-section, .use-cases-section, .steps-section {
+  background: #FFFFFF !important;
+}
+
+/* Horizontal Steps for How it Works */
+@media (min-width: 768px) {
+  .steps-timeline {
+    display: grid !important;
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 24px !important;
+    padding-left: 0 !important;
+    border-left: none !important;
+  }
+  .step-item {
+    display: flex !important;
+    flex-direction: column !important;
+    padding-left: 0 !important;
+    position: relative !important;
+  }
+  .step-number-wrapper {
+    position: static !important;
+    margin-bottom: 20px !important;
+  }
+  .step-line {
+    display: none !important;
+  }
+  .step-number {
+    width: 32px !important;
+    height: 32px !important;
+    background: #111111 !important;
+    color: #FFFFFF !important;
+    font-size: 14px !important;
+  }
+}
+
+/* Icons / Emojis to Monochrome */
+.feature-icon, .step-icon, .security-icon {
+  background: #F9FAFB !important;
+  color: #111111 !important;
+  border: 1px solid #E5E7EB !important;
+  border-radius: 6px !important;
+}
+.use-case-emoji {
+  filter: grayscale(100%) !important; /* Make emojis black/white */
+  opacity: 0.8 !important;
+}
+
+/* Stats */
+.stat-number {
+  color: #111111 !important;
+  background: none !important;
+  background-clip: padding-box !important;
+  -webkit-background-clip: unset !important;
+  -webkit-text-fill-color: #111111 !important;
+}
+
+/* CTA */
+.cta-card, .services-cta-card, .how-cta-card {
+  background: #F9FAFB !important;
+  border: 1px solid #E5E7EB !important;
+  border-radius: 12px !important;
+}
+.cta-title, .how-cta-title, .services-cta-title {
+  color: #111111 !important;
+}
+.cta-subtitle, .how-cta-subtitle, .services-cta-subtitle {
+  color: #6B7280 !important;
+}
+
+/* Status / Alerts */
+.status-message {
+  border-radius: 6px !important;
+}
+.status-success, .result-card-success {
+  background: #ECFDF5 !important;
+  border-color: #10B981 !important;
+  color: #065F46 !important;
+}
+.status-success svg, .result-card-success svg, .result-card-success h4 {
+  color: #10B981 !important;
+}
+.status-error, .result-card-danger {
+  background: #FEF2F2 !important;
+  border-color: #EF4444 !important;
+  color: #991B1B !important;
+}
+.status-error svg, .result-card-danger svg, .result-card-danger h4 {
+  color: #EF4444 !important;
+}
+.status-warning, .result-card-warning {
+  background: #FFFBEB !important;
+  border-color: #F59E0B !important;
+  color: #92400E !important;
+}
+.status-warning svg, .result-card-warning svg, .result-card-warning h4 {
+  color: #F59E0B !important;
+}
+
+/* Links & Accents */
+.dashboard-link {
+  background: #F9FAFB !important;
+  border-color: #E5E7EB !important;
+  color: #111111 !important;
+}
+.link-input {
+  background: #F9FAFB !important;
+  border-color: #E5E7EB !important;
+  color: #111111 !important;
+}
+
+/* Footer */
+.footer {
+  background: #FFFFFF !important;
+  border-top: 1px solid #E5E7EB !important;
+}
+.footer-logo {
+  color: #111111 !important;
+}
+.footer-motto, .footer-link {
+  color: #6B7280 !important;
+}
+.footer-col-title {
+  color: #111111 !important;
+}
+
+/* File Upload */
+.file-upload-label {
+  background: #F9FAFB !important;
+  border: 1px dashed #D1D5DB !important;
+  color: #111111 !important;
+}
+.file-upload-label:hover {
+  background: #F3F4F6 !important;
+  border-color: #9CA3AF !important;
+}
+
+/* Countdown */
+.countdown-display {
+  background: #F9FAFB !important;
+  border: 1px solid #E5E7EB !important;
+  color: #111111 !important;
+}
+
+/* Clean up hero visual floating cards */
+.visual-card {
+  background: #FFFFFF !important;
+  border: 1px solid #E5E7EB !important;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.05) !important;
+}
+.visual-dot {
+  background: #E5E7EB !important;
+}
+.visual-lock {
+  background: #F9FAFB !important;
+  border-color: #E5E7EB !important;
+  color: #111111 !important;
+}
+.visual-text {
+  color: #111111 !important;
+}
+.visual-timer {
+  background: #F9FAFB !important;
+  border-color: #E5E7EB !important;
+  color: #111111 !important;
+}
+
+/* 9. Services Page Card Overrides */
+.service-card-large {
+  background: #FFFFFF !important;
+  border: 1px solid #E5E7EB !important;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.02) !important;
+}
+.service-card-large:hover {
+  border-color: #D1D5DB !important;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05) !important;
+}
+.service-card-title {
+  color: #111111 !important;
+}
+.service-card-description, .service-feature-item span {
+  color: #4B5563 !important;
+}
+.service-card-badge {
+  background: #F3F4F6 !important;
+  border: 1px solid #E5E7EB !important;
+  color: #111111 !important;
+}
+.service-feature-item svg {
+  color: #10B981 !important;
+}
+
+/* 10. Footer Restructure Styles */
+.footer {
+  background: #FFFFFF !important;
+  border-top: 1px solid #E5E7EB !important;
+  padding: 64px 0 32px 0 !important;
+  color: #4B5563 !important;
+}
+.footer-grid {
+  display: grid !important;
+  grid-template-columns: 2fr 1fr 1fr 1fr !important;
+  gap: 48px !important;
+  margin-bottom: 48px !important;
+}
+@media (max-width: 768px) {
+  .footer-grid {
+    grid-template-columns: 1fr 1fr !important;
+  }
+}
+@media (max-width: 480px) {
+  .footer-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+.footer-logo-text {
+  font-weight: 700 !important;
+  font-size: 20px !important;
+  letter-spacing: -0.02em !important;
+  color: #111111 !important;
+}
+.footer-motto {
+  color: #6B7280 !important;
+  margin: 16px 0 24px 0 !important;
+  line-height: 1.6 !important;
+  max-width: 280px !important;
+}
+.footer-socials {
+  display: flex !important;
+  gap: 16px !important;
+}
+.footer-socials a {
+  color: #9CA3AF !important;
+  transition: color 0.2s ease !important;
+}
+.footer-socials a:hover {
+  color: #111111 !important;
+}
+.footer-col-title {
+  color: #111111 !important;
+  font-weight: 600 !important;
+  margin-bottom: 20px !important;
+  font-size: 14px !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.05em !important;
+}
+.footer-links {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 12px !important;
+}
+.footer-link {
+  color: #6B7280 !important;
+  font-weight: 500 !important;
+  transition: color 0.2s ease !important;
+}
+.footer-link:hover {
+  color: #111111 !important;
+}
+.footer-bottom {
+  border-top: 1px solid #F3F4F6 !important;
+  padding-top: 32px !important;
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  font-size: 14px !important;
+  color: #9CA3AF !important;
+}
+.footer-bottom-links {
+  display: flex !important;
+  gap: 24px !important;
+}
+.footer-bottom-links a {
+  color: #9CA3AF !important;
+}
+.footer-bottom-links a:hover {
+  color: #111111 !important;
+}

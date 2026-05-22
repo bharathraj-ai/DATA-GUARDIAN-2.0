@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { getLinkStatus, revokeAccess, RevokeAccessResult } from '@/actions/revoke-access';
 
 interface RevokePageProps {
@@ -201,12 +202,12 @@ export default function RevokePage({ params }: RevokePageProps) {
                         </div>
                         <h2 className="error-title">Invalid Link</h2>
                         <p className="error-message">{error}</p>
-                        <a href="/" className="return-button">
+                        <Link href="/" className="return-button">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                 <path d="M3 12l9-9 9 9M5 10v10a2 2 0 002 2h10a2 2 0 002-2V10" />
                             </svg>
                             Return to Home
-                        </a>
+                        </Link>
                     </div>
                 </div>
             </main>
@@ -418,12 +419,12 @@ export default function RevokePage({ params }: RevokePageProps) {
                             <span>Auto-Destruct</span>
                         </div>
                     </div>
-                    <a href="/" className="back-link">
+                    <Link href="/" className="back-link">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <polyline points="15 18 9 12 15 6" />
                         </svg>
                         Back to Home
-                    </a>
+                    </Link>
                 </div>
             </div>
         </main>
