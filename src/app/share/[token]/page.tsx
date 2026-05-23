@@ -4,10 +4,11 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { verifyOTP } from '@/actions/verify-otp';
 import { validateShareAccess } from '@/actions/validate-share-access';
-import { signIn, useSession } from 'next-auth/react';
+import { sendVendorOTP } from '@/actions/send-vendor-otp';
+import { useSession, signIn } from 'next-auth/react';
 
 interface SharePageProps {
-    params: Promise<{ token: string }>;
+    params: any;
 }
 
 type VerificationState = 'idle' | 'loading' | 'success' | 'error';
@@ -15,8 +16,10 @@ type AccessState = 'checking' | 'allowed' | 'denied' | 'requires_auth';
 
 export default function SharePage({ params }: SharePageProps) {
     const router = useRouter();
-    const { data: sessionData } = useSession();
+    const { data: sessionData, status } = useSession();
     const [token, setToken] = useState<string>('');
+    const [step, setStep] = useState<'email' | 'otp'>('email');
+    const [email, setEmail] = useState<string>('');
     const [otp, setOtp] = useState<string[]>(['', '', '', '', '', '']);
     const [state, setState] = useState<VerificationState>('idle');
     const [error, setError] = useState<string>('');
@@ -39,14 +42,22 @@ export default function SharePage({ params }: SharePageProps) {
         }
     }, []);
 
+    // Auto-detect session email to auto-fill and skip to OTP step
+    useEffect(() => {
+        if (accessState === 'allowed' && sessionData?.user?.email) {
+            setEmail(sessionData.user.email);
+            setStep('otp');
+        }
+    }, [accessState, sessionData]);
+
     // Resolve params
     useEffect(() => {
-        params.then((p) => {
+        params.then((p: any) => {
             console.log('Token resolved:', p.token);
             // Remove any query parameters (like timestamp) from token
             const cleanToken = p.token.split('?')[0];
             setToken(cleanToken);
-        }).catch((err) => {
+        }).catch((err: any) => {
             console.error('Failed to resolve params:', err);
             setIsLoading(false);
         });
@@ -141,8 +152,36 @@ export default function SharePage({ params }: SharePageProps) {
         setTimeout(() => setShake(false), 500);
     };
 
-    // Email is sourced from the authenticated session (vendor signed in with Google)
-    const email = sessionData?.user?.email || '';
+    const handleEmailSubmit = async () => {
+        if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            setError('Please enter a valid email address');
+            triggerShake();
+            return;
+        }
+
+        setState('loading');
+        setError('');
+
+        try {
+            const result = await sendVendorOTP({ token, email });
+
+            if (result.success) {
+                setState('idle');
+                setStep('otp');
+                setCountdown(300); // 5 minutes fresh timer
+            } else {
+                setState('error');
+                setError(result.error || 'Failed to request OTP');
+                triggerShake();
+                setTimeout(() => setState('idle'), 2000);
+            }
+        } catch {
+            setState('error');
+            setError('Connection error. Please try again.');
+            triggerShake();
+            setTimeout(() => setState('idle'), 2000);
+        }
+    };
 
     const handleSubmit = useCallback(async () => {
         const otpString = otp.join('');
@@ -201,7 +240,7 @@ export default function SharePage({ params }: SharePageProps) {
     }, [otp, state, handleSubmit, accessState]);
 
     // Loading state
-    if (isLoading || accessState === 'checking') {
+    if (isLoading || accessState === 'checking' || status === 'loading') {
         return (
             <main className="otp-wrapper">
                 <div className="otp-card">
@@ -330,6 +369,9 @@ export default function SharePage({ params }: SharePageProps) {
         );
     }
 
+    // Dynamic Step Resolver to prevent rendering flash/race conditions
+    const isStepOtp = step === 'otp' || (status === 'authenticated' && !!sessionData?.user?.email);
+
     // ACCESS GRANTED — Show OTP form (only reaches here if accessState === 'allowed')
     return (
         <main className="otp-wrapper">
@@ -381,8 +423,52 @@ export default function SharePage({ params }: SharePageProps) {
                     </div>
                 )}
 
-                {/* OTP Input */}
-                {state !== 'success' && (
+                {/* Step 1: Email Input */}
+                {!isStepOtp && state !== 'success' && (
+                    <div className={`otp-input-container ${shake ? 'shake' : ''}`}>
+                        <label className="otp-label">Email Address</label>
+                        <input
+                            type="email"
+                            value={email}
+                            onChange={(e) => {
+                                setEmail(e.target.value);
+                                setError('');
+                            }}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleEmailSubmit();
+                            }}
+                            className={`otp-box filled ${error ? 'error' : ''}`}
+                            style={{ width: '100%', marginBottom: '16px', fontSize: '16px', padding: '12px' }}
+                            placeholder="Enter your email to receive OTP"
+                            disabled={state === 'loading'}
+                            autoFocus
+                        />
+                        <button
+                            onClick={handleEmailSubmit}
+                            disabled={state === 'loading' || !email}
+                            className={`otp-button ${state}`}
+                            style={{ margin: 0 }}
+                        >
+                            {state === 'loading' ? (
+                                <>
+                                    <span className="button-spinner" />
+                                    Sending...
+                                </>
+                            ) : (
+                                <>
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+                                        <polyline points="22,6 12,13 2,6" />
+                                    </svg>
+                                    Send Verification Code
+                                </>
+                            )}
+                        </button>
+                    </div>
+                )}
+
+                {/* Step 2: OTP Input */}
+                {isStepOtp && state !== 'success' && (
                     <div className={`otp-input-container ${shake ? 'shake' : ''}`}>
                         <label className="otp-label">{email ? `Enter OTP sent to ${email}` : 'Enter the 6-digit OTP from your email'}</label>
                         <div className="otp-boxes">

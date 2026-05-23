@@ -782,7 +782,7 @@ export default function UniversalEditor({
             </>
           )}
 
-          {view === "pdf2docx" && <PDFtoDOCX onBack={() => { setView("editor"); setInitialPdfFile(null); }} initialFile={initialPdfFile} onSave={onSave} forceAutoSave={forceAutoSave} onAutoSaveComplete={onAutoSaveComplete} />}
+
 
           {/* Chat Sidebar */}
           {chatOpen && (

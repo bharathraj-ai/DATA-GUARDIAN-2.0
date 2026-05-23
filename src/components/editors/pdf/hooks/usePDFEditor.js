@@ -122,9 +122,13 @@ export function usePDFEditor({ initialFile, onSave, forceAutoSave, onAutoSaveCom
   /* ─── Auto-process initialFile on mount ───────────────────────────── */
   useEffect(() => {
     if (initialFile) {
-      handleFileInternal(initialFile);
+      // Defer execution slightly to avoid synchronous setState inside mount effect
+      const t = setTimeout(() => {
+        handleFileInternal(initialFile);
+      }, 0);
+      return () => clearTimeout(t);
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [initialFile, handleFileInternal]);
 
   /* ─── Block CRUD operations ───────────────────────────────────────── */
   const updateBlock = useCallback((i, patch) => {
@@ -250,9 +254,13 @@ export function usePDFEditor({ initialFile, onSave, forceAutoSave, onAutoSaveCom
   /* ─── Legacy: forceAutoSave support ───────────────────────────────── */
   useEffect(() => {
     if (forceAutoSave && phase === "editing") {
-      submitFinalDocument();
+      // Defer execution slightly to avoid synchronous setState inside effect
+      const t = setTimeout(() => {
+        submitFinalDocument();
+      }, 0);
+      return () => clearTimeout(t);
     }
-  }, [forceAutoSave, phase]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [forceAutoSave, phase, submitFinalDocument]);
 
   /* ─── Keyboard shortcuts ──────────────────────────────────────────── */
   useEffect(() => {
