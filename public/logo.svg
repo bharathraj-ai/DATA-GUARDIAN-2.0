@@ -1,23 +1,13 @@
 <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <linearGradient id="shieldGrad" x1="0" y1="0" x2="40" y2="40" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#6366f1"/>
-      <stop offset="50%" stop-color="#8b5cf6"/>
-      <stop offset="100%" stop-color="#06b6d4"/>
-    </linearGradient>
-    <linearGradient id="lockGrad" x1="14" y1="12" x2="26" y2="30" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#ffffff"/>
-      <stop offset="100%" stop-color="#e0e7ff"/>
-    </linearGradient>
-  </defs>
-  <!-- Shield -->
-  <path d="M20 2L4 9v9c0 11 16 18 16 18s16-7 16-18V9L20 2z" fill="url(#shieldGrad)" opacity="0.9"/>
-  <path d="M20 3.5L5.5 9.8v8.2c0 10 14.5 16.5 14.5 16.5S34.5 28 34.5 18v-8.2L20 3.5z" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="0.5"/>
-  <!-- Lock body -->
-  <rect x="13" y="19" width="14" height="10" rx="2" fill="url(#lockGrad)"/>
-  <!-- Lock shackle -->
-  <path d="M15 19v-4a5 5 0 0 1 10 0v4" stroke="url(#lockGrad)" stroke-width="2.5" fill="none" stroke-linecap="round"/>
-  <!-- Keyhole -->
-  <circle cx="20" cy="23.5" r="1.8" fill="url(#shieldGrad)"/>
-  <rect x="19.2" y="23.5" width="1.6" height="3" rx="0.8" fill="url(#shieldGrad)"/>
+  <!-- Premium black background with smooth rounded corners -->
+  <rect width="40" height="40" rx="10" fill="#111111"/>
+  
+  <!-- "D" shape in pure white -->
+  <path d="M13 10H19C24.5228 10 29 14.4772 29 20C29 25.5228 24.5228 30 19 30H13V10Z" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  
+  <!-- "G" shape overlapping -->
+  <path d="M25 15C23.6845 12.5674 20.5163 10.5 17.5 10.5C12.2533 10.5 8 14.7533 8 20C8 25.2467 12.2533 29.5 17.5 29.5C22.7467 29.5 27 25.2467 27 20H19.5" stroke="#38BDF8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  
+  <!-- Small security node -->
+  <circle cx="27" cy="20" r="2.5" fill="#38BDF8"/>
 </svg>

@@ -337,8 +337,24 @@ body {
   padding-bottom: 120px;
   position: relative;
   overflow: hidden;
-  display: flex;
+}
+
+.hero-section .container {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr;
+  gap: 60px;
   align-items: center;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 60px;
+}
+
+@media (max-width: 1024px) {
+  .hero-section .container {
+    grid-template-columns: 1fr 1fr;
+    gap: 50px;
+    padding: 0 40px;
+  }
 }
 
 @media (max-width: 768px) {
@@ -346,12 +362,26 @@ body {
     padding-top: 140px;
     padding-bottom: 80px;
   }
+  
+  .hero-section .container {
+    grid-template-columns: 1fr;
+    gap: 40px;
+    padding: 0 32px;
+  }
+  
+  .hero-visual {
+    order: -1;
+  }
 }
 
 @media (max-width: 480px) {
   .hero-section {
     padding-top: 120px;
     padding-bottom: 60px;
+  }
+  
+  .hero-section .container {
+    padding: 0 20px;
   }
 }
 
@@ -397,7 +427,7 @@ body {
 .hero-content {
   position: relative;
   z-index: 10;
-  max-width: 650px;
+  max-width: 100%;
   animation: fadeInUp 1s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -436,7 +466,7 @@ body {
   line-height: 1.7;
   color: var(--text-secondary);
   margin-bottom: 40px;
-  max-width: 480px;
+  max-width: 100%;
 }
 
 .hero-cta {
@@ -473,24 +503,25 @@ body {
 
 /* Hero Visual */
 .hero-visual {
-  position: absolute;
-  right: 5%;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 1;
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 10;
+  animation: fadeInUp 1s cubic-bezier(0.16, 1, 0.3, 1) 0.2s both;
 }
 
 .visual-card {
   background: transparent;
-  
   border: 1px solid var(--border-color);
   border-radius: 20px;
-  padding: 24px;
+  padding: 32px;
   box-shadow: 0 1px 3px rgba(0,0,0,0.05);
 }
 
 .visual-card-main {
-  width: 320px;
+  width: 100%;
+  max-width: 380px;
 }
 
 .visual-card-header {
@@ -507,9 +538,9 @@ body {
 }
 
 .visual-lock {
-  width: 80px;
-  height: 80px;
-  margin: 0 auto 20px;
+  width: 100px;
+  height: 100px;
+  margin: 0 auto 24px;
   background: transparent;
   border: 1px solid rgba(14, 165, 233, 0.2);
   border-radius: 20px;
@@ -519,24 +550,29 @@ body {
   color: var(--primary-blue);
 }
 
+.visual-lock svg {
+  width: 56px;
+  height: 56px;
+}
+
 .visual-text {
   text-align: center;
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 700;
-  margin-bottom: 16px;
+  margin-bottom: 20px;
 }
 
 .visual-timer {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 12px;
+  gap: 10px;
+  padding: 14px 20px;
   background: rgba(16, 185, 129, 0.1);
   border: 1px solid rgba(16, 185, 129, 0.2);
   border-radius: 10px;
   color: var(--success);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
 }
 

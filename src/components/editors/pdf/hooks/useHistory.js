@@ -7,7 +7,7 @@
  * @module pdf/hooks/useHistory
  */
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback } from "react";
 import { createHistory } from "../history";
 
 /**
@@ -23,18 +23,16 @@ import { createHistory } from "../history";
  * }}
  */
 export function useHistory(initialState) {
-  const historyRef = useRef(null);
   const [, forceUpdate] = useState(0);
 
-  // Lazy init — create history manager once
-  if (!historyRef.current) {
-    historyRef.current = createHistory();
+  // Lazy init — create history manager once using useState lazy initializer to avoid Ref render-access warnings
+  const [h] = useState(() => {
+    const manager = createHistory();
     if (initialState && initialState.length > 0) {
-      historyRef.current.push(initialState);
+      manager.push(initialState);
     }
-  }
-
-  const h = historyRef.current;
+    return manager;
+  });
 
   const push = useCallback((state) => {
     h.push(state);
