@@ -1,14 +1,19 @@
 'use client';
+
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { verifyOTP } from '@/actions/verify-otp';
 import { validateShareAccess } from '@/actions/validate-share-access';
+import { sendVendorOTP } from '@/actions/send-vendor-otp';
 import { useSession, signIn } from 'next-auth/react';
+
 interface SharePageProps {
-    params: Promise<{ token: string }>;
+    params: any;
 }
+
 type VerificationState = 'idle' | 'loading' | 'success' | 'error';
 type AccessState = 'checking' | 'allowed' | 'denied' | 'requires_auth';
+
 export default function SharePage({ params }: SharePageProps) {
     const router = useRouter();
     const { data: sessionData, status } = useSession();
@@ -25,6 +30,7 @@ export default function SharePage({ params }: SharePageProps) {
     const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [accessState, setAccessState] = useState<AccessState>('checking');
+
     // Force refresh on mount to clear any cached data
     useEffect(() => {
         // Clear any browser cache for this page
@@ -35,6 +41,7 @@ export default function SharePage({ params }: SharePageProps) {
             }
         }
     }, []);
+
     // Auto-detect session email to auto-fill and skip to OTP step
     useEffect(() => {
         if (accessState === 'allowed' && sessionData?.user?.email) {
@@ -42,24 +49,28 @@ export default function SharePage({ params }: SharePageProps) {
             setStep('otp');
         }
     }, [accessState, sessionData]);
+
     // Resolve params
     useEffect(() => {
-        params.then((p) => {
+        params.then((p: any) => {
             console.log('Token resolved:', p.token);
             // Remove any query parameters (like timestamp) from token
             const cleanToken = p.token.split('?')[0];
             setToken(cleanToken);
-        }).catch((err) => {
+        }).catch((err: any) => {
             console.error('Failed to resolve params:', err);
             setIsLoading(false);
         });
     }, [params]);
+
     // SECURITY: Validate access before showing OTP form
     useEffect(() => {
         if (!token) return;
+
         async function checkAccess() {
             setAccessState('checking');
             const result = await validateShareAccess(token);
+
             if (result.allowed) {
                 setAccessState('allowed');
                 setIsLoading(false);
@@ -73,8 +84,10 @@ export default function SharePage({ params }: SharePageProps) {
                 setIsLoading(false);
             }
         }
+
         checkAccess();
     }, [token]);
+
     // Countdown timer
     useEffect(() => {
         if (countdown <= 0 || accessState !== 'allowed') return;
@@ -83,39 +96,47 @@ export default function SharePage({ params }: SharePageProps) {
         }, 1000);
         return () => clearInterval(timer);
     }, [countdown, accessState]);
+
     // Auto-focus first input
     useEffect(() => {
         if (token && accessState === 'allowed' && inputRefs.current[0]) {
             inputRefs.current[0].focus();
         }
     }, [token, accessState]);
+
     const formatTime = (seconds: number): string => {
         const mins = Math.floor(seconds / 60);
         const secs = seconds % 60;
         return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
     };
+
     const getTimerClass = (): string => {
         if (countdown <= 30) return 'timer-danger';
         if (countdown <= 60) return 'timer-warning';
         return 'timer-safe';
     };
+
     const handleChange = (index: number, value: string) => {
         // Only allow digits
         if (value && !/^\d$/.test(value)) return;
+
         const newOtp = [...otp];
         newOtp[index] = value;
         setOtp(newOtp);
         setError('');
+
         // Auto-advance to next input
         if (value && index < 5) {
             inputRefs.current[index + 1]?.focus();
         }
     };
+
     const handleKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
         if (e.key === 'Backspace' && !otp[index] && index > 0) {
             inputRefs.current[index - 1]?.focus();
         }
     };
+
     const handlePaste = (e: React.ClipboardEvent) => {
         e.preventDefault();
         const pastedData = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
@@ -125,21 +146,25 @@ export default function SharePage({ params }: SharePageProps) {
             inputRefs.current[5]?.focus();
         }
     };
+
     const triggerShake = () => {
         setShake(true);
         setTimeout(() => setShake(false), 500);
     };
+
     const handleEmailSubmit = async () => {
         if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
             setError('Please enter a valid email address');
             triggerShake();
             return;
         }
+
         setState('loading');
         setError('');
+
         try {
-            const { sendVendorOTP } = await import('@/actions/send-vendor-otp');
             const result = await sendVendorOTP({ token, email });
+
             if (result.success) {
                 setState('idle');
                 setStep('otp');
@@ -157,21 +182,27 @@ export default function SharePage({ params }: SharePageProps) {
             setTimeout(() => setState('idle'), 2000);
         }
     };
+
     const handleSubmit = useCallback(async () => {
         const otpString = otp.join('');
+
         if (otpString.length !== 6) {
             setError('Please enter all 6 digits');
             triggerShake();
             return;
         }
+
         if (countdown <= 0) {
             setError('OTP has expired. Please request a new link.');
             return;
         }
+
         setState('loading');
         setError('');
+
         try {
             const result = await verifyOTP({ token, otp: otpString, email: email || undefined });
+
             if (result.success) {
                 setState('success');
                 // Force full page navigation to bypass all caches
@@ -182,12 +213,15 @@ export default function SharePage({ params }: SharePageProps) {
                 setState('error');
                 setError(result.error || 'Verification failed');
                 triggerShake();
+
                 if (result.errorType === 'INVALID_OTP') {
                     setRemainingAttempts((prev) => Math.max(0, prev - 1));
                 }
+
                 // Reset OTP inputs
                 setOtp(['', '', '', '', '', '']);
                 inputRefs.current[0]?.focus();
+
                 setTimeout(() => setState('idle'), 2000);
             }
         } catch {
@@ -197,12 +231,14 @@ export default function SharePage({ params }: SharePageProps) {
             setTimeout(() => setState('idle'), 2000);
         }
     }, [otp, token, countdown, router, email]);
+
     // Auto-submit when all 6 digits entered
     useEffect(() => {
         if (otp.every((digit) => digit !== '') && state === 'idle' && accessState === 'allowed') {
             handleSubmit();
         }
     }, [otp, state, handleSubmit, accessState]);
+
     // Loading state
     if (isLoading || accessState === 'checking' || status === 'loading') {
         return (
@@ -214,6 +250,7 @@ export default function SharePage({ params }: SharePageProps) {
             </main>
         );
     }
+
     // SECURITY: Requires authentication — show sign-in prompt
     if (accessState === 'requires_auth') {
         return (
@@ -221,6 +258,7 @@ export default function SharePage({ params }: SharePageProps) {
                 <div className="bg-orb bg-orb-1" />
                 <div className="bg-orb bg-orb-2" />
                 <div className="bg-grid" />
+
                 <div className="otp-card">
                     <div className="otp-header">
                         <div className="lock-icon">
@@ -234,6 +272,7 @@ export default function SharePage({ params }: SharePageProps) {
                             Please sign in with Google to verify your identity.
                         </p>
                     </div>
+
                     <button
                         onClick={() => signIn('google', { callbackUrl: `/share/${token}` })}
                         className="otp-button idle"
@@ -246,6 +285,7 @@ export default function SharePage({ params }: SharePageProps) {
                         </svg>
                         Sign in with Google
                     </button>
+
                     <div className="security-badge" style={{ marginTop: '24px' }}>
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
@@ -256,6 +296,7 @@ export default function SharePage({ params }: SharePageProps) {
             </main>
         );
     }
+
     // SECURITY: Access denied — wrong email or link issues
     if (accessState === 'denied') {
         const isRevoked = accessError.includes('revoked');
@@ -266,6 +307,7 @@ export default function SharePage({ params }: SharePageProps) {
                 <div className="bg-orb bg-orb-1" />
                 <div className="bg-orb bg-orb-2" />
                 <div className="bg-grid" />
+
                 <div className="otp-card">
                     <div className="otp-header">
                         <div className="lock-icon" style={{ color: '#ef4444' }}>
@@ -282,6 +324,7 @@ export default function SharePage({ params }: SharePageProps) {
                         </h1>
                         <p className="otp-subtitle">{accessError}</p>
                     </div>
+
                     {isEmailMismatch && (
                         <div className="phishing-warning" style={{
                             background: 'rgba(239, 68, 68, 0.1)',
@@ -303,6 +346,7 @@ export default function SharePage({ params }: SharePageProps) {
                             </div>
                         </div>
                     )}
+
                     <button
                         onClick={() => {
                             window.location.href = `/create-link?t=${Date.now()}`;
@@ -312,6 +356,7 @@ export default function SharePage({ params }: SharePageProps) {
                     >
                         Return Home
                     </button>
+
                     <div className="security-badge" style={{ marginTop: '24px' }}>
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
@@ -323,8 +368,10 @@ export default function SharePage({ params }: SharePageProps) {
             </main>
         );
     }
+
     // Dynamic Step Resolver to prevent rendering flash/race conditions
     const isStepOtp = step === 'otp' || (status === 'authenticated' && !!sessionData?.user?.email);
+
     // ACCESS GRANTED — Show OTP form (only reaches here if accessState === 'allowed')
     return (
         <main className="otp-wrapper">
@@ -332,6 +379,7 @@ export default function SharePage({ params }: SharePageProps) {
             <div className="bg-orb bg-orb-1" />
             <div className="bg-orb bg-orb-2" />
             <div className="bg-grid" />
+
             <div className="otp-card">
                 {/* Header */}
                 <div className="otp-header">
@@ -358,6 +406,7 @@ export default function SharePage({ params }: SharePageProps) {
                         }
                     </p>
                 </div>
+
                 {/* Timer */}
                 {state !== 'success' && (
                     <div className={`otp-timer ${getTimerClass()}`}>
@@ -373,6 +422,7 @@ export default function SharePage({ params }: SharePageProps) {
                         </span>
                     </div>
                 )}
+
                 {/* Step 1: Email Input */}
                 {!isStepOtp && state !== 'success' && (
                     <div className={`otp-input-container ${shake ? 'shake' : ''}`}>
@@ -416,6 +466,7 @@ export default function SharePage({ params }: SharePageProps) {
                         </button>
                     </div>
                 )}
+
                 {/* Step 2: OTP Input */}
                 {isStepOtp && state !== 'success' && (
                     <div className={`otp-input-container ${shake ? 'shake' : ''}`}>
@@ -464,6 +515,7 @@ export default function SharePage({ params }: SharePageProps) {
                         </button>
                     </div>
                 )}
+
                 {/* Trust Indicators */}
                 <div className="trust-indicators">
                     <div className="trust-item">
@@ -487,6 +539,7 @@ export default function SharePage({ params }: SharePageProps) {
                         <span>No data stored after expiry</span>
                     </div>
                 </div>
+
                 {/* Anti-Phishing Warning */}
                 <div className="phishing-warning" style={{
                     background: 'rgba(251, 191, 36, 0.1)',
@@ -510,6 +563,7 @@ export default function SharePage({ params }: SharePageProps) {
                         <span style={{ opacity: 0.8 }}>Verify you are on: <code style={{ background: 'rgba(0,0,0,0.3)', padding: '1px 4px', borderRadius: '3px' }}>{typeof window !== 'undefined' ? window.location.hostname : 'localhost'}</code></span>
                     </div>
                 </div>
+
                 {/* Security Badge */}
                 <div className="security-badge">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

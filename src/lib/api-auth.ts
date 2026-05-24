@@ -19,11 +19,16 @@ async function getRedisClient() {
     }
 }
 
+interface LogMetadata {
+    ip?: string;
+    [key: string]: unknown;
+}
+
 /**
  * Audit Logging Utility without sensitive data leakage
  * Strict sanitization to prevent PII exposure in logs.
  */
-async function logSecurityEvent(action: string, linkId: string | null, metadata: any) {
+async function logSecurityEvent(action: string, linkId: string | null, metadata: LogMetadata) {
     try {
         // Redact IP slightly
         if (metadata.ip) {

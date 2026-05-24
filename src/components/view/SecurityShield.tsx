@@ -99,7 +99,7 @@ export const SecurityShield = memo(function SecurityShield({
     const [watermarkOffset, setWatermarkOffset] = useState({ x: 0, y: 0 });
     const warningTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const blurTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const eventQueueRef = useRef<Array<{ action: string; timestamp: number; metadata?: any }>>([]);
+    const eventQueueRef = useRef<Array<{ action: string; timestamp: number; metadata?: Record<string, unknown> }>>([]);
     const flushTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // ── Flash Warning Banner ──
@@ -137,7 +137,7 @@ export const SecurityShield = memo(function SecurityShield({
         }
     }, [token]);
 
-    const logSecurityEvent = useCallback((action: SecurityEvent, metadata?: any) => {
+    const logSecurityEvent = useCallback((action: SecurityEvent, metadata?: Record<string, unknown>) => {
         eventQueueRef.current.push({ action, timestamp: Date.now(), metadata });
         // Debounce flush: wait 500ms for more events before sending
         if (flushTimeoutRef.current) clearTimeout(flushTimeoutRef.current);

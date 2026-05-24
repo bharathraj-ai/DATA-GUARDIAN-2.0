@@ -7,10 +7,11 @@ import { getRawFileForEdit } from '@/actions/get-raw-file-for-edit';
 import { updateFile } from '@/actions/update-file';
 import { submitFinal } from '@/actions/submit-final';
 
-const UniversalEditor = dynamic(() => import('@/components/editors/UniversalEditor'), {
+const UniversalEditor = dynamic(() => import('@/components/editors/core/UniversalEditor'), {
     ssr: false,
     loading: () => <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', color: '#fff' }}>Loading Editor...</div>,
 });
+
 
 const SecurePDFViewer = dynamic(() => import('@/components/editors/SecurePDFViewer'), {
     ssr: false,
@@ -105,7 +106,7 @@ export default function EditorPage({ params }: EditorPageProps) {
             const res = await submitFinal(token, fileId, formData);
 
             if (res.success) {
-                router.back();
+                window.location.assign(`/view/${token}`);
             } else {
                 alert(res.error || 'Failed to submit final document.');
             }

@@ -170,33 +170,38 @@ export async function GET(
 
                     const duration = Math.floor((Date.now() - startTime) / 1000);
 
-                    // Check if the link still exists before creating audit log
+                    // Check if the link still exists
                     const linkExists = await prisma.secureLink.findUnique({
                         where: { id: secureLink.id },
                         select: { id: true }
                     });
 
-                    if (!linkExists) {
-                        console.log(`[AUDIT] Skipping session end log - link ${secureLink.id} no longer exists`);
-                        return;
-                    }
+                    // We always want to log the session end. If the link was deleted, we log it with linkId: null
+                    const logData = {
+                        action: 'SESSION_ENDED',
+                        linkId: linkExists ? secureLink.id : null,
+                        reason: `Session ended: ${reason}`,
+                        metadata: JSON.stringify({ 
+                            durationSeconds: duration, 
+                            endReason: reason,
+                            originalLinkId: secureLink.id 
+                        }),
+                    };
 
-                    // Fire and forget audit log
-                    await prisma.auditLog.create({
-                        data: {
-                            action: 'SESSION_ENDED',
-                            linkId: secureLink.id,
-                            reason: `Session ended: ${reason}`,
-                            metadata: JSON.stringify({ durationSeconds: duration, endReason: reason }),
-                        },
-                    });
-                } catch (e) {
-                    // Gracefully handle foreign key constraint errors
-                    if (e instanceof Error && e.message.includes('Foreign key constraint')) {
-                        console.log(`[AUDIT] Link was deleted before session end could be logged`);
-                    } else {
-                        console.error('Failed to log session end:', e);
+                    try {
+                        await prisma.auditLog.create({ data: logData });
+                    } catch (e) {
+                        // Fallback: If it STILL fails due to foreign key (meaning the link was deleted between findUnique and create)
+                        if (e instanceof Error && (e.message.includes('Foreign key constraint') || e.message.includes('Foreign key constraint failed'))) {
+                            console.log(`[AUDIT] Link was deleted concurrently before session end could be logged. Retrying with linkId=null.`);
+                            logData.linkId = null; // Unlink it
+                            await prisma.auditLog.create({ data: logData });
+                        } else {
+                            console.error('Failed to log session end:', e);
+                        }
                     }
+                } catch (e) {
+                    console.error('Failed to execute logSessionEnd block:', e);
                 }
             };
 
