@@ -95,19 +95,17 @@ const nextConfig: NextConfig = {
           },
         ],
       },
-      // AGGRESSIVE CACHE for static assets (1 year, immutable)
-      {
-        source: '/_next/static/(.*)',
-        headers: [
-          { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' },
-        ],
-      },
-      {
-        source: '/fonts/(.*)',
-        headers: [
-          { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' },
-        ],
-      },
+      // AGGRESSIVE CACHE for fonts (1 year, immutable) - ONLY IN PRODUCTION
+      ...(process.env.NODE_ENV === 'production'
+        ? [
+            {
+              source: '/fonts/(.*)',
+              headers: [
+                { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' },
+              ],
+            },
+          ]
+        : []),
       // Cache robots.txt and favicon
       {
         source: '/robots.txt',

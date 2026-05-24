@@ -6,6 +6,7 @@ import * as XLSX from 'xlsx';
 import { authorizeSecureLink } from '@/lib/linkAuthorization';
 import { checkUploadRateLimit, extractClientIP, formatRateLimitError } from '@/lib/rate-limit';
 import { headers } from 'next/headers';
+import { downloadFromMongo } from '@/lib/mongo/operations';
 
 export type FilePreviewResult = {
     success: boolean;
@@ -39,18 +40,48 @@ export async function getFilePreview(token: string, fileId: string): Promise<Fil
             return { success: false, error: 'File not found' };
         }
 
-        // 3. Decrypt Content
+        // 3. Decrypt Content — supports both inline and Mongo-backed files
         let buffer: Buffer;
-        try {
-            const dek = (fileRecord as any).encryptedDek ? decryptDek((fileRecord as any).encryptedDek) : undefined;
-            buffer = decryptBuffer(
-                fileRecord.encryptedContent!,
-                fileRecord.iv!,
-                fileRecord.authTag!,
-                dek
-            );
-        } catch (e) {
-            return { success: false, error: 'Decryption failed' };
+
+        if (fileRecord.encryptedContent) {
+            // Inline encrypted content (draft saves)
+            try {
+                const dek = (fileRecord as any).encryptedDek ? decryptDek((fileRecord as any).encryptedDek) : undefined;
+                buffer = decryptBuffer(
+                    fileRecord.encryptedContent,
+                    fileRecord.iv!,
+                    fileRecord.authTag!,
+                    dek
+                );
+            } catch (e) {
+                return { success: false, error: 'Decryption failed' };
+            }
+        } else if ((fileRecord as any).mongoFileId) {
+            // FIX: Mongo GridFS fallback for files stored via streaming upload
+            try {
+                const mongoFileRecord = await prisma.mongoFile.findUnique({
+                    where: { id: (fileRecord as any).mongoFileId, isDeleted: false },
+                    select: { gridFSId: true },
+                });
+
+                if (!mongoFileRecord) {
+                    return { success: false, error: 'File storage record not found' };
+                }
+
+                const encryptedBuffer = await downloadFromMongo(mongoFileRecord.gridFSId);
+                const dek = (fileRecord as any).encryptedDek ? decryptDek((fileRecord as any).encryptedDek) : undefined;
+                buffer = decryptBuffer(
+                    encryptedBuffer,
+                    fileRecord.iv!,
+                    fileRecord.authTag!,
+                    dek
+                );
+            } catch (e) {
+                console.error('[PREVIEW] Mongo download/decrypt failed:', e);
+                return { success: false, error: 'Failed to retrieve file for preview' };
+            }
+        } else {
+            return { success: false, error: 'File has no content available for preview' };
         }
 
         // 4. Process Content based on Type
