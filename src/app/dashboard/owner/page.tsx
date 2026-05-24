@@ -30,12 +30,16 @@ export default function OwnerDashboardPage() {
     const [auditLogs, setAuditLogs] = useState<UnifiedAuditLog[]>([]);
     const [auditFilter, setAuditFilter] = useState({ search: '', type: 'ALL', severity: 'ALL' });
 
+    const userRole = (session?.user as any)?.role as string | undefined;
+
     // Redirect to sign-in if not authenticated
     useEffect(() => {
         if (sessionStatus === 'unauthenticated') {
             router.push('/auth/signin?callbackUrl=/dashboard/owner');
+        } else if (sessionStatus === 'authenticated' && userRole === 'VENDOR') {
+            router.push('/dashboard/vendor');
         }
-    }, [sessionStatus, router]);
+    }, [sessionStatus, userRole, router]);
 
 
 

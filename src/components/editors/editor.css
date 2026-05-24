@@ -1,0 +1,214 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+.editor-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: #09090b;
+  color: #fafafa;
+  user-select: none;
+  -webkit-user-select: none;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.editor-container input, 
+.editor-container textarea, 
+.editor-container [contenteditable] { 
+  user-select: auto;
+  -webkit-user-select: auto; 
+}
+
+.editor-container ::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+.editor-container ::-webkit-scrollbar-track {
+  background: #09090b;
+}
+.editor-container ::-webkit-scrollbar-thumb {
+  background: #3f3f46;
+  border-radius: 10px;
+}
+.editor-container ::-webkit-scrollbar-thumb:hover {
+  background: #52525b;
+}
+
+.editor-container .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 16px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all .2s ease;
+  white-space: nowrap;
+  font-family: 'Inter', sans-serif;
+  letter-spacing: 0;
+}
+.editor-container .btn-ghost {
+  background: transparent;
+  color: #a1a1aa;
+}
+.editor-container .btn-ghost:hover:not(:disabled) {
+  background: #27272a;
+  color: #fafafa;
+}
+.editor-container .btn-ghost:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+.editor-container .btn-primary {
+  background: #fff;
+  color: #09090b;
+  font-weight: 600;
+}
+.editor-container .btn-primary:hover {
+  background: #d4d4d8;
+}
+.editor-container .btn-danger {
+  background: rgba(220, 38, 38, 0.1);
+  color: #f87171;
+  border: 1px solid rgba(220, 38, 38, 0.25);
+}
+.editor-container .btn-danger:hover {
+  background: rgba(220, 38, 38, 0.18);
+}
+.editor-container .btn-outline {
+  border: 1px solid #3f3f46;
+  background: transparent;
+  color: #a1a1aa;
+}
+.editor-container .btn-outline:hover {
+  border-color: #71717a;
+  color: #fafafa;
+  background: #27272a;
+}
+.editor-container .btn-finish {
+  background: #fff;
+  color: #09090b;
+  font-weight: 600;
+}
+.editor-container .btn-finish:hover {
+  background: #d4d4d8;
+}
+
+.editor-container .sep {
+  width: 1px;
+  height: 24px;
+  background: #27272a;
+  margin: 0 8px;
+}
+.editor-container .tsel {
+  background: #18181b;
+  color: #d4d4d8;
+  border: 1px solid #3f3f46;
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  outline: none;
+  transition: all .2s;
+}
+.editor-container .tsel:hover {
+  border-color: #71717a;
+}
+.editor-container .tsel:focus {
+  border-color: #a1a1aa;
+}
+
+.editor-container .pinput {
+  width: 100%;
+  background: #18181b;
+  border: 1px solid #3f3f46;
+  color: #d4d4d8;
+  border-radius: 6px;
+  padding: 9px 12px;
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+  transition: all .2s;
+}
+.editor-container .pinput:focus {
+  border-color: #a1a1aa;
+}
+
+.editor-container .plabel {
+  font-size: 10px;
+  color: #71717a;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+.editor-container .psec {
+  margin-bottom: 18px;
+}
+
+.editor-container .thumb-card:hover > div:first-child {
+  border-color: #52525b !important;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(0,0,0,0.35);
+}
+.editor-container .thumb-card.active > div:first-child {
+  border-color: #fff !important;
+  transform: translateY(-1px);
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.15), 0 4px 12px rgba(0,0,0,0.4) !important;
+}
+.editor-container .thumb-card:hover .thumb-overlay {
+  background: transparent !important;
+}
+
+.editor-container .dz {
+  border: 2px dashed #3f3f46;
+  border-radius: 12px;
+  padding: 60px 40px;
+  text-align: center;
+  cursor: pointer;
+  transition: all .2s;
+  background: #18181b;
+}
+.editor-container .dz:hover {
+  border-color: #a1a1aa;
+  background: #27272a;
+}
+
+.editor-container .panel {
+  background: #18181b;
+  border-radius: 8px;
+  border: 1px solid #27272a;
+  overflow: hidden;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+.editor-container .spin { animation: spin .8s linear infinite; }
+@keyframes fadeUp { from { opacity: 0; transform: translateY(12px) } to { opacity: 1; transform: none } }
+.editor-container .fup { animation: fadeUp .35s ease both; }
+.editor-container .glass-bar {
+  background: #09090b;
+  border-bottom: 1px solid #27272a;
+}
+.editor-container .confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: rgba(0,0,0,0.8);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.editor-container .confirm-card {
+  background: #18181b;
+  border: 1px solid #27272a;
+  border-radius: 12px;
+  padding: 40px 36px;
+  max-width: 480px;
+  width: 100%;
+  text-align: center;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  animation: fadeUp .3s ease both;
+}

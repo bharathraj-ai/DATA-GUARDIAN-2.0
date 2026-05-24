@@ -76,19 +76,23 @@ export async function updateFile(
 
         // 7. Snapshot current version for rollback support (only if inline content exists)
         if (fileRecord.encryptedContent) {
-            await prisma.fileVersion.create({
-                data: {
-                    fileId: fileRecord.id,
-                    versionNumber: fileRecord.version,
-                    encryptedContent: fileRecord.encryptedContent,
-                    iv: fileRecord.iv!,
-                    authTag: fileRecord.authTag!,
-                    encryptedDek: (fileRecord as any).encryptedDek,
-                    fileSize: fileRecord.fileSize,
-                    changeType: 'annotation',
-                    changeDescription: `Snapshot before update from version ${fileRecord.version}`,
-                },
-            });
+            try {
+                await prisma.fileVersion.create({
+                    data: {
+                        fileId: fileRecord.id,
+                        versionNumber: fileRecord.version,
+                        encryptedContent: fileRecord.encryptedContent,
+                        iv: fileRecord.iv!,
+                        authTag: fileRecord.authTag!,
+                        encryptedDek: (fileRecord as any).encryptedDek,
+                        fileSize: fileRecord.fileSize,
+                        changeType: 'annotation',
+                        changeDescription: `Snapshot before update from version ${fileRecord.version}`,
+                    },
+                });
+            } catch (err: any) {
+                if (err.code !== 'P2002') throw err; // Ignore unique constraint if snapshot already taken
+            }
         }
 
         // 8. Encrypt new content with fresh DEK (per-file key rotation on every save)

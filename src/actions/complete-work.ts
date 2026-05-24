@@ -45,8 +45,10 @@ export async function completeWork(token: string): Promise<CompleteWorkResult> {
             try {
                 let buffer: Buffer | null = null;
 
+                const hasEncryption = file.iv && file.authTag;
+
                 if (file.encryptedContent) {
-                    // Inline encrypted content — decrypt it
+                    // Inline encrypted content (latest draft) — decrypt it
                     const dek = (file as any).encryptedDek
                         ? decryptDek((file as any).encryptedDek)
                         : undefined;
@@ -56,34 +58,177 @@ export async function completeWork(token: string): Promise<CompleteWorkResult> {
                         file.authTag!,
                         dek
                     );
+                    console.log(`[Complete Work] Decrypted inline file ${file.fileName}: ${buffer.length} bytes`);
                 } else if ((file as any).mongoFileId) {
                     // Mongo-backed file — download from GridFS
                     const mongoFile = await prisma.mongoFile.findUnique({
                         where: { id: (file as any).mongoFileId },
-                        select: { gridFSId: true },
+                        select: { gridFSId: true, status: true },
                     });
 
                     if (mongoFile) {
-                        const encryptedBuffer = await downloadFromMongo(mongoFile.gridFSId);
-                        const dek = (file as any).encryptedDek ? decryptDek((file as any).encryptedDek) : undefined;
-                        buffer = decryptBuffer(
-                            encryptedBuffer,
-                            file.iv!,
-                            file.authTag!,
-                            dek
-                        );
+                        const downloadedBuffer = await downloadFromMongo(mongoFile.gridFSId);
+                        console.log(`[Complete Work] Downloaded GridFS file ${file.fileName}: ${downloadedBuffer.length} bytes, hasEncryption=${!!hasEncryption}, status=${mongoFile.status}`);
+
+                        if (hasEncryption) {
+                            // Original upload was encrypted — decrypt it
+                            const dek = (file as any).encryptedDek ? decryptDek((file as any).encryptedDek) : undefined;
+                            buffer = decryptBuffer(
+                                downloadedBuffer,
+                                file.iv!,
+                                file.authTag!,
+                                dek
+                            );
+                        } else {
+                            // submitFinal uploads raw unencrypted to GridFS — use as-is
+                            buffer = downloadedBuffer;
+                        }
+                    } else {
+                        console.warn(`[Complete Work] MongoFile record not found for ${file.fileName} (mongoFileId: ${(file as any).mongoFileId})`);
                     }
+                } else {
+                    console.warn(`[Complete Work] File ${file.fileName} has no content (no encryptedContent, no mongoFileId)`);
                 }
 
                 if (buffer) {
+                    // SAFETY NET: Detect and repair files corrupted by the old JSON.stringify bug.
+                    // Previously, the editor saved its internal state (pages/elements/coordinates)
+                    // as JSON instead of proper file content. This detects that pattern and
+                    // extracts the actual content from the JSON wrapper.
+                    let finalBuffer = buffer;
+                    let finalContentType = file.fileType;
+
+                    try {
+                        const textContent = buffer.toString('utf-8');
+                        // Only attempt JSON parse for text-like MIME types or small files
+                        // that could plausibly be wrapped editor state
+                        if (textContent.startsWith('{"type":"') && textContent.includes('"pages":[')) {
+                            const parsed = JSON.parse(textContent);
+                            if (parsed && Array.isArray(parsed.pages)) {
+                                console.warn(`[Complete Work] Detected JSON-wrapped editor state for file ${file.fileName} — extracting real content (type: ${parsed.type}, pages: ${parsed.pages.length})`);
+
+                                // Extract content in the SAME format the owner originally uploaded
+                                if (parsed.type === 'pdf') {
+                                    // PDF: render all pages with all elements
+                                    const { PDFDocument, rgb, StandardFonts } = await import('pdf-lib');
+                                    const pdfDoc = await PDFDocument.create();
+
+                                    for (const page of parsed.pages) {
+                                        const pdfPage = pdfDoc.addPage([page.width || 794, page.height || 1122]);
+                                        pdfPage.drawRectangle({ x: 0, y: 0, width: page.width || 794, height: page.height || 1122, color: rgb(1, 1, 1) });
+
+                                        for (const el of (page.elements || [])) {
+                                            if (el.type === 'text') {
+                                                try {
+                                                    const font = await pdfDoc.embedFont(el.bold ? StandardFonts.HelveticaBold : StandardFonts.Helvetica);
+                                                    const fs = el.size || 12;
+                                                    pdfPage.drawText(el.content || '', {
+                                                        x: el.x || 0,
+                                                        y: Math.max(0, (page.height || 1122) - (el.y || 0) - fs),
+                                                        size: fs, font, color: rgb(0, 0, 0),
+                                                    });
+                                                } catch { }
+                                            } else if (el.type === 'image' && el.src) {
+                                                try {
+                                                    const matches = el.src.match(/^data:([^;]+);base64,(.+)$/);
+                                                    if (matches) {
+                                                        const imgBytes = Buffer.from(matches[2], 'base64');
+                                                        const img = matches[1].includes('png')
+                                                            ? await pdfDoc.embedPng(imgBytes)
+                                                            : await pdfDoc.embedJpg(imgBytes);
+                                                        pdfPage.drawImage(img, {
+                                                            x: el.x || 0,
+                                                            y: (page.height || 1122) - (el.y || 0) - (el.height || 150),
+                                                            width: el.width || 200,
+                                                            height: el.height || 150,
+                                                        });
+                                                    }
+                                                } catch { }
+                                            } else if (el.type === 'table') {
+                                                try {
+                                                    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+                                                    const { rows = [], colW = 100, rowH = 24 } = el;
+                                                    for (let r = 0; r < rows.length; r++) {
+                                                        for (let c = 0; c < (rows[r] || []).length; c++) {
+                                                            const cx = (el.x || 0) + c * colW;
+                                                            const cy = (page.height || 1122) - (el.y || 0) - (r + 1) * rowH;
+                                                            pdfPage.drawRectangle({
+                                                                x: cx, y: cy, width: colW, height: rowH,
+                                                                borderColor: rgb(0.7, 0.7, 0.7), borderWidth: 0.5,
+                                                                color: r === 0 ? rgb(0.88, 0.88, 0.95) : rgb(1, 1, 1),
+                                                            });
+                                                            pdfPage.drawText(String(rows[r][c] || ''), {
+                                                                x: cx + 4, y: cy + 6, size: 9, font, color: rgb(0, 0, 0),
+                                                            });
+                                                        }
+                                                    }
+                                                } catch { }
+                                            }
+                                        }
+                                    }
+
+                                    const pdfBytes = await pdfDoc.save();
+                                    finalBuffer = Buffer.from(pdfBytes);
+                                    finalContentType = 'application/pdf';
+
+                                } else if (parsed.type === 'csv' || parsed.type === 'xlsx' || parsed.type === 'xls') {
+                                    // Spreadsheet: extract ALL table rows from ALL pages
+                                    const allRows: any[][] = [];
+                                    for (const page of parsed.pages) {
+                                        for (const el of (page.elements || [])) {
+                                            if (el.type === 'table' && el.rows) {
+                                                allRows.push(...el.rows);
+                                            }
+                                        }
+                                    }
+                                    if (allRows.length > 0) {
+                                        const XLSX = await import('xlsx');
+                                        const worksheet = XLSX.utils.aoa_to_sheet(allRows);
+                                        if (parsed.type === 'csv') {
+                                            const csvStr = XLSX.utils.sheet_to_csv(worksheet);
+                                            finalBuffer = Buffer.from(csvStr, 'utf-8');
+                                            finalContentType = 'text/csv';
+                                        } else {
+                                            const workbook = XLSX.utils.book_new();
+                                            XLSX.utils.book_append_sheet(workbook, worksheet, 'Sheet1');
+                                            const buf = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+                                            finalBuffer = Buffer.from(buf);
+                                            finalContentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+                                        }
+                                    }
+                                } else if (parsed.type === 'image') {
+                                    // Image: extract image binary from base64 data URL
+                                    const imgEl = parsed.pages.flatMap((p: any) => p.elements || []).find((e: any) => e.type === 'image' && e.src);
+                                    if (imgEl?.src) {
+                                        const matches = imgEl.src.match(/^data:([^;]+);base64,(.+)$/);
+                                        if (matches) {
+                                            finalBuffer = Buffer.from(matches[2], 'base64');
+                                            finalContentType = matches[1];
+                                        }
+                                    }
+                                } else {
+                                    // Text (TXT and other): join ALL text elements across ALL pages
+                                    const text = parsed.pages
+                                        .flatMap((p: any) => (p.elements || []).filter((e: any) => e.type === 'text').map((e: any) => e.content))
+                                        .join('\n');
+                                    finalBuffer = Buffer.from(text, 'utf-8');
+                                    finalContentType = 'text/plain';
+                                }
+                            }
+                        }
+                    } catch {
+                        // Not JSON or parse failed — use original buffer (correct behavior)
+                    }
+
                     attachments.push({
                         filename: file.fileName,
-                        content: buffer,
-                        contentType: file.fileType,
+                        content: finalBuffer,
+                        contentType: finalContentType,
                     });
+                    console.log(`[Complete Work] Prepared attachment: ${file.fileName} (${finalBuffer.length} bytes, ${finalContentType})`);
                 }
             } catch (err) {
-                console.error(`[Complete Work] Failed to retrieve file ${file.id}:`, err);
+                console.error(`[Complete Work] Failed to retrieve file ${file.id} (${file.fileName}):`, err);
                 // Continue with other files — don't fail the entire operation
             }
         }

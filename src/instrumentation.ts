@@ -22,8 +22,8 @@ export async function register() {
         // Initial cleanup after 30 seconds (let the server stabilize first)
         setTimeout(async () => {
             try {
-                const { cleanupExpiredData } = await import('@/actions/cleanup');
-                const result = await cleanupExpiredData();
+                const { executeCleanup } = await import('@/lib/cleanup-core');
+                const result = await executeCleanup();
                 if (result.deletedLinks > 0) {
                     console.log(
                         `[CLEANUP] Initial purge: ${result.deletedLinks} links, ` +
@@ -40,8 +40,8 @@ export async function register() {
         // Recurring cleanup every 10 minutes
         setInterval(async () => {
             try {
-                const { cleanupExpiredData } = await import('@/actions/cleanup');
-                const result = await cleanupExpiredData();
+                const { executeCleanup } = await import('@/lib/cleanup-core');
+                const result = await executeCleanup();
                 if (result.deletedLinks > 0) {
                     console.log(
                         `[CLEANUP] Scheduled purge: ${result.deletedLinks} links, ` +

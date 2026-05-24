@@ -137,7 +137,7 @@ export const authOptions: NextAuthOptions = {
                 // NextAuth PrismaAdapter already fetches the full user object from the database.
                 // We can access custom fields directly without an extra database query.
                 session.user.role = normalizeRole((user as { role?: string }).role);
-                session.user.roleSelected = (user as any).roleSelected ?? false;
+                session.user.roleSelected = (user as { roleSelected?: boolean }).roleSelected ?? false;
             }
             return session;
         },
