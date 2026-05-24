@@ -87,7 +87,7 @@ export async function submitFinal(
                 },
             });
 
-            // Update UserFile metadata (no encrypted content)
+            // Update UserFile metadata — clear encryption fields since Mongo stores raw
             await prisma.userFile.update({
                 where: { id: fileId },
                 data: {
@@ -96,7 +96,12 @@ export async function submitFinal(
                     submittedAt: new Date(),
                     submittedBy: vendorEmail,
                     editingLocked: true,
-                    version: { increment: 1 }
+                    version: { increment: 1 },
+                    // Clear old inline encryption metadata — the Mongo file is stored raw
+                    encryptedContent: null,
+                    iv: null,
+                    authTag: null,
+                    encryptedDek: null,
                 } as any
             });
         } else {
@@ -124,37 +129,15 @@ export async function submitFinal(
 
         console.log(`[Submit] DB Update successful for ${fileId}`);
 
-        // 5. Revoke vendor access for this specific link after final submission
-        if (authResult.context.effectiveEmail) {
-            const lowerEmail = authResult.context.effectiveEmail.toLowerCase();
-
-            // Revoke VendorAccess
-            const revokedVA = await prisma.vendorAccess.updateMany({
-                where: {
-                    secureLinkId: authResult.context.secureLink.id,
-                    email: { mode: 'insensitive', equals: lowerEmail }
-                },
-                data: { isRevoked: true }
-            });
-
-            // Revoke LinkAccess
-            const revokedLA = await prisma.linkAccess.updateMany({
-                where: {
-                    secureLinkId: authResult.context.secureLink.id,
-                    vendorEmail: { mode: 'insensitive', equals: lowerEmail }
-                },
-                data: { isUsed: false }
-            });
-
-            console.log(`[Submit] Revoked access for ${lowerEmail}. VendorAccess: ${revokedVA.count}, LinkAccess: ${revokedLA.count}`);
-        }
+        // 5. Vendor access is intentionally NOT revoked after final submission
+        // (Access remains active per business logic change)
 
         // 6. Audit Log
         await prisma.auditLog.create({
             data: {
                 action: 'VENDOR_SUBMITTED_FINAL',
                 linkId: authResult.context.secureLink.id,
-                reason: `Vendor submitted final document: ${uploadedFile.name}. Access revoked.`,
+                reason: `Vendor submitted final document: ${uploadedFile.name}. Access preserved.`,
                 metadata: JSON.stringify({
                     fileId,
                     submittedBy: vendorEmail,
@@ -165,6 +148,9 @@ export async function submitFinal(
         });
 
         console.log(`[Submit] Audit log created. Submission complete.`);
+
+        // 7. Owner notification removed — submit only commits the change.
+        // No email is sent and no access is revoked.
 
         return { success: true };
     } catch (error) {

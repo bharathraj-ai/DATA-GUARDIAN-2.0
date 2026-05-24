@@ -138,3 +138,21 @@ export async function downloadFromMongo(gridFSId: string): Promise<Buffer> {
     downloadStream.on('end', () => resolve(Buffer.concat(chunks)));
   });
 }
+
+/**
+ * Delete a file from GridFS by its gridFSId.
+ * Silently succeeds if the file doesn't exist (idempotent).
+ */
+export async function deleteFromMongo(gridFSId: string): Promise<void> {
+  try {
+    const bucket = await getGridFSBucket();
+    await bucket.delete(new ObjectId(gridFSId));
+  } catch (err: any) {
+    // FileNotFound is expected if already cleaned up — ignore it
+    if (err?.message?.includes('FileNotFound') || err?.code === 'FileNotFound' || /file not found/i.test(err?.message)) {
+      return;
+    }
+    console.error(`[Mongo] Failed to delete GridFS file ${gridFSId}:`, err);
+    throw err;
+  }
+}

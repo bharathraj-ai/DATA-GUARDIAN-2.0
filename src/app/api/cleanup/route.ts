@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { cleanupExpiredData } from '@/actions/cleanup';
+import { executeCleanup } from '@/lib/cleanup-core';
 import { authorizeCronRequest } from '@/lib/security/cron-auth';
 
 export const dynamic = 'force-dynamic';
@@ -13,7 +13,7 @@ export async function GET(request: Request) {
     );
   }
 
-  const result = await cleanupExpiredData();
+  const result = await executeCleanup();
 
   const headers = {
     'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
@@ -28,6 +28,7 @@ export async function GET(request: Request) {
         deletedLinks: result.deletedLinks,
         deletedUserData: result.deletedUserData,
         deletedFiles: result.deletedFiles,
+        deletedMongoFiles: result.deletedMongoFiles,
         deletedAuditLogs: result.deletedAuditLogs,
       },
       { headers },

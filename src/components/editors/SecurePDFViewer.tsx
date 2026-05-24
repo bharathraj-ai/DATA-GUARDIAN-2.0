@@ -22,39 +22,42 @@ export default function SecurePDFViewer({ file, token, onClose }: SecurePDFViewe
 
     return (
         <SecurityShield token={token} maxTabSwitches={3} enableWatermark={true}>
-            <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', background: '#0f1117' }}>
+            <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', background: '#09090b' }}>
                 <div style={{ 
                     padding: '12px 20px', 
-                    background: 'linear-gradient(90deg, #1e1b4b, #1a1a2e)', 
-                    borderBottom: '1px solid rgba(99,102,241,0.2)', 
+                    background: '#09090b', 
+                    borderBottom: '1px solid #27272a', 
                     display: 'flex', 
                     alignItems: 'center', 
                     justifyContent: 'space-between', 
                     gap: '8px', 
                     flexShrink: 0 
                 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                         {onClose && (
                             <button 
                                 onClick={onClose}
                                 style={{
-                                    background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff',
+                                    background: '#27272a', border: '1px solid #3f3f46', color: '#d4d4d8',
                                     padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px',
-                                    fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px'
+                                    fontWeight: 500, display: 'flex', alignItems: 'center', gap: '6px',
+                                    fontFamily: "'Inter', sans-serif"
                                 }}
                             >
-                                &larr; Back
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5"/><polyline points="12 19 5 12 12 5"/></svg>
+                                Back
                             </button>
                         )}
-                        <span style={{ color: '#e2e8f0', fontSize: '14px', fontWeight: 600 }}>
+                        <span style={{ color: '#d4d4d8', fontSize: '14px', fontWeight: 500, fontFamily: "'Inter', sans-serif" }}>
                             {file.name}
                         </span>
-                        <span style={{ fontSize: '11px', background: 'rgba(239,68,68,0.1)', color: '#ef4444', padding: '3px 8px', borderRadius: '12px', border: '1px solid rgba(239,68,68,0.2)', fontWeight: 700 }}>
-                            VIEW ONLY PDF
+                        <span style={{ fontSize: '10px', background: 'rgba(220,38,38,0.1)', color: '#dc2626', padding: '3px 8px', borderRadius: '4px', border: '1px solid rgba(220,38,38,0.2)', fontWeight: 600, letterSpacing: '0.04em', fontFamily: "'Inter', sans-serif" }}>
+                            VIEW ONLY
                         </span>
                     </div>
-                    <div style={{ color: '#94a3b8', fontSize: '12px' }}>
-                        🔒 Secure Preview Active
+                    <div style={{ color: '#52525b', fontSize: '12px', fontFamily: "'Inter', sans-serif", display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                        Secure Preview
                     </div>
                 </div>
                 <div style={{ flex: 1, position: 'relative' }}>

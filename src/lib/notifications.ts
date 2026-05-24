@@ -18,7 +18,8 @@ export type NotificationEvent =
     | 'REVOKED'          // Link manually revoked by owner
     | 'DEVICE_MISMATCH'  // Anti-phishing: Access from different device
     | 'FAILED_ATTEMPTS'  // Anti-phishing: OTP failure (revoked immediately)
-    | 'FORWARDED_LINK';  // Zero Trust: Link opened by wrong email recipient
+    | 'FORWARDED_LINK'   // Zero Trust: Link opened by wrong email recipient
+    | 'VENDOR_SUBMITTED'; // Vendor submitted final edited document
 
 interface NotificationPayload {
     email: string;
@@ -31,6 +32,8 @@ interface NotificationPayload {
         expiryTime?: Date;
         failedAttempts?: number;   // for FAILED_ATTEMPTS alerts
         intendedRecipient?: string; // for FORWARDED_LINK alerts
+        vendorEmail?: string;       // for VENDOR_SUBMITTED
+        fileName?: string;          // for VENDOR_SUBMITTED
     };
 }
 
@@ -107,6 +110,15 @@ function createEmailTemplate(payload: NotificationPayload): { subject: string; h
             const intended = metadata?.intendedRecipient || 'the intended recipient';
             message = `Someone tried to access your secure link at ${formattedTime}, but their email didn't match the intended recipient (${intended}). Access was DENIED to protect your data.`;
             iconColor = '#dc2626'; // dark red
+            break;
+
+        case 'VENDOR_SUBMITTED':
+            subject = '✅ Data Guardian: Document Submitted';
+            heading = 'Vendor Submitted Edited Document';
+            const vendorLabel = metadata?.vendorEmail || 'A vendor';
+            const fileLabel = metadata?.fileName || 'a document';
+            message = `${vendorLabel} has finished editing and submitted the final version of "${fileLabel}" at ${formattedTime}. You can review the submitted document in your dashboard.`;
+            iconColor = '#10b981'; // green
             break;
     }
 
@@ -346,6 +358,25 @@ export async function notifyForwardedLinkAttempt(
         tokenId,
         timestamp: new Date(),
         metadata: { intendedRecipient }
+    });
+}
+
+/**
+ * Helper: Send vendor submitted notification
+ * Notifies the owner that a vendor has finished editing and submitted the document
+ */
+export async function notifyVendorSubmitted(
+    email: string,
+    tokenId: string,
+    vendorEmail: string,
+    fileName: string
+): Promise<void> {
+    await sendAccessNotification({
+        email,
+        event: 'VENDOR_SUBMITTED',
+        tokenId,
+        timestamp: new Date(),
+        metadata: { vendorEmail, fileName }
     });
 }
 
