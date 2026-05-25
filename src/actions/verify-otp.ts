@@ -186,6 +186,17 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
                     errorType: 'EMAIL_MISMATCH',
                 };
             }
+        } else if (secureLink.VendorAccess && secureLink.VendorAccess.length > 0) {
+            // If email is not provided, try to find the vendor by matching the OTP hash
+            for (const v of secureLink.VendorAccess) {
+                if (v.otpHash && await verifyOTPHash(otp, v.otpHash)) {
+                    vendor = v;
+                    break;
+                }
+            }
+        }
+
+        if (vendor) {
             if (vendor.isRevoked) {
                 return {
                     success: false,
@@ -193,13 +204,27 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
                     errorType: 'REVOKED',
                 };
             }
-            if (vendor.loginCount >= vendor.maxLogins) {
+
+            if (vendor.status === 'completed') {
                 return {
                     success: false,
-                    error: `You have reached the maximum number of logins (${vendor.maxLogins}) for this session.`,
+                    error: 'This task has already been completed.',
                     errorType: 'DENIED',
                 };
             }
+
+            if (vendor.status === 'active' && vendor.activeSessionId) {
+                const fiveMinsAgo = new Date(Date.now() - 5 * 60000);
+                if (vendor.lastSeenAt && vendor.lastSeenAt > fiveMinsAgo) {
+                    return {
+                        success: false,
+                        error: 'Another active session is currently running in a different tab or device.',
+                        errorType: 'DENIED',
+                    };
+                }
+            }
+
+            // Login limit removed as requested by user
         } else if (secureLink.LinkAccess && secureLink.LinkAccess.length > 0) {
             if (!userEmail) {
                 await prisma.auditLog.create({
@@ -263,53 +288,10 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
             };
         }
 
-        // ANTI-PHISHING: Check if OTP was already verified (single-use enforcement)
-        if ((!vendor && !vendorAccess && secureLink.otpVerifiedAt) || (vendorAccess && vendorAccess.otpVerifiedAt)) {
-            await prisma.auditLog.create({
-                data: {
-                    action: 'DENIED',
-                    linkId: secureLink.id,
-                    reason: 'OTP reuse attempt blocked',
-                    metadata: JSON.stringify({
-                        type: 'otp_reuse',
-                        originalVerifyTime: (vendorAccess?.otpVerifiedAt || secureLink.otpVerifiedAt)?.toISOString()
-                    })
-                }
-            });
+        // Single-use OTP check removed to allow reuse
 
-            return {
-                success: false,
-                error: 'This OTP has already been used. Please request a new secure link.',
-                errorType: 'USED'
-            };
-        }
-
-        // ANTI-PHISHING: 5-minute OTP verification window
+        // OTP verification window removed to allow infinite reuse as requested by user
         const now = new Date();
-        if (otpFirstAttemptAt) {
-            const windowExpiry = new Date(
-                otpFirstAttemptAt.getTime() + OTP_VERIFY_WINDOW_MINUTES * 60 * 1000
-            );
-            if (now > windowExpiry) {
-                await prisma.auditLog.create({
-                    data: {
-                        action: 'DENIED',
-                        linkId: secureLink.id,
-                        reason: 'OTP verification window expired',
-                        metadata: JSON.stringify({
-                            type: 'otp_window_expired',
-                            windowMinutes: OTP_VERIFY_WINDOW_MINUTES
-                        })
-                    }
-                });
-
-                return {
-                    success: false,
-                    error: `OTP verification window expired (${OTP_VERIFY_WINDOW_MINUTES} minutes). Please request a new secure link.`,
-                    errorType: 'EXPIRED'
-                };
-            }
-        }
 
         // 5. SECURITY: Check device binding
         // If deviceHash is set (link was previously used), ensuring it's the same device
@@ -469,7 +451,6 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
                     where: { id: vendorAccess.id },
                     data: {
                         ...updateData,
-                        otpHash: null,  // SECURITY: Clear OTP hash — single-use enforcement
                     },
                 });
             } else {
@@ -477,17 +458,26 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
                     where: { id: secureLink.id },
                     data: {
                         ...updateData,
-                        otpHash: '',  // SECURITY: Clear OTP hash — single-use enforcement (required field, use empty string)
                     },
                 });
             }
 
             if (vendor) {
+                let totalBreakDuration = vendor.totalBreakDuration;
+                if (vendor.status === 'break' && vendor.breakStartedAt) {
+                    totalBreakDuration += Math.floor((now.getTime() - vendor.breakStartedAt.getTime()) / 1000);
+                }
+
                 await tx.vendorAccess.update({
                     where: { id: vendor.id },
                     data: {
-                        loginCount: { increment: 1 },
-                        otpHash: null, // SECURITY: Clear OTP hash — single-use enforcement
+                        loginCount: vendor.status === 'break' ? vendor.loginCount : { increment: 1 },
+                        status: 'active',
+                        breakStartedAt: null,
+                        totalBreakDuration,
+                        activeSessionId: sessionId,
+                        lastLoginAt: now,
+                        lastSeenAt: now
                     }
                 });
             }

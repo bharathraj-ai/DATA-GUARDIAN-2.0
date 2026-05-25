@@ -245,8 +245,7 @@ export async function completeWork(token: string): Promise<CompleteWorkResult> {
                 console.log(`[Complete Work] Delivered ${attachments.length} file(s) to owner: ${ownerEmail.substring(0, 3)}***`);
             } catch (emailErr) {
                 console.error('[Complete Work] Email delivery failed:', emailErr);
-                // Don't block the revocation — the files are still in DB if email fails
-                // Owner can still access them before cleanup runs
+                return { success: false, error: 'Failed to deliver files to the owner via email. Please try again. Your work has been saved.' };
             }
         } else {
             console.log('[Complete Work] No files to deliver.');

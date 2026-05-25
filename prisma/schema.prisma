@@ -74,6 +74,12 @@ model SecureLink {
   @@index([ownerToken])
   @@index([token])
 }
+enum VendorStatus {
+  active
+  break
+  completed
+  expired
+}
 
 model VendorAccess {
   id             String     @id @default(cuid())
@@ -86,6 +92,20 @@ model VendorAccess {
   failedAttempts Int        @default(0)
   isRevoked      Boolean    @default(false)
   createdAt      DateTime   @default(now())
+
+  // Session & Resume Fields
+  status             VendorStatus @default(active)
+  lastSavedWork      Json?
+  resumePoint        Json?
+  lastCommitAt       DateTime?
+  breakStartedAt     DateTime?
+  currentPage        Int        @default(1)
+  activeWorkDuration Int        @default(0)
+  totalBreakDuration Int        @default(0)
+  draftVersion       Int        @default(1)
+  activeSessionId    String?
+  lastLoginAt        DateTime?
+  lastSeenAt         DateTime?
 
   SecureLink     SecureLink @relation(fields: [secureLinkId], references: [id], onDelete: Cascade)
 
