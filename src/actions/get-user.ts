@@ -44,7 +44,9 @@ export type MaskedUserData = {
     ownerName: string | null;
     ownerEmail: string | null;
     isOwner: boolean;
-
+    vendorStatus?: string;
+    lastSavedWork?: any;
+    resumePoint?: any;
 };
 
 export type GetUserDataResult = {
@@ -83,6 +85,7 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
             where: { token },
             include: {
                 UserData: true,
+                VendorAccess: true,
                 UserFile: {
                     select: {
                         id: true,
@@ -134,6 +137,13 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
             };
         }
 
+        let vendorAccess = null;
+        if (authResult.context.effectiveEmail && !authResult.context.isOwner) {
+            vendorAccess = (fullLink as any).VendorAccess?.find(
+                (v: any) => v.email.toLowerCase() === authResult.context.effectiveEmail!.toLowerCase()
+            );
+        }
+
         return {
             success: true,
             data: {
@@ -152,7 +162,9 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
                 ownerName: fullLink.User?.name || null,
                 ownerEmail: fullLink.User?.email || null,
                 isOwner: authResult.context.isOwner,
-
+                vendorStatus: vendorAccess?.status,
+                lastSavedWork: vendorAccess?.lastSavedWork,
+                resumePoint: vendorAccess?.resumePoint,
             },
         };
     } catch (error) {
