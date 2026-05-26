@@ -68,14 +68,20 @@ export async function getFilePreview(token: string, fileId: string): Promise<Fil
                     return { success: false, error: 'File storage record not found' };
                 }
 
-                const encryptedBuffer = await downloadFromMongo(mongoFileRecord.gridFSId);
-                const dek = (fileRecord as any).encryptedDek ? decryptDek((fileRecord as any).encryptedDek) : undefined;
-                buffer = decryptBuffer(
-                    encryptedBuffer,
-                    fileRecord.iv!,
-                    fileRecord.authTag!,
-                    dek
-                );
+                const rawBuffer = await downloadFromMongo(mongoFileRecord.gridFSId);
+                
+                if (fileRecord.iv && fileRecord.authTag) {
+                    const dek = (fileRecord as any).encryptedDek ? decryptDek((fileRecord as any).encryptedDek) : undefined;
+                    buffer = decryptBuffer(
+                        rawBuffer,
+                        fileRecord.iv,
+                        fileRecord.authTag,
+                        dek
+                    );
+                } else {
+                    // Mongo stores raw if no inline encryption metadata exists
+                    buffer = rawBuffer;
+                }
             } catch (e) {
                 console.error('[PREVIEW] Mongo download/decrypt failed:', e);
                 return { success: false, error: 'Failed to retrieve file for preview' };

@@ -8,15 +8,6 @@ export function CompleteWorkButton({ token }: { token: string }) {
     const [isSuccess, setIsSuccess] = useState(false);
 
     const handleComplete = async () => {
-        if (!confirm(
-            'Are you sure you have completed your work?\n\n' +
-            '• All edited files will be automatically sent to the owner\'s email\n' +
-            '• Your access will be permanently revoked\n' +
-            '• This action cannot be undone'
-        )) {
-            return;
-        }
-
         setIsLoading(true);
         try {
             const res = await completeWork(token);
