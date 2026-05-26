@@ -13,8 +13,8 @@ export interface DashboardLink {
     isRevoked: boolean;
     createdAt: Date;
     allowedVendorEmail: string | null;
-    vendorAccess: { email: string; level: number }[];
-    status: 'active' | 'expired' | 'revoked' | 'used';
+    vendorAccess: { email: string; level: number; status?: string }[];
+    status: 'active' | 'expired' | 'revoked' | 'used' | 'break';
     /** Legacy field — OTPs are never persisted; always null. */
     otp: null;
     // Enhanced fields
@@ -73,6 +73,7 @@ export async function getOwnedLinks(userId: string): Promise<DashboardLink[]> {
                     select: {
                         email: true,
                         level: true,
+                        status: true,
                     },
                     orderBy: {
                         level: 'asc',
@@ -181,6 +182,7 @@ export async function getReceivedLinks(email: string): Promise<DashboardLink[]> 
                     select: {
                         email: true,
                         level: true,
+                        status: true,
                     },
                     orderBy: {
                         level: 'asc',
@@ -216,6 +218,14 @@ export async function getReceivedLinks(email: string): Promise<DashboardLink[]> 
             // (Since the query filters by their email, LinkAccess[0] is guaranteed to be theirs if it exists).
             const vendorIsUsed = link.LinkAccess?.[0]?.isUsed ?? link.isUsed;
 
+            let finalStatus = getStatus({ ...link, isUsed: vendorIsUsed }) as any;
+            const vendorAccess = link.VendorAccess?.find((v: any) => v.email.toLowerCase() === email.toLowerCase());
+            
+            // If they are on a break, override the status so they can resume
+            if ((finalStatus === 'used' || finalStatus === 'active') && vendorAccess?.status === 'break') {
+                finalStatus = 'break';
+            }
+
             return {
                 ...link,
                 allowedVendorEmail: primaryVendor,
@@ -223,7 +233,7 @@ export async function getReceivedLinks(email: string): Promise<DashboardLink[]> 
                 vendorAccess: link.VendorAccess || [],
                 files: link.UserFile,
                 auditLogs: link.AuditLog,
-                status: getStatus({ ...link, isUsed: vendorIsUsed }),
+                status: finalStatus,
                 fileCount: link.UserFile.length,
                 otp: null,
             } as DashboardLink;
