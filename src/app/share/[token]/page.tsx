@@ -18,7 +18,7 @@ export default function SharePage({ params }: SharePageProps) {
     const router = useRouter();
     const { data: sessionData, status } = useSession();
     const [token, setToken] = useState<string>('');
-    const [step, setStep] = useState<'email' | 'otp'>('email');
+    const [step, setStep] = useState<'email' | 'otp'>('otp');
     const [email, setEmail] = useState<string>('');
     const [otp, setOtp] = useState<string[]>(['', '', '', '', '', '']);
     const [state, setState] = useState<VerificationState>('idle');
@@ -42,11 +42,10 @@ export default function SharePage({ params }: SharePageProps) {
         }
     }, []);
 
-    // Auto-detect session email to auto-fill and skip to OTP step
+    // Auto-detect session email to auto-fill
     useEffect(() => {
         if (accessState === 'allowed' && sessionData?.user?.email) {
             setEmail(sessionData.user.email);
-            setStep('otp');
         }
     }, [accessState, sessionData]);
 
@@ -370,7 +369,7 @@ export default function SharePage({ params }: SharePageProps) {
     }
 
     // Dynamic Step Resolver to prevent rendering flash/race conditions
-    const isStepOtp = step === 'otp' || (status === 'authenticated' && !!sessionData?.user?.email);
+    const isStepOtp = step === 'otp';
 
     // ACCESS GRANTED — Show OTP form (only reaches here if accessState === 'allowed')
     return (
@@ -489,6 +488,7 @@ export default function SharePage({ params }: SharePageProps) {
                                 />
                             ))}
                         </div>
+                        {error && <div style={{ color: '#ef4444', fontSize: '0.875rem', marginTop: '12px', textAlign: 'center' }}>{error}</div>}
                         
                         <button
                             onClick={handleSubmit}

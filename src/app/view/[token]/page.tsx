@@ -7,6 +7,8 @@ import { ChatPanel } from '@/components/view/ChatPanel';
 import { FileList } from '@/components/view/FileList';
 import { SecureViewWrapper } from '@/components/view/SecureViewWrapper';
 import { CompleteWorkButton } from '@/components/view/CompleteWorkButton';
+import { BreakButton } from '@/components/view/BreakButton';
+import { VendorAutoSave } from '@/components/view/VendorAutoSave';
 
 export const metadata = {
     title: 'Secure View | Data Guardian',
@@ -118,8 +120,10 @@ export default async function ViewPage({ params }: { params: Promise<{ token: st
                     </div>
 
                     {!data.isOwner && (
-                        <div style={{ padding: '0 24px', marginBottom: '24px' }}>
+                        <div style={{ padding: '0 24px', marginBottom: '24px', display: 'flex', flexDirection: 'column' }}>
                             <CompleteWorkButton token={cleanToken} />
+                            <BreakButton token={cleanToken} />
+                            <VendorAutoSave token={cleanToken} />
                         </div>
                     )}
 

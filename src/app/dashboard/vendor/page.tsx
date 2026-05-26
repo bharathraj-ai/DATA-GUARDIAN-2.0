@@ -11,7 +11,7 @@ export default function VendorDashboardPage() {
     const { data: session, status: sessionStatus } = useSession();
     const [links, setLinks] = useState<DashboardLink[]>([]);
     const [isLoading, setIsLoading] = useState(true);
-    const [filter, setFilter] = useState<'all' | 'active' | 'expired' | 'revoked' | 'used'>('all');
+    const [filter, setFilter] = useState<'all' | 'active' | 'expired' | 'revoked' | 'used' | 'break'>('all');
 
     // Redirect to sign-in if not authenticated
     useEffect(() => {
@@ -72,6 +72,7 @@ export default function VendorDashboardPage() {
             expired: { bg: 'rgba(239, 68, 68, 0.15)', color: '#ef4444', label: '🔴 Expired' },
             revoked: { bg: 'rgba(239, 68, 68, 0.15)', color: '#ef4444', label: '⛔ Revoked' },
             used: { bg: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6', label: '✅ Viewed' },
+            break: { bg: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b', label: '⏸️ On Break' },
         };
         const s = styles[status] || styles.expired;
         return (
@@ -103,6 +104,7 @@ export default function VendorDashboardPage() {
         expired: links.filter(l => l.status === 'expired').length,
         revoked: links.filter(l => l.status === 'revoked').length,
         used: links.filter(l => l.status === 'used').length,
+        break: links.filter(l => l.status === 'break').length,
     };
 
     return (
@@ -139,6 +141,7 @@ export default function VendorDashboardPage() {
                             {[
                                 { label: 'Total Received', value: counts.all, color: 'var(--accent-cyan)' },
                                 { label: 'Ready to View', value: counts.active, color: '#22c55e' },
+                                { label: 'On Break', value: counts.break, color: '#f59e0b' },
                                 { label: 'Viewed', value: counts.used, color: '#3b82f6' },
                                 { label: 'Expired', value: counts.expired, color: '#ef4444' },
                             ].map((stat) => (
@@ -155,7 +158,7 @@ export default function VendorDashboardPage() {
 
                         {/* Filter */}
                         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '24px' }}>
-                            {(['all', 'active', 'used', 'expired', 'revoked'] as const).map((f) => (
+                            {(['all', 'active', 'break', 'used', 'expired', 'revoked'] as const).map((f) => (
                                 <button
                                     key={f}
                                     onClick={() => setFilter(f)}
@@ -236,6 +239,14 @@ export default function VendorDashboardPage() {
                                                         style={{ fontSize: '0.8rem' }}
                                                     >
                                                         🔓 View Secure Data
+                                                    </Link>
+                                                ) : link.status === 'break' ? (
+                                                    <Link
+                                                        href={`/share/${link.token}`}
+                                                        className="btn btn-primary btn-sm"
+                                                        style={{ fontSize: '0.8rem', background: '#f59e0b', color: '#fff', border: 'none' }}
+                                                    >
+                                                        ▶️ Resume Work
                                                     </Link>
                                                 ) : link.status === 'used' ? (
                                                     <span style={{
