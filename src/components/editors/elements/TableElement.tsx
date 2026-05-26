@@ -1,5 +1,21 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { TableElementData, TableCellData } from "../types";
+
+export interface TableActions {
+  addRow: () => void;
+  deleteRow: () => void;
+  addCol: () => void;
+  deleteCol: () => void;
+  toggleHeader: () => void;
+  sortAsc: () => void;
+  sortDesc: () => void;
+  applyStyle: (key: keyof TableCellData, val: any) => void;
+  hasActiveCell: boolean;
+  hasHeader: boolean;
+  currentCell: TableCellData | null;
+  canDeleteRow: boolean;
+  canDeleteCol: boolean;
+}
 
 interface TableElementProps {
   el: TableElementData;
@@ -7,9 +23,10 @@ interface TableElementProps {
   onUpdate: (patch: Partial<TableElementData>) => void;
   selected: boolean;
   onSelect: () => void;
+  onRegisterActions?: (actions: TableActions | null) => void;
 }
 
-export const TableElement = React.memo(({ el, scale, onUpdate, selected, onSelect }: TableElementProps) => {
+export const TableElement = React.memo(({ el, scale, onUpdate, selected, onSelect, onRegisterActions }: TableElementProps) => {
   const { rows = [], colW = 100, rowH = 28, hasHeader = true } = el;
   const [activeCell, setActiveCell] = useState<{ r: number; c: number } | null>(null);
   const [editingCell, setEditingCell] = useState<{ r: number; c: number } | null>(null);
@@ -115,10 +132,36 @@ export const TableElement = React.memo(({ el, scale, onUpdate, selected, onSelec
     onUpdate({ rows: [...headerRow, ...dataRows] });
   };
 
-  const applyStyle = (key: keyof TableCellData, val: any) => {
+  const applyStyle = useCallback((key: keyof TableCellData, val: any) => {
     if (!activeCell) return;
     updateCell(activeCell.r, activeCell.c, { [key]: val });
-  };
+  }, [activeCell, rows]);
+
+  // Register actions with parent when selected
+  useEffect(() => {
+    if (!onRegisterActions) return;
+    if (selected) {
+      onRegisterActions({
+        addRow,
+        deleteRow,
+        addCol,
+        deleteCol,
+        toggleHeader,
+        sortAsc: () => sortData(true),
+        sortDesc: () => sortData(false),
+        applyStyle,
+        hasActiveCell: !!activeCell,
+        hasHeader,
+        currentCell: activeCell ? rows[activeCell.r]?.[activeCell.c] ?? null : null,
+        canDeleteRow: !!activeCell && rows.length > 1,
+        canDeleteCol: !!activeCell && (rows[0] ? rows[0].length > 1 : false),
+      });
+    } else {
+      onRegisterActions(null);
+    }
+  }, [selected, activeCell, rows, hasHeader, onRegisterActions]);
+
+  const currentCell = activeCell ? rows[activeCell.r]?.[activeCell.c] : null;
 
   const renderCell = (cell: TableCellData, r: number, c: number) => {
     const isHeader = hasHeader && r === 0;
@@ -218,8 +261,6 @@ export const TableElement = React.memo(({ el, scale, onUpdate, selected, onSelec
     );
   };
 
-  const currentCell = activeCell ? rows[activeCell.r]?.[activeCell.c] : null;
-
   return (
     <div
       style={{
@@ -235,46 +276,6 @@ export const TableElement = React.memo(({ el, scale, onUpdate, selected, onSelec
         onSelect();
       }}
     >
-      {selected && (
-        <div
-          data-nondrag="1"
-          style={{
-            position: "absolute",
-            top: -48,
-            left: 0,
-            display: "flex",
-            gap: 6,
-            background: "#18181b",
-            padding: "6px",
-            borderRadius: 8,
-            border: "1px solid #3f3f46",
-            boxShadow: "0 4px 12px rgba(0,0,0,0.5)",
-            zIndex: 1001,
-            alignItems: "center",
-            width: "max-content",
-          }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <button className="btn btn-ghost" style={{ padding: "4px 8px", fontSize: 11 }} onClick={addRow} title="Add Row Below">Row +</button>
-          <button className="btn btn-danger" style={{ padding: "4px 8px", fontSize: 11 }} onClick={deleteRow} disabled={!activeCell || rows.length <= 1} title="Delete Row">Row -</button>
-          <div className="sep" style={{ height: 16 }} />
-          <button className="btn btn-ghost" style={{ padding: "4px 8px", fontSize: 11 }} onClick={addCol} title="Add Column Right">Col +</button>
-          <button className="btn btn-danger" style={{ padding: "4px 8px", fontSize: 11 }} onClick={deleteCol} disabled={!activeCell || (rows[0] && rows[0].length <= 1)} title="Delete Column">Col -</button>
-          <div className="sep" style={{ height: 16 }} />
-          <button className="btn btn-ghost" style={{ padding: "4px 8px", fontSize: 11, background: hasHeader ? "#27272a" : "transparent" }} onClick={toggleHeader} title="Toggle Header">Header</button>
-          <button className="btn btn-ghost" style={{ padding: "4px 8px", fontSize: 11 }} onClick={() => sortData(true)} disabled={!activeCell} title="Sort Ascending">Asc</button>
-          <button className="btn btn-ghost" style={{ padding: "4px 8px", fontSize: 11 }} onClick={() => sortData(false)} disabled={!activeCell} title="Sort Descending">Desc</button>
-          <div className="sep" style={{ height: 16 }} />
-          
-          <button className="btn btn-ghost" style={{ padding: "4px 8px", fontSize: 11, fontWeight: "bold", background: currentCell?.bold ? "#3f3f46" : "transparent" }} onClick={() => applyStyle("bold", !currentCell?.bold)} disabled={!activeCell} title="Bold">B</button>
-          <button className="btn btn-ghost" style={{ padding: "4px 8px", fontSize: 11, fontStyle: "italic", background: currentCell?.italic ? "#3f3f46" : "transparent" }} onClick={() => applyStyle("italic", !currentCell?.italic)} disabled={!activeCell} title="Italic">I</button>
-          
-          <div className="sep" style={{ height: 16 }} />
-          <input type="color" title="Background Color" style={{ width: 24, height: 24, border: "none", cursor: "pointer", background: "transparent" }} value={currentCell?.bgColor || "#09090b"} onChange={(e) => applyStyle("bgColor", e.target.value)} disabled={!activeCell} />
-          <input type="color" title="Text Color" style={{ width: 24, height: 24, border: "none", cursor: "pointer", background: "transparent" }} value={currentCell?.textColor || "#fafafa"} onChange={(e) => applyStyle("textColor", e.target.value)} disabled={!activeCell} />
-        </div>
-      )}
-      
       <div style={{ width: "100%", height: "100%", overflow: "auto" }}>
         <table style={{ borderCollapse: "collapse", fontSize: 11 * scale, width: "100%", tableLayout: "fixed" }}>
           <tbody>

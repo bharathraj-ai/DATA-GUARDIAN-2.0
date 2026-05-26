@@ -221,8 +221,10 @@ export async function getReceivedLinks(email: string): Promise<DashboardLink[]> 
             let finalStatus = getStatus({ ...link, isUsed: vendorIsUsed }) as any;
             const vendorAccess = link.VendorAccess?.find((v: any) => v.email.toLowerCase() === email.toLowerCase());
             
-            // If they are on a break, override the status so they can resume
-            if ((finalStatus === 'used' || finalStatus === 'active') && vendorAccess?.status === 'break') {
+            // If vendor has accessed but NOT completed work, let them resume
+            // 'active' = accessed but session ended without completing
+            // 'break' = explicitly took a break
+            if (finalStatus === 'used' && vendorAccess?.status && vendorAccess.status !== 'completed') {
                 finalStatus = 'break';
             }
 
