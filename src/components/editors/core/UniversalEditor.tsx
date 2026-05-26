@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import "../editor.css";
 import { DocumentData } from "../types";
 import { getFileIcon, uid } from "../utils/editorUtils";
@@ -7,6 +7,7 @@ import { parseFile } from "../utils/fileParsers";
 import { exportDocument } from "../utils/fileExporters";
 import { useEditorState } from "../hooks/useEditorState";
 import { Page } from "../layout/Page";
+import { TableActions } from "../elements/TableElement";
 
 interface UniversalEditorProps {
   token?: string;
@@ -55,6 +56,12 @@ export default function UniversalEditor({
   const onSubmitRef = useRef(onSubmit);
   const isSavingRef = useRef(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Table tools state
+  const [tableActions, setTableActions] = useState<TableActions | null>(null);
+  const onRegisterTableActions = useCallback((actions: TableActions | null) => {
+    setTableActions(actions);
+  }, []);
 
   // Chat Polling
   useEffect(() => {
@@ -344,14 +351,7 @@ export default function UniversalEditor({
           </div>
         </div>
 
-        {doc && view === "editor" && (
-          <div style={{ position: "absolute", left: "50%", transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: 8, padding: "5px 12px", background: "#18181b", borderRadius: 20, border: "1px solid #27272a", maxWidth: "260px", fontSize: 12, color: "#a1a1aa" }}>
-            <span>{getFileIcon(doc.name)}</span>
-            <span style={{ fontWeight: 500, color: "#fafafa", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={doc.name}>
-              {doc.name}
-            </span>
-          </div>
-        )}
+
 
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginLeft: "auto" }}>
           {doc && view === "editor" && (
@@ -392,7 +392,7 @@ export default function UniversalEditor({
       </div>
 
       {/* ═══ Main Editor Content ═══ */}
-      <div style={{ flex: 1, position: "relative", display: "flex", overflow: "hidden" }}>
+      <div style={{ flex: 1, position: "relative", display: "flex", flexDirection: "column", overflow: "hidden" }}>
         {loading ? (
           <div className="fup" style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "#09090b", zIndex: 1000 }}>
             <svg className="spin" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#fafafa" strokeWidth="2" strokeLinecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
@@ -411,74 +411,140 @@ export default function UniversalEditor({
           </div>
         ) : view === "editor" ? (
           <>
-            {/* Editor Sidebar */}
-            <div style={{ width: 260, background: "#18181b", borderRight: "1px solid #27272a", display: "flex", flexDirection: "column", flexShrink: 0 }}>
-              <div style={{ padding: "20px 20px 16px", borderBottom: "1px solid #27272a" }}>
-                <h3 style={{ fontSize: 11, color: "#71717a", textTransform: "uppercase", letterSpacing: ".1em", fontWeight: 600, marginBottom: 16 }}>Pages</h3>
-                <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 8, margin: "0 -4px", padding: "0 4px" }}>
-                  {doc.pages.map((p, i) => (
-                    <div key={p.id} className={`thumb-card ${activePage === i ? "active" : ""}`} style={{ cursor: "pointer", position: "relative", flexShrink: 0 }} onClick={() => setActivePage(i)} draggable onDragStart={e => handleDragStart(e, i)} onDragOver={e => handleDragOver(e, i)} onDrop={e => handleDropPage(e, i)}>
-                      <div style={{ width: 48, height: 64, background: "#09090b", border: activePage === i ? "1px solid #fff" : "1px solid #3f3f46", borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "#71717a", transition: "all 0.2s" }}>{i + 1}</div>
-                      <div className="thumb-overlay" style={{ position: "absolute", inset: 0, background: activePage === i ? "transparent" : "rgba(24,24,27,0.4)", borderRadius: 4, transition: "all 0.2s", pointerEvents: "none" }} />
-                    </div>
-                  ))}
-                  {!isReadOnly && (
-                    <div onClick={addPage} style={{ width: 48, height: 64, background: "rgba(255,255,255,0.03)", border: "1px dashed #3f3f46", borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0, transition: "all 0.2s" }}>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#71717a" strokeWidth="2" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {!isReadOnly && (
-                <div style={{ padding: "20px", borderBottom: "1px solid #27272a" }}>
-                  <h3 style={{ fontSize: 11, color: "#71717a", textTransform: "uppercase", letterSpacing: ".1em", fontWeight: 600, marginBottom: 12 }}>Insert</h3>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                    <button className="btn btn-outline" style={{ justifyContent: "center" }} onClick={addText}>Text</button>
-                    <label className="btn btn-outline" style={{ justifyContent: "center", cursor: "pointer", margin: 0 }}>
-                      Image <input type="file" accept="image/*" style={{ display: "none" }} onChange={addImage} />
-                    </label>
-                    <button className="btn btn-outline" style={{ justifyContent: "center", gridColumn: "1 / -1" }} onClick={addTable}>Table</button>
+            {/* ═══ Horizontal Toolbar ═══ */}
+            {!isReadOnly && (
+              <div className="editor-toolbar">
+                {/* PAGES */}
+                <div className="toolbar-section">
+                  <div className="toolbar-label">Pages</div>
+                  <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                    {doc.pages.map((p, i) => (
+                      <button key={p.id} className={`toolbar-page-btn ${activePage === i ? "active" : ""}`} onClick={() => setActivePage(i)} draggable onDragStart={e => handleDragStart(e, i)} onDragOver={e => handleDragOver(e, i)} onDrop={e => handleDropPage(e, i)} title={`Page ${i + 1}`}>{i + 1}</button>
+                    ))}
+                    <button className="toolbar-page-btn add" onClick={addPage} title="Add Page">+ Add Page</button>
                   </div>
                 </div>
-              )}
 
-              {/* Element Properties */}
-              {selectedId && !isReadOnly && (() => {
-                const sel = doc.pages[activePage]?.elements.find(e => e.id === selectedId);
-                if (!sel) return null;
-                return (
-                  <div style={{ padding: "20px", flex: 1, overflowY: "auto" }}>
-                    <h3 style={{ fontSize: 11, color: "#71717a", textTransform: "uppercase", letterSpacing: ".1em", fontWeight: 600, marginBottom: 16 }}>Properties</h3>
-                    <div className="psec" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                      <div><div className="plabel">X</div><input type="number" className="pinput" value={Math.round(sel.x)} onChange={e => updateSelected({ x: +e.target.value })} /></div>
-                      <div><div className="plabel">Y</div><input type="number" className="pinput" value={Math.round(sel.y)} onChange={e => updateSelected({ y: +e.target.value })} /></div>
-                      <div><div className="plabel">W</div><input type="number" className="pinput" value={Math.round(sel.width)} onChange={e => updateSelected({ width: +e.target.value })} /></div>
-                      <div><div className="plabel">H</div><input type="number" className="pinput" value={Math.round(sel.height)} onChange={e => updateSelected({ height: +e.target.value })} /></div>
-                    </div>
-                    {sel.type === "text" && (
-                      <div className="psec">
-                        <div className="plabel">Typography</div>
-                        <select className="tsel" style={{ width: "100%", marginBottom: 8 }} value={(sel as any).font || "Georgia"} onChange={e => updateSelected({ font: e.target.value })}>
-                          {["Georgia", "Arial", "Courier New", "Times New Roman"].map(f => <option key={f} value={f}>{f}</option>)}
-                        </select>
-                        <div style={{ display: "flex", gap: 8 }}>
-                          <input type="number" className="pinput" style={{ width: 60 }} value={(sel as any).size || 12} onChange={e => updateSelected({ size: +e.target.value })} />
-                          <input type="color" className="pinput" style={{ padding: 2, height: 34, flex: 1 }} value={(sel as any).color || "#000000"} onChange={e => updateSelected({ color: e.target.value })} />
-                        </div>
-                        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                          <button className="btn btn-outline" style={{ flex: 1, background: (sel as any).bold ? "#3f3f46" : "transparent" }} onClick={() => updateSelected({ bold: !(sel as any).bold })}>B</button>
-                          <button className="btn btn-outline" style={{ flex: 1, background: (sel as any).italic ? "#3f3f46" : "transparent" }} onClick={() => updateSelected({ italic: !(sel as any).italic })}>I</button>
-                          <button className="btn btn-outline" style={{ flex: 1, background: (sel as any).underline ? "#3f3f46" : "transparent" }} onClick={() => updateSelected({ underline: !(sel as any).underline })}>U</button>
+                <div className="toolbar-sep" />
+
+                {/* INSERT */}
+                <div className="toolbar-section">
+                  <div className="toolbar-label">Insert</div>
+                  <div style={{ display: "flex", gap: 4 }}>
+                    <button className="toolbar-btn" onClick={addText} title="Add Text">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M4 7V4h16v3" /><line x1="12" y1="4" x2="12" y2="20" /><line x1="8" y1="20" x2="16" y2="20" /></svg>
+                      Text
+                    </button>
+                    <label className="toolbar-btn" style={{ cursor: "pointer" }} title="Add Image">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="m21 15-5-5L5 21" /></svg>
+                      Image
+                      <input type="file" accept="image/*" style={{ display: "none" }} onChange={addImage} />
+                    </label>
+                    <button className="toolbar-btn" onClick={addTable} title="Add Table">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" /><line x1="3" y1="9" x2="21" y2="9" /><line x1="3" y1="15" x2="21" y2="15" /><line x1="9" y1="3" x2="9" y2="21" /><line x1="15" y1="3" x2="15" y2="21" /></svg>
+                      Table
+                    </button>
+                  </div>
+                </div>
+
+                <div className="toolbar-sep" />
+
+                {/* TABLE TOOLS */}
+                <div className="toolbar-section">
+                  <div className="toolbar-label">Table Tools</div>
+                  <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                    <button className="toolbar-btn tt-add" onClick={() => tableActions?.addRow()} disabled={!tableActions} title="Add Row Below">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+                      Row +
+                    </button>
+                    <button className="toolbar-btn tt-remove" onClick={() => tableActions?.deleteRow()} disabled={!tableActions || !tableActions.canDeleteRow} title="Delete Row">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="3" y="3" width="18" height="18" rx="2" /><line x1="8" y1="12" x2="16" y2="12" /></svg>
+                      Row −
+                    </button>
+                    <button className="toolbar-btn tt-col-add" onClick={() => tableActions?.addCol()} disabled={!tableActions} title="Add Column Right">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+                      Col +
+                    </button>
+                    <button className="toolbar-btn tt-remove" onClick={() => tableActions?.deleteCol()} disabled={!tableActions || !tableActions.canDeleteCol} title="Delete Column">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="3" y="3" width="18" height="18" rx="2" /><line x1="8" y1="12" x2="16" y2="12" /></svg>
+                      Col −
+                    </button>
+                    <div className="toolbar-mini-sep" />
+                    <button className={`toolbar-btn ${tableActions?.hasHeader ? "active" : ""}`} onClick={() => tableActions?.toggleHeader()} disabled={!tableActions} title="Toggle Header">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /><line x1="3" y1="9" x2="21" y2="9" /></svg>
+                      Header
+                    </button>
+                    <button className="toolbar-btn" onClick={() => tableActions?.sortAsc()} disabled={!tableActions || !tableActions.hasActiveCell} title="Sort Ascending">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 19V5" /><path d="m5 12 7-7 7 7" /></svg>
+                      Asc
+                    </button>
+                    <button className="toolbar-btn" onClick={() => tableActions?.sortDesc()} disabled={!tableActions || !tableActions.hasActiveCell} title="Sort Descending">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 5v14" /><path d="m19 12-7 7-7-7" /></svg>
+                      Desc
+                    </button>
+                  </div>
+                </div>
+
+                <div className="toolbar-sep" />
+
+                {/* TEXT TOOLS */}
+                <div className="toolbar-section">
+                  <div className="toolbar-label">Text Tools</div>
+                  <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                    <button className={`toolbar-btn ${tableActions?.currentCell?.bold ? "active" : ""}`} onClick={() => tableActions?.applyStyle("bold", !tableActions?.currentCell?.bold)} disabled={!tableActions?.hasActiveCell} title="Bold" style={{ fontWeight: 700 }}>B</button>
+                    <button className={`toolbar-btn ${tableActions?.currentCell?.italic ? "active" : ""}`} onClick={() => tableActions?.applyStyle("italic", !tableActions?.currentCell?.italic)} disabled={!tableActions?.hasActiveCell} title="Italic" style={{ fontStyle: "italic" }}>I</button>
+                    <button className="toolbar-btn" disabled={!tableActions?.hasActiveCell} title="Underline" style={{ textDecoration: "underline" }}>U</button>
+                    <div className="toolbar-mini-sep" />
+                    <button className={`toolbar-btn ${!tableActions?.currentCell?.align || tableActions?.currentCell?.align === "left" ? "active" : ""}`} onClick={() => tableActions?.applyStyle("align", "left")} disabled={!tableActions?.hasActiveCell} title="Align Left">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="17" y1="10" x2="3" y2="10" /><line x1="21" y1="6" x2="3" y2="6" /><line x1="21" y1="14" x2="3" y2="14" /><line x1="17" y1="18" x2="3" y2="18" /></svg>
+                    </button>
+                    <button className={`toolbar-btn ${tableActions?.currentCell?.align === "center" ? "active" : ""}`} onClick={() => tableActions?.applyStyle("align", "center")} disabled={!tableActions?.hasActiveCell} title="Center">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="10" x2="6" y2="10" /><line x1="21" y1="6" x2="3" y2="6" /><line x1="21" y1="14" x2="3" y2="14" /><line x1="18" y1="18" x2="6" y2="18" /></svg>
+                    </button>
+                    <button className={`toolbar-btn ${tableActions?.currentCell?.align === "right" ? "active" : ""}`} onClick={() => tableActions?.applyStyle("align", "right")} disabled={!tableActions?.hasActiveCell} title="Align Right">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="21" y1="10" x2="7" y2="10" /><line x1="21" y1="6" x2="3" y2="6" /><line x1="21" y1="14" x2="3" y2="14" /><line x1="21" y1="18" x2="7" y2="18" /></svg>
+                    </button>
+                    <button className="toolbar-btn" onClick={() => tableActions?.applyStyle("align", "justify" as any)} disabled={!tableActions?.hasActiveCell} title="Justify">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="21" y1="10" x2="3" y2="10" /><line x1="21" y1="6" x2="3" y2="6" /><line x1="21" y1="14" x2="3" y2="14" /><line x1="21" y1="18" x2="3" y2="18" /></svg>
+                    </button>
+                  </div>
+                </div>
+
+                {/* PROPERTIES */}
+                {selectedId && (() => {
+                  const sel = doc.pages[activePage]?.elements.find(e => e.id === selectedId);
+                  if (!sel) return null;
+                  return (
+                    <>
+                      <div className="toolbar-sep" />
+                      <div className="toolbar-section">
+                        <div className="toolbar-label">Properties</div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 3 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                            <span className="toolbar-prop-label">X</span>
+                            <input type="number" className="toolbar-prop-input" value={Math.round(sel.x)} onChange={e => updateSelected({ x: +e.target.value })} />
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                            <span className="toolbar-prop-label">Y</span>
+                            <input type="number" className="toolbar-prop-input" value={Math.round(sel.y)} onChange={e => updateSelected({ y: +e.target.value })} />
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                            <span className="toolbar-prop-label">W</span>
+                            <input type="number" className="toolbar-prop-input" value={Math.round(sel.width)} onChange={e => updateSelected({ width: +e.target.value })} />
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                            <span className="toolbar-prop-label">H</span>
+                            <input type="number" className="toolbar-prop-input" value={Math.round(sel.height)} onChange={e => updateSelected({ height: +e.target.value })} />
+                          </div>
                         </div>
                       </div>
-                    )}
-                  </div>
-                );
-              })()}
-            </div>
+                    </>
+                  );
+                })()}
+              </div>
+            )}
 
-            {/* Canvas Area */}
+            {/* ═══ Canvas Area (full width) ═══ */}
             <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", background: "#09090b", position: "relative" }} onClick={() => setSelectedId(null)}>
               <div style={{ minHeight: "100%", padding: "40px", display: "flex", flexDirection: "column", alignItems: "center" }}>
                 {doc.pages[activePage] && (
@@ -490,6 +556,7 @@ export default function UniversalEditor({
                     onUpdate={updatePage} 
                     onDelete={deleteElement} 
                     showBg={showBg} 
+                    onRegisterTableActions={onRegisterTableActions}
                   />
                 )}
               </div>
@@ -497,7 +564,7 @@ export default function UniversalEditor({
 
             {/* Chat Drawer */}
             {chatOpen && (
-              <div style={{ width: 320, background: "#18181b", borderLeft: "1px solid #27272a", display: "flex", flexDirection: "column", flexShrink: 0 }}>
+              <div style={{ width: 320, background: "#18181b", borderLeft: "1px solid #27272a", display: "flex", flexDirection: "column", flexShrink: 0, position: "absolute", right: 0, top: 0, bottom: 0, zIndex: 200 }}>
                 <div style={{ padding: 16, borderBottom: "1px solid #27272a", display: "flex", gap: 8 }}>
                   <button className="btn btn-ghost" style={{ flex: 1, background: chatTab === 'group' ? "#27272a" : "transparent", color: chatTab === 'group' ? "#fff" : "#a1a1aa" }} onClick={() => setChatTab('group')}>Team</button>
                   <button className="btn btn-ghost" style={{ flex: 1, background: chatTab === 'private' ? "#27272a" : "transparent", color: chatTab === 'private' ? "#fff" : "#a1a1aa" }} onClick={() => setChatTab('private')}>Private</button>

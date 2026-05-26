@@ -3,7 +3,7 @@ import { PageData, EditorElement } from "../types";
 import { DraggableElement } from "../elements/DraggableElement";
 import { TextElement } from "../elements/TextElement";
 import { ImageElement } from "../elements/ImageElement";
-import { TableElement } from "../elements/TableElement";
+import { TableElement, TableActions } from "../elements/TableElement";
 import { ZipEntryElement } from "../elements/ZipEntryElement";
 
 interface PageProps {
@@ -14,9 +14,10 @@ interface PageProps {
   onUpdate: (pageId: string, elements: EditorElement[]) => void;
   onDelete: (pageId: string, elId: string) => void;
   showBg: boolean;
+  onRegisterTableActions?: (actions: TableActions | null) => void;
 }
 
-export const Page = React.memo(({ page, scale, selectedId, onSelect, onUpdate, onDelete, showBg }: PageProps) => {
+export const Page = React.memo(({ page, scale, selectedId, onSelect, onUpdate, onDelete, showBg, onRegisterTableActions }: PageProps) => {
   const updateEl = (id: string, patch: Partial<EditorElement>) => {
     onUpdate(page.id, page.elements.map(e => e.id === id ? { ...e, ...patch } : e) as EditorElement[]);
   };
@@ -90,7 +91,7 @@ export const Page = React.memo(({ page, scale, selectedId, onSelect, onUpdate, o
         if (el.type === "table") {
           return (
             <DraggableElement key={el.id} el={el} scale={scale} onUpdate={upd} onDelete={del} selected={sel} onSelect={sel2}>
-              <TableElement el={el as any} scale={scale} onUpdate={upd as any} selected={sel} onSelect={sel2} />
+              <TableElement el={el as any} scale={scale} onUpdate={upd as any} selected={sel} onSelect={sel2} onRegisterActions={onRegisterTableActions} />
             </DraggableElement>
           );
         }
