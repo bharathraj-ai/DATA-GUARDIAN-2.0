@@ -49,6 +49,8 @@ export const ALLOWED_MIME_TYPES = new Set([
 const MAGIC_SIGNATURES: { bytes: number[]; mask?: number[]; mimeType: string }[] = [
     { bytes: [0x25, 0x50, 0x44, 0x46], mimeType: 'application/pdf' }, // %PDF
     { bytes: [0x50, 0x4B, 0x03, 0x04], mimeType: 'application/zip' }, // PK\x03\x04 — ZIP-based (DOCX/XLSX/PPTX/OD*)
+    { bytes: [0x50, 0x4B, 0x05, 0x06], mimeType: 'application/zip' }, // PK\x05\x06 — Empty ZIP
+    { bytes: [0x50, 0x4B, 0x07, 0x08], mimeType: 'application/zip' }, // PK\x07\x08 — Spanned ZIP
     { bytes: [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1], mimeType: 'application/msoffice' }, // OLE2 — DOC/XLS/PPT
     { bytes: [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A], mimeType: 'image/png' }, // PNG
     { bytes: [0xFF, 0xD8, 0xFF], mimeType: 'image/jpeg' }, // JPEG
@@ -163,6 +165,32 @@ export function validateMimeType(buffer: Buffer, ext: string): MimeValidationRes
         }
 
         return { valid: true, mimeType: sig.mimeType };
+    }
+
+    // Heuristics for common user mistakes (e.g. CSV, XML, HTML renamed to .xlsx)
+    const sample = buffer.subarray(0, Math.min(4096, buffer.length));
+    const sampleStr = sample.toString('utf-8').trimStart().toLowerCase();
+    
+    const isSpreadsheetExt = ext === '.xlsx' || ext === '.xls';
+
+    if (sampleStr.startsWith('<?xml')) {
+        if (isSpreadsheetExt) return { valid: true, mimeType: 'application/vnd.ms-excel' };
+        return { valid: false, error: `File appears to be an XML document but has a "${ext}" extension.` };
+    }
+    if (sampleStr.startsWith('<html') || sampleStr.startsWith('<!doctype html') || sampleStr.startsWith('<table')) {
+        if (isSpreadsheetExt) return { valid: true, mimeType: 'application/vnd.ms-excel' };
+        return { valid: false, error: `File appears to be an HTML document but has a "${ext}" extension.` };
+    }
+    
+    // Check if it's purely printable text (like a CSV)
+    let printableCount = 0;
+    for (let i = 0; i < sample.length; i++) {
+        const b = sample[i];
+        if (b === 9 || b === 10 || b === 13 || (b >= 32 && b < 127) || b >= 0x80) printableCount++;
+    }
+    if (sample.length > 0 && (printableCount / sample.length) > 0.95) {
+        if (isSpreadsheetExt) return { valid: true, mimeType: 'text/csv' };
+        return { valid: false, error: `File appears to be a plain text/CSV document but has a "${ext}" extension.` };
     }
 
     return { valid: false, error: `Could not verify file integrity for "${ext}". Possible content mismatch.` };

@@ -39,8 +39,8 @@ export default function Navbar() {
         <nav className={`navbar ${isScrolled ? 'navbar-scrolled' : ''}`}>
             <div className="container navbar-container">
                 <Link href="/" className="navbar-logo">
-                    <Image src="/logo.svg" alt="Data Guardian" width={28} height={28} style={{ opacity: 1 }} />
-                    <span style={{ fontWeight: 600, letterSpacing: '-0.02em', fontSize: '18px' }}>Data Guardian</span>
+                    <Image src="/logo.svg" alt="Secure Protocol" width={28} height={28} style={{ opacity: 0.9 }} />
+                    <span style={{ fontWeight: 600, letterSpacing: '-0.02em', fontSize: '18px' }}>Secure Protocol</span>
                 </Link>
 
                 {/* Desktop Menu */}
