@@ -48,6 +48,7 @@ export default function ScrollReveal({
         <div
             ref={ref}
             className={`scroll-reveal ${delayClass} ${className}`.trim()}
+            style={{ height: '100%' }}
         >
             {children}
         </div>
