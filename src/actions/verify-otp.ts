@@ -101,7 +101,6 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
             select: {
                 id: true,
                 token: true,
-                ownerToken: true,
                 otpHash: true,
                 expiresAt: true,
                 isUsed: true,
@@ -132,7 +131,21 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
                 // Anti-Phishing fields (Legacy fallback)
                 otpFirstAttemptAt: true,
                 otpVerifiedAt: true,
-                VendorAccess: true,
+                VendorAccess: {
+                    select: {
+                        id: true,
+                        email: true,
+                        otpHash: true,
+                        isRevoked: true,
+                        status: true,
+                        activeSessionId: true,
+                        lastSeenAt: true,
+                        loginCount: true,
+                        failedAttempts: true,
+                        breakStartedAt: true,
+                        totalBreakDuration: true,
+                    }
+                },
             }
         });
 

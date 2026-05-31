@@ -6,6 +6,7 @@ import { verifyOTP } from '@/actions/verify-otp';
 import { validateShareAccess } from '@/actions/validate-share-access';
 import { sendVendorOTP } from '@/actions/send-vendor-otp';
 import { useSession, signIn } from 'next-auth/react';
+import { logger, redactToken } from '@/lib/logger';
 
 interface SharePageProps {
     params: any;
@@ -49,15 +50,14 @@ export default function SharePage({ params }: SharePageProps) {
         }
     }, [accessState, sessionData]);
 
-    // Resolve params
     useEffect(() => {
         params.then((p: any) => {
-            console.log('Token resolved:', p.token);
+            logger.debug(`Token resolved: ${redactToken(p.token)}`);
             // Remove any query parameters (like timestamp) from token
             const cleanToken = p.token.split('?')[0];
             setToken(cleanToken);
         }).catch((err: any) => {
-            console.error('Failed to resolve params:', err);
+            logger.error('Failed to resolve params', err);
             setIsLoading(false);
         });
     }, [params]);

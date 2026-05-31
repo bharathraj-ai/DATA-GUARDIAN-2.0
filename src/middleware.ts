@@ -1,52 +1,18 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { validateCSRF } from '@/lib/security/csrf';
 
 export function middleware(request: NextRequest) {
     const response = NextResponse.next();
 
-    // CSRF Protection for custom API routes
-    if (request.nextUrl.pathname.startsWith('/api/')) {
-        const method = request.method;
-        const isMutating = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
-
-        if (isMutating) {
-            // Origin validation (Fail-closed on origin mismatch)
-            const origin = request.headers.get('origin');
-            const host = request.headers.get('host');
-
-            if (!origin || !host) {
-                // Allow server actions (Next.js sets x-action-id header)
-                const isServerAction = request.headers.get('next-action') !== null;
-                if (!isServerAction) {
-                    console.warn('[CSRF] Blocked: Missing Origin/Host', {
-                        path: request.nextUrl.pathname,
-                        method,
-                    });
-                    return NextResponse.json(
-                        { error: 'CSRF Violation: Missing Origin/Host' },
-                        { status: 403 }
-                    );
-                }
-            } else {
-                try {
-                    const originHost = new URL(origin).host;
-                    if (originHost !== host) {
-                        console.warn('[CSRF] Blocked: Origin mismatch', {
-                            origin: originHost,
-                            host,
-                        });
-                        return NextResponse.json(
-                            { error: 'CSRF Violation: Origin mismatch' },
-                            { status: 403 }
-                        );
-                    }
-                } catch {
-                    return NextResponse.json(
-                        { error: 'CSRF Violation: Invalid Origin' },
-                        { status: 403 }
-                    );
-                }
-            }
+    // CSRF Protection for custom API routes, except NextAuth which has its own protection
+    if (request.nextUrl.pathname.startsWith('/api/') && !request.nextUrl.pathname.startsWith('/api/auth/')) {
+        const csrfResult = validateCSRF(request);
+        if (!csrfResult.allowed) {
+            return NextResponse.json(
+                { error: csrfResult.reason },
+                { status: csrfResult.status }
+            );
         }
     }
 

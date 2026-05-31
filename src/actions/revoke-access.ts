@@ -2,6 +2,8 @@
 
 import { prisma } from '@/lib/prisma';
 import { cleanupSingleLink } from '@/actions/cleanup';
+import { auth } from '@/lib/auth';
+import { logger } from '@/lib/logger';
 
 // Cache Redis availability check at module load (performance optimization)
 const isRedisConfigured = !!(
@@ -44,6 +46,15 @@ export async function revokeAccess(
     deleteDataImmediately: boolean = false
 ): Promise<RevokeAccessResult> {
     try {
+        const session = await auth();
+
+        if (!session?.user?.id) {
+            return {
+                success: false,
+                error: 'Authentication required. Please log in.',
+            };
+        }
+
         // Find the secure link by owner token
         const secureLink = await prisma.secureLink.findUnique({
             where: { ownerToken },
@@ -54,6 +65,26 @@ export async function revokeAccess(
             return {
                 success: false,
                 error: 'Invalid owner token. This link may not exist.',
+            };
+        }
+
+        // Verify ownership (BOLA prevention)
+        if (secureLink.ownerId !== session.user.id) {
+            await prisma.auditLog.create({
+                data: {
+                    action: 'REVOKE_ACCESS_DENIED',
+                    linkId: secureLink.id,
+                    reason: 'Unauthorized user attempted to revoke link',
+                    metadata: JSON.stringify({
+                        attemptedBy: session.user.id,
+                        actualOwner: secureLink.ownerId
+                    })
+                }
+            }).catch(e => logger.warn('Failed to log REVOKE_ACCESS_DENIED', e.message));
+
+            return {
+                success: false,
+                error: 'Unauthorized: You do not have permission to revoke this link.',
             };
         }
 
@@ -78,10 +109,10 @@ export async function revokeAccess(
                 // Create audit log for revocation
                 await tx.auditLog.create({
                     data: {
-                        action: 'REVOKED',
+                        action: 'REVOKE_ACCESS_SUCCESS',
                         linkId: secureLink.id,
                         reason: 'Owner requested manual revocation',
-                        metadata: JSON.stringify({ killSwitchLatencyMs: 0 }), // Will be updated below
+                        metadata: JSON.stringify({ killSwitchLatencyMs: 0, revokedBy: session.user.id }), // Will be updated below
                     },
                 });
 
@@ -104,7 +135,7 @@ export async function revokeAccess(
         ]);
 
         // Log kill switch performance
-        console.log(`[KILL SWITCH] Link ${secureLink.id} revoked | Redis: ${redisResult.success ? `${redisResult.latencyMs}ms` : 'N/A'} | Target: <100ms`);
+        logger.info(`[KILL SWITCH] Link ${secureLink.id} revoked by ${session.user.id} | Redis: ${redisResult.success ? `${redisResult.latencyMs}ms` : 'N/A'} | Target: <100ms`);
 
         // AUTO-CLEANUP: Purge ALL data after revocation (fire-and-forget)
         cleanupSingleLink(secureLink.token).catch(() => { });
@@ -114,7 +145,7 @@ export async function revokeAccess(
             message: 'Access revoked and all data permanently deleted.',
         };
     } catch (error) {
-        console.error('Error revoking access:', error instanceof Error ? error.message : 'Unknown');
+        logger.error('Error revoking access:', error instanceof Error ? error.message : 'Unknown');
         return {
             success: false,
             error: 'Failed to revoke access. Please try again.',
@@ -137,9 +168,20 @@ export async function getLinkStatus(ownerToken: string): Promise<{
     error?: string;
 }> {
     try {
+        const session = await auth();
+
+        if (!session?.user?.id) {
+            return {
+                success: false,
+                error: 'Authentication required. Please log in.',
+            };
+        }
+
         const secureLink = await prisma.secureLink.findUnique({
             where: { ownerToken },
             select: {
+                id: true,
+                ownerId: true,
                 isUsed: true,
                 isRevoked: true,
                 expiresAt: true,
@@ -156,6 +198,35 @@ export async function getLinkStatus(ownerToken: string): Promise<{
                 error: 'Invalid owner token. This link may not exist.',
             };
         }
+
+        if (secureLink.ownerId !== session.user.id) {
+            await prisma.auditLog.create({
+                data: {
+                    action: 'GET_LINK_STATUS_DENIED',
+                    linkId: secureLink.id,
+                    reason: 'Unauthorized user attempted to view link status',
+                    metadata: JSON.stringify({
+                        attemptedBy: session.user.id,
+                        actualOwner: secureLink.ownerId
+                    })
+                }
+            }).catch(e => logger.warn('Failed to log GET_LINK_STATUS_DENIED', e.message));
+
+            return {
+                success: false,
+                error: 'Unauthorized: You do not have permission to view this link status.',
+            };
+        }
+
+        // Log success
+        await prisma.auditLog.create({
+            data: {
+                action: 'GET_LINK_STATUS_SUCCESS',
+                linkId: secureLink.id,
+                reason: 'Owner viewed link status',
+                metadata: JSON.stringify({ viewedBy: session.user.id })
+            }
+        }).catch(e => logger.warn('Failed to log GET_LINK_STATUS_SUCCESS', e.message));
 
         const now = new Date();
         const isExpired = secureLink.expiresAt < now;

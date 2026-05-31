@@ -127,20 +127,21 @@ export async function authorizeSecureLink(
   let isAuthorized = false;
   let effectiveIsUsed = secureLink.isUsed; // Track effective isUsed for the user
 
+  // Cache normalized email once — avoids repeated toLowerCase().trim() calls
+  const normalizedEffective = normalizeEmail(effectiveEmail);
+
   if (isOwner) {
     isAuthorized = true;
     effectiveIsUsed = true; // Owners don't need OTP
   } else if (!hasEmailGate) {
     isAuthorized = true;
-  } else if (effectiveEmail) {
-    const normalized = normalizeEmail(effectiveEmail)!;
-
-    if (secureLink.allowedVendorEmail && normalizeEmail(secureLink.allowedVendorEmail) === normalized) {
+  } else if (normalizedEffective) {
+    if (secureLink.allowedVendorEmail && normalizeEmail(secureLink.allowedVendorEmail) === normalizedEffective) {
       isAuthorized = true;
     }
 
     const linkAccess = secureLink.LinkAccess.find(
-      (access) => normalizeEmail(access.vendorEmail) === normalized && !access.lockedAt,
+      (access) => normalizeEmail(access.vendorEmail) === normalizedEffective && !access.lockedAt,
     );
     if (linkAccess) {
       vendorAccessRecord = { level: linkAccess.level, isRevoked: false };
@@ -149,7 +150,7 @@ export async function authorizeSecureLink(
     }
 
     const vendor = secureLink.VendorAccess.find(
-      (access) => normalizeEmail(access.email) === normalized && !access.isRevoked,
+      (access) => normalizeEmail(access.email) === normalizedEffective && !access.isRevoked,
     );
     if (vendor) {
       vendorAccessRecord = vendorAccessRecord ?? { level: vendor.level, isRevoked: false };

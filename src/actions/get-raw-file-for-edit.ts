@@ -61,7 +61,7 @@ export async function getRawFileForEdit(token: string, fileId: string): Promise<
                 return { success: false, error: 'Decryption failed' };
             }
         } else if ((fileRecord as any).mongoFileId) {
-            // ── Mongo fallback: download original file from Mongo ─────────
+            // ── Mongo fallback: download file from Mongo ─────────
             try {
                 const mongoFileRecord = await prisma.mongoFile.findUnique({
                     where: { id: (fileRecord as any).mongoFileId, isDeleted: false },
@@ -72,15 +72,21 @@ export async function getRawFileForEdit(token: string, fileId: string): Promise<
                     return { success: false, error: 'Mongo file record not found' };
                 }
 
-                const encryptedBuffer = await downloadFromMongo(mongoFileRecord.gridFSId);
+                const downloadedBuffer = await downloadFromMongo(mongoFileRecord.gridFSId);
 
-                const dek = (fileRecord as any).encryptedDek ? decryptDek((fileRecord as any).encryptedDek) : undefined;
-                buffer = decryptBuffer(
-                    encryptedBuffer,
-                    fileRecord.iv!,
-                    fileRecord.authTag!,
-                    dek
-                );
+                // If iv/authTag are present, the file was encrypted at upload — decrypt it.
+                // If they're null, submitFinal stored the file raw in GridFS — use as-is.
+                if (fileRecord.iv && fileRecord.authTag) {
+                    const dek = (fileRecord as any).encryptedDek ? decryptDek((fileRecord as any).encryptedDek) : undefined;
+                    buffer = decryptBuffer(
+                        downloadedBuffer,
+                        fileRecord.iv,
+                        fileRecord.authTag,
+                        dek
+                    );
+                } else {
+                    buffer = downloadedBuffer;
+                }
             } catch (e) {
                 console.error('[MONGO_EDIT] Download/Decrypt failed:', e);
                 return { success: false, error: 'Failed to retrieve or decrypt file from storage' };

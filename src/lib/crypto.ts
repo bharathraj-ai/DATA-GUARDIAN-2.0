@@ -103,6 +103,23 @@ function getEncryptionKey(): Buffer {
     return _cachedKey;
 }
 
+// Cache the KEK to avoid repeated env parsing
+let _cachedKek: Buffer | null = null;
+
+export function getKekKey(): Buffer {
+    if (_cachedKek) return _cachedKek;
+
+    const keyHex = process.env.KEK_KEY;
+    if (!keyHex) {
+        throw new Error('KEK_KEY not configured in environment variables');
+    }
+    if (keyHex.length !== 64) {
+        throw new Error('KEK_KEY must be 64 hex characters (256 bits)');
+    }
+    _cachedKek = Buffer.from(keyHex, 'hex');
+    return _cachedKek;
+}
+
 /**
  * Encrypts data using AES-256-GCM
  * 
@@ -183,7 +200,7 @@ export function generateDek(): Buffer {
  * @returns Encrypted string in format: iv:authTag:ciphertext
  */
 export function encryptDek(dek: Buffer): string {
-    const key = getEncryptionKey(); // Master KEK
+    const key = getKekKey(); // Master KEK
     const iv = crypto.randomBytes(IV_LENGTH);
 
     const cipher = crypto.createCipheriv(ALGORITHM, key, iv, {
@@ -206,8 +223,6 @@ export function encryptDek(dek: Buffer): string {
  * @returns 32-byte Data Encryption Key
  */
 export function decryptDek(encryptedDekString: string): Buffer {
-    const key = getEncryptionKey(); // Master KEK
-
     const parts = encryptedDekString.split(':');
     if (parts.length !== 3) {
         throw new Error('Invalid encrypted DEK format');
@@ -225,15 +240,43 @@ export function decryptDek(encryptedDekString: string): Buffer {
         throw new Error('Invalid auth tag length for DEK decryption');
     }
 
-    const decipher = crypto.createDecipheriv(ALGORITHM, key, iv, {
-        authTagLength: AUTH_TAG_LENGTH,
-    });
-    decipher.setAuthTag(authTag);
+    // Try decrypting with new KEK first
+    try {
+        const key = getKekKey(); // Master KEK
+        const decipher = crypto.createDecipheriv(ALGORITHM, key, iv, {
+            authTagLength: AUTH_TAG_LENGTH,
+        });
+        decipher.setAuthTag(authTag);
 
-    return Buffer.concat([
-        decipher.update(ciphertext),
-        decipher.final(),
-    ]);
+        return Buffer.concat([
+            decipher.update(ciphertext),
+            decipher.final(),
+        ]);
+    } catch (e: any) {
+        // Fallback to legacy ENCRYPTION_KEY only if it's an authentication tag failure.
+        // Node's crypto module throws this specific message when GCM auth fails due to a wrong key.
+        const isAuthTagFailure = e instanceof Error && e.message.includes('Unsupported state or unable to authenticate data');
+        
+        if (isAuthTagFailure) {
+            try {
+                const legacyKey = getEncryptionKey();
+                const legacyDecipher = crypto.createDecipheriv(ALGORITHM, legacyKey, iv, {
+                    authTagLength: AUTH_TAG_LENGTH,
+                });
+                legacyDecipher.setAuthTag(authTag);
+                
+                return Buffer.concat([
+                    legacyDecipher.update(ciphertext),
+                    legacyDecipher.final(),
+                ]);
+            } catch (legacyError) {
+                throw new Error('Failed to decrypt DEK: Invalid key or tampered data');
+            }
+        }
+        
+        // Re-throw if it's any other kind of unexpected error
+        throw e;
+    }
 }
 
 /**

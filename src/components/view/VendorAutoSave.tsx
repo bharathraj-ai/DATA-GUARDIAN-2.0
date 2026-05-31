@@ -11,7 +11,13 @@ export function VendorAutoSave({ token }: VendorAutoSaveProps) {
     const draftVersionRef = useRef(1);
 
     useEffect(() => {
+        const isSavingRef = { current: false };
+        let majorEditDebounce: ReturnType<typeof setTimeout> | null = null;
+
         const performAutosave = async (isBeacon = false) => {
+            if (isSavingRef.current) return;
+            isSavingRef.current = true;
+
             try {
                 // Collect state from wherever it's globally stored (e.g., window object, local storage)
                 const lastSavedWork = (window as any).__VENDOR_DRAFT__ || null;
@@ -39,6 +45,8 @@ export function VendorAutoSave({ token }: VendorAutoSaveProps) {
                 }
             } catch (error) {
                 console.error('Autosave failed:', error);
+            } finally {
+                isSavingRef.current = false;
             }
         };
 
@@ -49,12 +57,16 @@ export function VendorAutoSave({ token }: VendorAutoSaveProps) {
         const handleBeforeUnload = () => performAutosave(true);
         window.addEventListener('beforeunload', handleBeforeUnload);
 
-        // 3. Listen to major edit events from editor
-        const handleMajorEdit = () => performAutosave(false);
+        // 3. Listen to major edit events from editor (debounced 300ms)
+        const handleMajorEdit = () => {
+            if (majorEditDebounce) clearTimeout(majorEditDebounce);
+            majorEditDebounce = setTimeout(() => performAutosave(false), 300);
+        };
         window.addEventListener('vendor-major-edit', handleMajorEdit);
 
         return () => {
             clearInterval(timer);
+            if (majorEditDebounce) clearTimeout(majorEditDebounce);
             window.removeEventListener('beforeunload', handleBeforeUnload);
             window.removeEventListener('vendor-major-edit', handleMajorEdit);
         };

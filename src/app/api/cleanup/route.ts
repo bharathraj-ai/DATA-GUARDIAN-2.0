@@ -4,7 +4,15 @@ import { authorizeCronRequest } from '@/lib/security/cron-auth';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: Request) {
+/**
+ * POST /api/cleanup
+ * 
+ * Scheduled task (cron job) to hard delete expired data.
+ * Protected by timing-safe Bearer token authentication.
+ * 
+ * MUST be invoked as POST to prevent GET-based CSRF and adhere to REST semantics.
+ */
+export async function POST(request: Request) {
   const cron = authorizeCronRequest(request);
   if (!cron.ok) {
     return NextResponse.json(

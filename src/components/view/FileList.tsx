@@ -29,14 +29,7 @@ export const FileList = memo(function FileList({ token, files, isOwner }: FileLi
     const handleEdit = useCallback(async (fileId: string) => {
         if (!capabilities.canEdit) return;
         setIsEditLoading(fileId);
-        try {
-            router.push(`/editor/${token}/${fileId}`);
-        } catch (err) {
-            console.error('Edit navigation error:', err);
-            alert('Error navigating to editor');
-        } finally {
-            setIsEditLoading(null);
-        }
+        router.push(`/editor/${token}/${fileId}`);
     }, [token, capabilities.canEdit, router]);
 
     const handlePreview = useCallback(async (fileId: string) => {
