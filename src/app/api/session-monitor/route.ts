@@ -1,5 +1,7 @@
 import { NextRequest } from 'next/server';
 import { cookies } from 'next/headers';
+import { authorizeSecureLink } from '@/lib/linkAuthorization';
+import { prisma } from '@/lib/prisma';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -23,6 +25,38 @@ export async function GET(req: NextRequest) {
   if (!sessionId) {
     return new Response('Unauthorized', { status: 401 });
   }
+
+  if (!token) {
+    return new Response('Missing token', { status: 400 });
+  }
+
+  const authResult = await authorizeSecureLink(token, 'view');
+  if (!authResult.success) {
+    // Try to find the link ID for the audit log
+    const link = await prisma.secureLink.findUnique({ where: { token }, select: { id: true } });
+    if (link) {
+      await prisma.auditLog.create({
+        data: {
+          action: 'SESSION_MONITOR_DENIED',
+          linkId: link.id,
+          reason: 'Unauthorized session monitor access attempt',
+          metadata: JSON.stringify({ error: authResult.error })
+        }
+      }).catch(() => {});
+    }
+    return new Response('Unauthorized', { status: 403 });
+  }
+
+  await prisma.auditLog.create({
+    data: {
+      action: 'SESSION_MONITOR_CONNECTED',
+      linkId: authResult.context.secureLink.id,
+      reason: 'User connected to SSE session monitor',
+      metadata: JSON.stringify({
+         email: authResult.context.effectiveEmail || 'owner'
+      })
+    }
+  }).catch(() => {});
 
   const encoder = new TextEncoder();
 

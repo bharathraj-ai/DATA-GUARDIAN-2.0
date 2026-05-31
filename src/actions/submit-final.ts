@@ -6,6 +6,7 @@ import { encryptBuffer, generateDek, encryptDek } from '@/lib/crypto';
 import { validateMimeType, ALLOWED_EXTENSIONS } from '@/lib/security/file-validator';
 import { uploadToMongo } from '@/lib/mongo/operations';
 import path from 'path';
+import { logger, redactEmail } from '@/lib/logger';
 
 export type SubmitFinalResult = {
     success: boolean;
@@ -52,7 +53,7 @@ export async function submitFinal(
 
         const isMongoBacked = !!(fileRecord as any).mongoFileId;
 
-        console.log(`[Submit] FileId: ${fileId}, Vendor: ${vendorEmail}, FileName: ${uploadedFile.name}, Storage: ${isMongoBacked ? 'Mongo' : 'inline'}`);
+        logger.info(`FileId: ${fileId}, Vendor: ${redactEmail(vendorEmail)}, FileName: ${uploadedFile.name}, Storage: ${isMongoBacked ? 'Mongo' : 'inline'}`);
 
         if (isMongoBacked) {
             // ── Mongo path: upload final version to Mongo ─────────────────
@@ -95,7 +96,6 @@ export async function submitFinal(
                     status: 'submitted',
                     submittedAt: new Date(),
                     submittedBy: vendorEmail,
-                    editingLocked: true,
                     version: { increment: 1 },
                     // Clear old inline encryption metadata — the Mongo file is stored raw
                     encryptedContent: null,
@@ -121,13 +121,12 @@ export async function submitFinal(
                     status: 'submitted',
                     submittedAt: new Date(),
                     submittedBy: vendorEmail,
-                    editingLocked: true,
                     version: { increment: 1 }
                 } as any
             });
         }
 
-        console.log(`[Submit] DB Update successful for ${fileId}`);
+        logger.info(`DB Update successful for ${fileId}`);
 
         // 5. Vendor access is intentionally NOT revoked after final submission
         // (Access remains active per business logic change)
@@ -147,14 +146,14 @@ export async function submitFinal(
             }
         });
 
-        console.log(`[Submit] Audit log created. Submission complete.`);
+        logger.info(`Audit log created. Submission complete.`);
 
         // 7. Owner notification removed — submit only commits the change.
         // No email is sent and no access is revoked.
 
         return { success: true };
     } catch (error) {
-        console.error('submitFinal error:', error);
+        logger.error('submitFinal error:', error);
         return { success: false, error: 'Failed to submit final document.' };
     }
 }

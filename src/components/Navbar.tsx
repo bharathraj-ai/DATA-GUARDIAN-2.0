@@ -55,12 +55,7 @@ export default function Navbar() {
                         </Link>
                     ))}
 
-                    {!hasMounted ? null : status === 'loading' ? (
-                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', opacity: 0 }}>
-                            <div className="btn btn-sm">...</div>
-                            <div className="btn btn-sm">...</div>
-                        </div>
-                    ) : isAuthenticated ? (
+                    {isAuthenticated ? (
                             <>
                                 {isOwnerSide && (
                                     <Link
@@ -186,12 +181,7 @@ export default function Navbar() {
                     )}
 
                     <div className="navbar-mobile-cta">
-                        {!hasMounted ? null : status === 'loading' ? (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', opacity: 0 }}>
-                                <div className="btn btn-full">...</div>
-                                <div className="btn btn-full">...</div>
-                            </div>
-                        ) : isAuthenticated ? (
+                        {isAuthenticated ? (
                                 <>
                                     {/* Mobile Profile Badge */}
                                     <div style={{
