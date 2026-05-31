@@ -43,15 +43,17 @@ export default function LandingPage() {
           <div className="hero-content">
             {/* Logo/Brand */}
             <div className="brand-badge">
-              <Image src="/logo.svg" alt="Data Guardian" width={24} height={24} />
-              <span>Data Guardian</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+              </svg>
+              <span>Enterprise-Grade Security</span>
             </div>
 
             {/* Main Heading */}
             <h1 className="hero-title">
               Secure Data Sharing
               <br />
-              <span>Made Simple</span>
+              <span className="gradient-text">Made Simple</span>
             </h1>
 
             <p className="hero-subtitle">
@@ -99,27 +101,34 @@ export default function LandingPage() {
 
           {/* Hero Visual */}
           <div className="hero-visual">
-            <div className="visual-card visual-card-main">
-              <div className="visual-card-header">
-                <div className="visual-dot"></div>
-                <div className="visual-dot"></div>
-                <div className="visual-dot"></div>
-              </div>
-              <div className="visual-card-content">
-                <div className="visual-lock">
-                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                    <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+            <div className="hero-globe-container" style={{ position: 'relative', width: '100%', maxWidth: '500px', margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div className="globe-layer-glow" style={{ position: 'absolute', width: '120%', height: '120%', background: 'radial-gradient(circle, rgba(56, 189, 248, 0.08) 0%, rgba(2, 132, 199, 0.02) 50%, transparent 70%)', filter: 'blur(40px)', zIndex: 1, pointerEvents: 'none' }}></div>
+              
+              <div className="hero-globe-image-wrapper" style={{ position: 'relative', zIndex: 2, width: '100%', height: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {/* Rotating background layer 1 (Tech ring) */}
+                <div className="rotating-layer-1" style={{ position: 'absolute', width: '92%', aspectRatio: '1/1', zIndex: 1, pointerEvents: 'none' }}>
+                  <svg width="100%" height="100%" viewBox="0 0 100 100" fill="none">
+                    <circle cx="50" cy="50" r="46" stroke="#38bdf8" strokeWidth="0.5" strokeDasharray="3 9" style={{ opacity: 0.35 }} />
                   </svg>
                 </div>
-                <div className="visual-text">Secure Link Generated</div>
-                <div className="visual-timer">
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                    <path d="M8 3.5a.5.5 0 0 0-1 0V9a.5.5 0 0 0 .252.434l3.5 2a.5.5 0 0 0 .496-.868L8 8.71V3.5z" />
-                    <path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16zm7-8A7 7 0 1 1 1 8a7 7 0 0 1 14 0z" />
+                
+                {/* Rotating background layer 2 (Outer tech ring) */}
+                <div className="rotating-layer-2" style={{ position: 'absolute', width: '102%', aspectRatio: '1/1', zIndex: 1, pointerEvents: 'none' }}>
+                  <svg width="100%" height="100%" viewBox="0 0 100 100" fill="none">
+                    <circle cx="50" cy="50" r="48" stroke="#0284c7" strokeWidth="0.4" strokeDasharray="1 15" style={{ opacity: 0.3 }} />
+                    <circle cx="50" cy="50" r="44" stroke="#38bdf8" strokeWidth="0.3" style={{ opacity: 0.18 }} />
                   </svg>
-                  <span>Expires in 15m</span>
                 </div>
+
+                <Image 
+                  src="/network_globe_real.png" 
+                  alt="Global Security Network" 
+                  width={500} 
+                  height={500} 
+                  className="hero-globe-image"
+                  style={{ width: '100%', height: 'auto', display: 'block', objectFit: 'contain', mixBlendMode: 'multiply', position: 'relative', zIndex: 2 }} 
+                  priority 
+                />
               </div>
             </div>
           </div>
@@ -238,26 +247,56 @@ export default function LandingPage() {
           <div className="stats-grid">
             <ScrollReveal delay={1}>
               <div className="stat-card">
-                <div className="stat-number">256-bit</div>
-                <div className="stat-label">AES Encryption</div>
+                <div className="feature-icon feature-icon-blue" style={{ marginBottom: 0 }}>
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                  </svg>
+                </div>
+                <div>
+                  <div className="stat-number">256-bit</div>
+                  <div className="stat-label">AES Encryption</div>
+                </div>
               </div>
             </ScrollReveal>
             <ScrollReveal delay={2}>
               <div className="stat-card">
-                <div className="stat-number">100%</div>
-                <div className="stat-label">Data Privacy</div>
+                <div className="feature-icon feature-icon-purple" style={{ marginBottom: 0 }}>
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                  </svg>
+                </div>
+                <div>
+                  <div className="stat-number">100%</div>
+                  <div className="stat-label">Data Privacy</div>
+                </div>
               </div>
             </ScrollReveal>
             <ScrollReveal delay={3}>
               <div className="stat-card">
-                <div className="stat-number">24/7</div>
-                <div className="stat-label">Protection</div>
+                <div className="feature-icon feature-icon-cyan" style={{ marginBottom: 0 }}>
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <polyline points="12 6 12 12 16 14"></polyline>
+                  </svg>
+                </div>
+                <div>
+                  <div className="stat-number">24/7</div>
+                  <div className="stat-label">Protection</div>
+                </div>
               </div>
             </ScrollReveal>
             <ScrollReveal delay={4}>
               <div className="stat-card">
-                <div className="stat-number">Instant</div>
-                <div className="stat-label">Revocation</div>
+                <div className="feature-icon feature-icon-green" style={{ marginBottom: 0 }}>
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path>
+                  </svg>
+                </div>
+                <div>
+                  <div className="stat-number">Instant</div>
+                  <div className="stat-label">Revocation</div>
+                </div>
               </div>
             </ScrollReveal>
           </div>
@@ -268,21 +307,31 @@ export default function LandingPage() {
       <section className="cta-section">
         <div className="container">
           <ScrollReveal>
-            <div className="cta-card">
-              <h2 className="cta-title">Ready to Secure Your Data?</h2>
-              <p className="cta-subtitle">
-                Start sharing sensitive information with confidence. No credit card required.
-              </p>
-              <div className="cta-buttons">
-                <Link href="/how-it-works" className="btn btn-primary btn-large">
-                  <span>Learn How It Works</span>
-                  <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clipRule="evenodd" />
+            <div className="cta-card" style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: '40px', alignItems: 'center' }}>
+              <div>
+                <h2 className="cta-title">Ready to Secure Your Data?</h2>
+                <p className="cta-subtitle">
+                  Start sharing sensitive information with confidence. No credit card required.
+                </p>
+                <div className="cta-buttons" style={{ justifyContent: 'flex-start' }}>
+                  <Link href="/how-it-works" className="btn btn-primary btn-large">
+                    <span>Learn How It Works</span>
+                    <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clipRule="evenodd" />
+                    </svg>
+                  </Link>
+                  <Link href="/create-link" className="btn btn-outline-light btn-large">
+                    <span>Create Secure Link</span>
+                  </Link>
+                </div>
+              </div>
+              <div className="cta-illustration">
+                <div className="cta-shield">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
                   </svg>
-                </Link>
-                <Link href="/create-link" className="btn btn-outline-light btn-large">
-                  <span>Create Secure Link</span>
-                </Link>
+                </div>
               </div>
             </div>
           </ScrollReveal>
