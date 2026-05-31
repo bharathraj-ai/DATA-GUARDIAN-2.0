@@ -72,8 +72,8 @@ export default function RootLayout({
                   <div className="footer-grid">
                     <div className="footer-brand">
                       <Link href="/" className="footer-logo">
-                        <Image src="/logo.svg" alt="Data Guardian" width={24} height={24} />
-                        <span className="footer-logo-text">Data Guardian</span>
+                        <Image src="/logo.jpg" alt="Secure Protocol" width={28} height={28} style={{ opacity: 0.9, borderRadius: '4px' }} />
+                        <span className="footer-logo-text">Secure Protocol</span>
                       </Link>
                       <p className="footer-motto">
                         Enterprise-grade data security. Protect, share, and control your sensitive information with zero-knowledge architecture.
@@ -113,7 +113,7 @@ export default function RootLayout({
                     </div>
                   </div>
                   <div className="footer-bottom">
-                    <p>&copy; {new Date().getFullYear()} Data Guardian. All rights reserved.</p>
+                    <p>&copy; {new Date().getFullYear()} Secure Protocol. All rights reserved.</p>
                     <div className="footer-bottom-links">
                       <Link href="#">English (US)</Link>
                       <Link href="#">ISO 27001 Certified</Link>

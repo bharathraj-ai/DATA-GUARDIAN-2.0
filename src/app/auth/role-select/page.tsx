@@ -76,7 +76,7 @@ export default function RoleSelectPage() {
                         {/* Header */}
                         <div className="app-header">
                             <div className="brand-badge" style={{ marginBottom: '24px', justifyContent: 'center' }}>
-                                <Image src="/logo.svg" alt="Secure Protocol" width={32} height={32} style={{ opacity: 0.9 }}/>
+                                <Image src="/logo.jpg" alt="Secure Protocol" width={36} height={36} style={{ opacity: 0.9, borderRadius: '4px' }}/>
                                 <span className="gradient-text" style={{ fontSize: '1.5rem', fontWeight: 600 }}>Secure Protocol</span>
                             </div>
                             <h1 className="app-page-title">
