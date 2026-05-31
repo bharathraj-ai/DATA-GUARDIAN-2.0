@@ -36,7 +36,7 @@ function SignInContent() {
         }
     }, [sessionStatus, session, router, rawCallbackUrl]);
 
-    if (sessionStatus === 'loading' || sessionStatus === 'authenticated') {
+    if (sessionStatus === 'authenticated') {
         return (
             <main className="app-page">
                 <section className="app-section">

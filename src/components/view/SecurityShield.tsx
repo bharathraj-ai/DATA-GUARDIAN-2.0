@@ -32,31 +32,32 @@ type SecurityEvent =
 const BLOCKED_SHORTCUTS: Array<{
     ctrl?: boolean; shift?: boolean; alt?: boolean; meta?: boolean;
     key: string; event: SecurityEvent; message: string;
-}> = 
-[
-  { ctrl: true, key: 'c', event: 'COPY_ATTEMPT', message: 'Copy is disabled for security' },
-  { ctrl: true, key: 'x', event: 'CUT_ATTEMPT', message: 'Cut is disabled for security' },
-  { ctrl: true, key: 'p', event: 'PRINT_ATTEMPT', message: 'Printing is disabled for security' },
-  { ctrl: true, key: 's', event: 'SAVE_ATTEMPT', message: 'Saving is disabled — files are view-only' },
-  { ctrl: true, key: 'a', event: 'SELECT_ALL_ATTEMPT', message: 'Select all is disabled for security' },
-  { ctrl: true, key: 'u', event: 'VIEW_SOURCE_ATTEMPT', message: 'Viewing source is restricted' },
-  { ctrl: true, shift: true, key: 'i', event: 'DEVTOOLS_SHORTCUT', message: 'Developer tools are restricted' },
-  { ctrl: true, shift: true, key: 'j', event: 'DEVTOOLS_SHORTCUT', message: 'Developer tools are restricted' },
-  { ctrl: true, shift: true, key: 'c', event: 'DEVTOOLS_SHORTCUT', message: 'Developer tools are restricted' },
-  { meta: true, key: 'c', event: 'COPY_ATTEMPT', message: 'Copy is disabled for security' },
-  { meta: true, key: 'x', event: 'CUT_ATTEMPT', message: 'Cut is disabled for security' },
-  { meta: true, key: 'v', event: 'PASTE_ATTEMPT', message: 'Paste is disabled for security' },
-  { meta: true, key: 'p', event: 'PRINT_ATTEMPT', message: 'Printing is disabled for security' },
-  { meta: true, key: 's', event: 'SAVE_ATTEMPT', message: 'Saving is disabled for security' },
-  { meta: true, key: 'a', event: 'SELECT_ALL_ATTEMPT', message: 'Select all is disabled for security' },
-  { meta: true, key: 'u', event: 'VIEW_SOURCE_ATTEMPT', message: 'Viewing source is restricted' },
-  { meta: true, shift: true, key: 'i', event: 'DEVTOOLS_SHORTCUT', message: 'Developer tools are restricted' },
-  { ctrl: true, shift: true, key: 's', event: 'SCREENSHOT_ATTEMPT', message: 'Screenshot is disabled for security' },
-  { meta: true, shift: true, key: 's', event: 'SCREENSHOT_ATTEMPT', message: 'Screenshot is disabled for security' },
-  { key: 'PrintScreen', event: 'SCREENSHOT_ATTEMPT', message: 'Screenshots are restricted for security' },
-  { alt: true, key: 'PrintScreen', event: 'SCREENSHOT_ATTEMPT', message: 'Screenshots are restricted for security' },
-  { key: 'F12', event: 'DEVTOOLS_SHORTCUT', message: 'Developer tools are restricted' },
-];
+}> =
+    [
+        { ctrl: true, key: 'c', event: 'COPY_ATTEMPT', message: 'Copy is disabled for security' },
+        { ctrl: true, key: 'x', event: 'CUT_ATTEMPT', message: 'Cut is disabled for security' },
+        { ctrl: true, key: 'p', event: 'PRINT_ATTEMPT', message: 'Printing is disabled for security' },
+        { ctrl: true, key: 's', event: 'SAVE_ATTEMPT', message: 'Saving is disabled — files are view-only' },
+        { ctrl: true, key: 'a', event: 'SELECT_ALL_ATTEMPT', message: 'Select all is disabled for security' },
+        { ctrl: true, key: 'u', event: 'VIEW_SOURCE_ATTEMPT', message: 'Viewing source is restricted' },
+        { ctrl: true, shift: true, key: 'i', event: 'DEVTOOLS_SHORTCUT', message: 'Developer tools are restricted' },
+        { ctrl: true, shift: true, key: 'j', event: 'DEVTOOLS_SHORTCUT', message: 'Developer tools are restricted' },
+        { ctrl: true, shift: true, key: 'c', event: 'DEVTOOLS_SHORTCUT', message: 'Developer tools are restricted' },
+        { ctrl: true, shift: true, key: 's', event: 'SCREENSHOT_ATTEMPT', message: 'Screenshot is disabled for security' },
+        { meta: true, key: 'c', event: 'COPY_ATTEMPT', message: 'Copy is disabled for security' },
+        { meta: true, key: 'x', event: 'CUT_ATTEMPT', message: 'Cut is disabled for security' },
+        { meta: true, key: 'p', event: 'PRINT_ATTEMPT', message: 'Printing is disabled for security' },
+        { meta: true, key: 's', event: 'SAVE_ATTEMPT', message: 'Saving is disabled for security' },
+        { meta: true, key: 'a', event: 'SELECT_ALL_ATTEMPT', message: 'Select all is disabled for security' },
+        { meta: true, key: 'u', event: 'VIEW_SOURCE_ATTEMPT', message: 'Viewing source is restricted' },
+        { meta: true, shift: true, key: 'i', event: 'DEVTOOLS_SHORTCUT', message: 'Developer tools are restricted' },
+        { ctrl: true, shift: true, key: 's', event: 'SCREENSHOT_ATTEMPT', message: 'Screenshot is disabled for security' },
+        { meta: true, shift: true, key: 's', event: 'SCREENSHOT_ATTEMPT', message: 'Screenshot is disabled for security' },
+        { key: 'PrintScreen', event: 'SCREENSHOT_ATTEMPT', message: 'Screenshots are restricted for security' },
+        { alt: true, key: 'PrintScreen', event: 'SCREENSHOT_ATTEMPT', message: 'Screenshots are restricted for security' },
+        
+        { key: 'F12', event: 'DEVTOOLS_SHORTCUT', message: 'Developer tools are restricted' },
+    ];
 
 // ─── Component ──────────────────────────────────────────────────────
 /**
@@ -113,9 +114,23 @@ export const SecurityShield = memo(function SecurityShield({
 
     // ── Temporary Content Blur (for screenshot deterrence) ──
     const blurContent = useCallback((durationMs = 2000) => {
+        // Direct DOM manipulation for maximum speed
+        const el = document.getElementById('security-content-wrapper');
+        if (el) {
+            el.classList.add('security-content-blur');
+            el.classList.remove('security-content-normal');
+        }
+        
         setIsBlurred(true);
         if (blurTimeoutRef.current) clearTimeout(blurTimeoutRef.current);
-        blurTimeoutRef.current = setTimeout(() => setIsBlurred(false), durationMs);
+        blurTimeoutRef.current = setTimeout(() => {
+            const el = document.getElementById('security-content-wrapper');
+            if (el) {
+                el.classList.remove('security-content-blur');
+                el.classList.add('security-content-normal');
+            }
+            setIsBlurred(false);
+        }, durationMs);
     }, []);
 
     // ── Batched Event Logging (debounced to reduce server load) ──
@@ -124,14 +139,12 @@ export const SecurityShield = memo(function SecurityShield({
         if (events.length === 0) return;
 
         try {
-            // Send events one at a time (simple, reliable)
-            for (const evt of events) {
-                await fetch('/api/audit', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ token, ...evt }),
-                }).catch(() => {}); // Silent fail per event
-            }
+            // Batch all events into a single POST request
+            await fetch('/api/audit', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token, events }),
+            }).catch(() => { }); // Silent fail — audit logging must never break UX
         } catch {
             // Silent fail — audit logging must never break UX
         }
@@ -163,6 +176,15 @@ export const SecurityShield = memo(function SecurityShield({
         const handleKeyDown = (e: KeyboardEvent) => {
             const key = e.key.toLowerCase();
 
+            // INSTANT DOM BLUR for Meta/OS key to beat the OS screenshot tool
+            if (e.metaKey || key === 'meta' || key === 'os') {
+                const el = document.getElementById('security-content-wrapper');
+                if (el) {
+                    el.classList.add('security-content-blur');
+                    el.classList.remove('security-content-normal');
+                }
+            }
+
             // F12 — DevTools
             if (key === 'f12') {
                 e.preventDefault();
@@ -181,7 +203,7 @@ export const SecurityShield = memo(function SecurityShield({
                 logSecurityEvent('SCREENSHOT_ATTEMPT');
                 try {
                     navigator.clipboard.writeText('Screenshots are disabled for security reasons.');
-                } catch (err) {}
+                } catch (err) { }
                 return;
             }
 
@@ -209,12 +231,24 @@ export const SecurityShield = memo(function SecurityShield({
 
         const handleKeyUp = (e: KeyboardEvent) => {
             const key = e.key.toLowerCase();
+            
+            // Unblur if Meta is released and we still have focus
+            if (key === 'meta' || key === 'os') {
+                if (!document.hidden && document.hasFocus()) {
+                    const el = document.getElementById('security-content-wrapper');
+                    if (el) {
+                        el.classList.remove('security-content-blur');
+                        el.classList.add('security-content-normal');
+                    }
+                }
+            }
+            
             // Windows takes the screenshot and puts it in the clipboard on keyup
             // Overwrite the clipboard if they hit printscreen
             if (key === 'printscreen' || e.key === 'PrintScreen') {
                 try {
                     navigator.clipboard.writeText('Screenshots are disabled for security reasons.');
-                } catch (err) {}
+                } catch (err) { }
                 blurContent(3000);
                 flashWarning(' Screenshots are not permitted. Clipboard cleared.', 'critical');
             }
@@ -252,6 +286,13 @@ export const SecurityShield = memo(function SecurityShield({
 
         const handleVisibilityChange = () => {
             if (document.hidden) {
+                // Direct DOM manipulation for maximum speed
+                const el = document.getElementById('security-content-wrapper');
+                if (el) {
+                    el.classList.add('security-content-blur');
+                    el.classList.remove('security-content-normal');
+                }
+                
                 // Tab switched away — blur content immediately
                 setIsBlurred(true);
 
@@ -278,6 +319,11 @@ export const SecurityShield = memo(function SecurityShield({
             } else {
                 // Tab returned — unblur if session is still active
                 if (!sessionTerminated) {
+                    const el = document.getElementById('security-content-wrapper');
+                    if (el) {
+                        el.classList.remove('security-content-blur');
+                        el.classList.add('security-content-normal');
+                    }
                     setIsBlurred(false);
                     logSecurityEvent('FOCUS_REGAINED');
                 }
@@ -287,6 +333,13 @@ export const SecurityShield = memo(function SecurityShield({
         // Also track window blur/focus for more aggressive detection
         const handleBlur = () => {
             if (!document.hidden) {
+                // Direct DOM manipulation for maximum speed
+                const el = document.getElementById('security-content-wrapper');
+                if (el) {
+                    el.classList.add('security-content-blur');
+                    el.classList.remove('security-content-normal');
+                }
+
                 // Window lost focus but tab not hidden (e.g., alt-tab)
                 setIsBlurred(true);
                 logSecurityEvent('FOCUS_LOST');
@@ -295,6 +348,11 @@ export const SecurityShield = memo(function SecurityShield({
 
         const handleFocus = () => {
             if (!sessionTerminated) {
+                const el = document.getElementById('security-content-wrapper');
+                if (el) {
+                    el.classList.remove('security-content-blur');
+                    el.classList.add('security-content-normal');
+                }
                 setIsBlurred(false);
             }
         };
@@ -405,7 +463,7 @@ export const SecurityShield = memo(function SecurityShield({
             lastHeight = window.outerHeight;
         };
 
-        const interval = setInterval(checkDevTools, 2000);
+        const interval = setInterval(checkDevTools, 5000);
         window.addEventListener('resize', checkDevTools);
 
         return () => {
@@ -489,12 +547,14 @@ export const SecurityShield = memo(function SecurityShield({
                 }
                 .security-content-blur {
                     filter: blur(20px) !important;
+                    opacity: 0.05 !important;
                     pointer-events: none !important;
-                    transition: filter 0.3s ease;
+                    /* No transition here! We want instant blur when focus is lost to beat the OS screenshot freeze */
                 }
                 .security-content-normal {
                     filter: none;
-                    transition: filter 0.3s ease;
+                    opacity: 1;
+                    transition: filter 0.3s ease, opacity 0.3s ease; /* Smooth un-blur only */
                 }
                 @keyframes shieldSlideIn {
                     from { opacity: 0; transform: translateX(-50%) translateY(-20px); }
@@ -507,7 +567,10 @@ export const SecurityShield = memo(function SecurityShield({
             `}</style>
 
             {/* ═══ Content Wrapper with blur protection ═══ */}
-            <div className={isBlurred || sessionTerminated ? 'security-content-blur' : 'security-content-normal'}>
+            <div 
+                id="security-content-wrapper" 
+                className={isBlurred || sessionTerminated ? 'security-content-blur' : 'security-content-normal'}
+            >
                 {children}
             </div>
 
@@ -528,7 +591,7 @@ export const SecurityShield = memo(function SecurityShield({
                         fontSize: '36px', marginBottom: '24px',
                         boxShadow: '0 0 40px rgba(220,38,38,0.4)',
                     }}>
-                        
+
                     </div>
                     <h2 style={{ fontSize: '24px', fontWeight: 700, margin: '0 0 12px' }}>
                         Session Terminated

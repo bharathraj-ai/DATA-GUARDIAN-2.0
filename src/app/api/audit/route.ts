@@ -7,6 +7,22 @@ import { cookies } from 'next/headers';
  * Receives client-side security events from SecurityShield.
  * Fire-and-forget from the client — failures here must never break UX.
  */
+
+function sanitizeAuditMetadata(metadata: any) {
+    if (!metadata || typeof metadata !== 'object') return {};
+    
+    const allowed = ['screenWidth', 'screenHeight', 'visibility', 'page', 'browser'];
+    const sanitized: Record<string, any> = {};
+    
+    for (const key of allowed) {
+        if (key in metadata) {
+            sanitized[key] = metadata[key];
+        }
+    }
+    
+    return sanitized;
+}
+
 export async function POST(request: NextRequest) {
     try {
         const body = await request.json();
@@ -39,17 +55,19 @@ export async function POST(request: NextRequest) {
 
         // sessionId already obtained from auth check above
 
+        const sanitizedMetadata = sanitizeAuditMetadata(metadata);
+
         await prisma.auditLog.create({
             data: {
                 action: `CLIENT_${action}`,
                 linkId: secureLink.id,
                 reason: `Client security event: ${action}`,
                 metadata: JSON.stringify({
+                    ...sanitizedMetadata,
                     clientTimestamp: timestamp,
                     clientIp,
                     sessionId: sessionId.substring(0, 8) + '...', // Truncate for safety
                     userAgent: request.headers.get('user-agent')?.substring(0, 100),
-                    ...(metadata || {}),
                 }),
             },
         });

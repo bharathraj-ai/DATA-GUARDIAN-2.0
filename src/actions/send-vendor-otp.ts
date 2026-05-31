@@ -92,10 +92,10 @@ export async function sendVendorOTP(input: { token: string; email: string }) {
         });
 
         // LOCAL DEV FALLBACK: Always log the OTP to the console so the user can test
-        console.log(`\n====================================================`);
-        console.log(`🗝️  [LOCAL DEV] OTP REQUESTED FOR: ${normalizedEmail}`);
-        console.log(`🔑  OTP CODE: ${otp}`);
-        console.log(`====================================================\n`);
+        import('@/lib/logger').then(({ logger, redactEmail }) => {
+            logger.info(`OTP REQUESTED FOR: ${redactEmail(normalizedEmail)}`);
+            logger.debug(`[LOCAL DEV] OTP CODE: ${otp}`);
+        });
 
         return { success: true };
     } catch (e) {

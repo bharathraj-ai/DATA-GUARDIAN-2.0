@@ -5,6 +5,8 @@ import { NextResponse } from 'next/server';
 import { generateDeviceHash } from '@/lib/fingerprint';
 import { extractClientIP, checkGlobalRateLimit } from '@/lib/rate-limit';
 import crypto from 'crypto';
+import { validateCSRF } from '@/lib/security/csrf';
+import { logger, redactToken } from '@/lib/logger';
 
 // Try to load redis safely for hybrid environments
 async function getRedisClient() {
@@ -43,7 +45,7 @@ async function logSecurityEvent(action: string, linkId: string | null, metadata:
             }
         });
     } catch (e) {
-        console.error('Audit log failed', e);
+        logger.error('Audit log failed', e);
     }
 }
 
@@ -77,23 +79,11 @@ export async function authorizeApiRequest(
     }
 
     // 2. Anti-CSRF: only state-changing methods require Origin alignment with Host
-    const method = (options.httpMethod || 'GET').toUpperCase();
-    const origin = _headers.get('origin');
-    const host = _headers.get('host');
-    const mutating = !['GET', 'HEAD', 'OPTIONS'].includes(method);
+    const csrfResult = validateCSRF({ method: options.httpMethod || 'GET', headers: _headers });
 
-    if (process.env.NODE_ENV === 'production' && mutating) {
-        if (origin && host) {
-            try {
-                if (new URL(origin).host !== host) {
-                    await logSecurityEvent('DENIED', null, { ip, reason: 'CSRF Origin mismatch', origin, host, method });
-                    return { errorResponse: NextResponse.json({ error: 'CSRF Violation: Origin mismatch' }, { status: 403 }) };
-                }
-            } catch {
-                await logSecurityEvent('DENIED', null, { ip, reason: 'Invalid Origin header', origin, method });
-                return { errorResponse: NextResponse.json({ error: 'CSRF Violation: Invalid Origin' }, { status: 403 }) };
-            }
-        }
+    if (!csrfResult.allowed) {
+        await logSecurityEvent('DENIED', null, { ip, reason: csrfResult.reason });
+        return { errorResponse: NextResponse.json({ error: csrfResult.reason }, { status: csrfResult.status }) };
     }
 
     // 3. Prevent Replay Attacks (Nonce validation)
@@ -112,7 +102,7 @@ export async function authorizeApiRequest(
         const nonceKey = `nonce:${nonce}`;
         const isReplay = await redis.setnx(nonceKey, "1");
         if (isReplay === 0) {
-            console.error(`[SECURITY] Replay attack detected for token: ${token}`);
+            logger.security(`Replay attack detected for token: ${redactToken(token)}`);
             await logSecurityEvent('DENIED', null, { ip, reason: 'Reused nonce' });
             return { errorResponse: NextResponse.json({ error: 'Replay Attack Prevented: Nonce reused' }, { status: 403 }) };
         }

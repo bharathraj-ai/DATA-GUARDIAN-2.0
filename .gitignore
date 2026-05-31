@@ -37,6 +37,7 @@ next-env.d.ts
 /src/generated/prisma
 /secure-storage/
 /prisma/dev.db
+/src/tests/
 
 # debug
 npm-debug.log*

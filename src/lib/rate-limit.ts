@@ -5,6 +5,8 @@
  * but still blocks unbounded abuse per instance). Pair with edge/WAF rate limits in production.
  */
 
+import { logger } from '@/lib/logger';
+
 const RATE_LIMITS = {
   OTP_VERIFY: {
     MAX_ATTEMPTS: 10,
@@ -63,7 +65,7 @@ async function getRedis() {
     });
     return redisClient;
   } catch (error) {
-    console.error('[RateLimit] Redis connection failed:', error);
+    logger.error('Redis connection failed:', error);
     return null;
   }
 }
@@ -131,7 +133,7 @@ async function checkRateLimit(key: string, limit: number, windowSeconds: number)
       usedMemoryFallback: false,
     };
   } catch (error) {
-    console.error('[RateLimit] Redis error — using memory fallback (fail-closed):', error);
+    logger.error('Redis error — using memory fallback (fail-closed):', error);
     return checkRateLimitMemory(`fb:${key}`, limit, windowSeconds);
   }
 }

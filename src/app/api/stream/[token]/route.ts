@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { decryptData } from '@/lib/crypto';
 import { cleanupSingleLink } from '@/actions/cleanup';
 import { auth } from '@/lib/auth';
+import { logger } from '@/lib/logger';
 
 export const dynamic = 'force-dynamic'; // Prevent static generation during build
 
@@ -158,7 +159,7 @@ export async function GET(
                     }
                 });
             } catch (e) {
-                console.error("Failed to create presence session:", e);
+                logger.error("Failed to create presence session:", e);
             }
 
             const logSessionEnd = async (reason: string) => {
@@ -193,15 +194,15 @@ export async function GET(
                     } catch (e) {
                         // Fallback: If it STILL fails due to foreign key (meaning the link was deleted between findUnique and create)
                         if (e instanceof Error && (e.message.includes('Foreign key constraint') || e.message.includes('Foreign key constraint failed'))) {
-                            console.log(`[AUDIT] Link was deleted concurrently before session end could be logged. Retrying with linkId=null.`);
+                            logger.warn(`Link was deleted concurrently before session end could be logged. Retrying with linkId=null.`);
                             logData.linkId = null; // Unlink it
                             await prisma.auditLog.create({ data: logData });
                         } else {
-                            console.error('Failed to log session end:', e);
+                            logger.error('Failed to log session end:', e);
                         }
                     }
                 } catch (e) {
-                    console.error('Failed to execute logSessionEnd block:', e);
+                    logger.error('Failed to execute logSessionEnd block:', e);
                 }
             };
 
@@ -317,7 +318,7 @@ export async function GET(
                     };
                     safeEnqueue(encoder.encode(`data: ${JSON.stringify(heartbeat)}\n\n`));
                 } catch (error) {
-                    console.error('Heartbeat error:', error instanceof Error ? error.message : 'Unknown');
+                    logger.error('Heartbeat error:', error instanceof Error ? error.message : 'Unknown');
                     clearInterval(heartbeatInterval);
                     safeClose();
                     await logSessionEnd('error');
