@@ -31,23 +31,13 @@ export async function autosaveSession(
       return { success: false, error: 'Unauthorized vendor session' };
     }
 
-    const secureLink = await prisma.secureLink.findUnique({
-      where: { token },
-      select: { id: true }
-    });
+    // Reuse secureLink from authorization result — no extra DB query needed
+    const secureLink = authResult.context.secureLink;
 
-    if (!secureLink) {
-      return { success: false, error: 'Link not found' };
-    }
-
-    const vendorAccess = await prisma.vendorAccess.findUnique({
-      where: {
-        secureLinkId_email: {
-          secureLinkId: secureLink.id,
-          email: vendorEmail
-        }
-      }
-    });
+    // Look up vendor from the already-loaded VendorAccess array
+    const vendorAccess = (secureLink as any).VendorAccess?.find(
+      (v: any) => v.email.toLowerCase() === vendorEmail!.toLowerCase()
+    );
 
     if (!vendorAccess) {
       return { success: false, error: 'Vendor access not found' };
@@ -64,6 +54,7 @@ export async function autosaveSession(
     }
 
     // Retry mechanism for transient DB connection drops (like ECONNRESET)
+    const now = new Date();
     let retries = 3;
     let lastError;
     
@@ -76,8 +67,8 @@ export async function autosaveSession(
             resumePoint: payload.resumePoint !== undefined ? payload.resumePoint : undefined,
             currentPage: payload.currentPage !== undefined ? payload.currentPage : undefined,
             draftVersion: { increment: 1 },
-            lastCommitAt: new Date(),
-            lastSeenAt: new Date()
+            lastCommitAt: now,
+            lastSeenAt: now
           }
         });
         return { success: true, draftVersion: vendorAccess.draftVersion + 1 };

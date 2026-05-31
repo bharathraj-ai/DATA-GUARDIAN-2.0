@@ -3,6 +3,7 @@ import GoogleProvider from 'next-auth/providers/google';
 import { PrismaAdapter } from '@next-auth/prisma-adapter';
 import { prisma } from '@/lib/prisma';
 import { normalizeRole } from '@/lib/security/roles';
+import { logger, redactEmail } from '@/lib/logger';
 
 /**
  * NextAuth Configuration for Data Guardian (v4 Compatible)
@@ -105,7 +106,7 @@ export const authOptions: NextAuthOptions = {
          */
         async signIn({ user, account }) {
             // Log sign-in for audit trail (non-blocking)
-            console.log(`[AUTH] Sign-in: ${user.email} via ${account?.provider}`);
+            logger.info(`Sign-in: ${redactEmail(user.email)} via ${account?.provider}`);
             return true;
         },
 
@@ -150,13 +151,13 @@ export const authOptions: NextAuthOptions = {
     debug: process.env.NODE_ENV === 'development',
     logger: {
         error(code, metadata) {
-            console.error(`[NEXTAUTH ERROR] ${code}`, metadata);
+            logger.error(`[NEXTAUTH ERROR] ${code}`, metadata);
         },
         warn(code) {
-            console.warn(`[NEXTAUTH WARN] ${code}`);
+            logger.warn(`[NEXTAUTH WARN] ${code}`);
         },
         debug(code, metadata) {
-            console.debug(`[NEXTAUTH DEBUG] ${code}`, metadata);
+            logger.debug(`[NEXTAUTH DEBUG] ${code}`, metadata);
         }
     },
     events: {
@@ -165,7 +166,7 @@ export const authOptions: NextAuthOptions = {
          * OWNER role must be explicitly assigned (e.g., first user or admin)
          */
         async createUser({ user }) {
-            console.log(`[AUTH] New user created: ${user.email} (default: VENDOR)`);
+            logger.info(`New user created: ${redactEmail(user.email)} (default: VENDOR)`);
         },
     },
 };

@@ -4,7 +4,6 @@ import { prisma } from '@/lib/prisma';
 import { decryptData } from '@/lib/crypto';
 import { maskEmail, maskPhone } from '@/lib/masking';
 import { cookies } from 'next/headers';
-import { auth } from '@/lib/auth';
 import { cleanupSingleLink } from '@/actions/cleanup';
 import { authorizeSecureLink, CapabilityFlags } from '@/lib/linkAuthorization';
 import { tryCheckRevoked, tryValidateSession } from '@/lib/redis-helpers';
@@ -78,33 +77,15 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
             };
         }
 
-        const authSession = await auth(); // Get session for role checks
         const capabilities = authResult.context.capabilities;
+        const secureLink = authResult.context.secureLink;
 
-        const fullLink = await prisma.secureLink.findUnique({
-            where: { token },
-            include: {
-                UserData: true,
-                VendorAccess: true,
-                UserFile: {
-                    select: {
-                        id: true,
-                        fileName: true,
-                        fileType: true,
-                        fileSize: true,
-                        status: true,
-                    } as any
-                },
-                User: {
-                    select: {
-                        name: true,
-                        email: true,
-                    }
-                }
-            },
+        // Only fetch UserData — the auth result already includes VendorAccess, UserFile, User
+        const userData = await prisma.userData.findUnique({
+            where: { id: secureLink.userId },
         });
 
-        if (!fullLink || !fullLink.UserData) {
+        if (!userData) {
             return {
                 success: false,
                 error: 'This link is invalid or has been deleted.',
@@ -113,7 +94,7 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
         }
 
         const now = new Date();
-        if (fullLink.expiresAt < now) {
+        if (secureLink.expiresAt < now) {
             cleanupSingleLink(token).catch(() => { });
             return {
                 success: false,
@@ -122,12 +103,12 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
             };
         }
 
-        const remainingMs = fullLink.expiresAt.getTime() - now.getTime();
+        const remainingMs = secureLink.expiresAt.getTime() - now.getTime();
         const remainingSeconds = Math.max(0, Math.floor(remainingMs / 1000));
 
         let decryptedData: DecryptedUserData;
         try {
-            decryptedData = decryptData<DecryptedUserData>((fullLink as any).UserData.encryptedData);
+            decryptedData = decryptData<DecryptedUserData>((userData as any).encryptedData);
         } catch (decryptError) {
             console.error('Decryption failed');
             return {
@@ -139,10 +120,13 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
 
         let vendorAccess = null;
         if (authResult.context.effectiveEmail && !authResult.context.isOwner) {
-            vendorAccess = (fullLink as any).VendorAccess?.find(
+            vendorAccess = (secureLink as any).VendorAccess?.find(
                 (v: any) => v.email.toLowerCase() === authResult.context.effectiveEmail!.toLowerCase()
             );
         }
+
+        // Derive owner info from the User relation already loaded by authorizeSecureLink
+        const ownerUser = (secureLink as any).User;
 
         return {
             success: true,
@@ -153,14 +137,14 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
                 maskedPhone: maskPhone(decryptedData.phone),
                 gender: decryptedData.gender,
                 age: decryptedData.age,
-                expiresAt: fullLink.expiresAt,
+                expiresAt: secureLink.expiresAt,
                 remainingSeconds,
                 capabilities,
-                files: (fullLink as any).UserFile || [],
-                purpose: fullLink.purpose,
-                purposeDetail: fullLink.purposeDetail,
-                ownerName: fullLink.User?.name || null,
-                ownerEmail: fullLink.User?.email || null,
+                files: (secureLink as any).UserFile || [],
+                purpose: secureLink.purpose,
+                purposeDetail: secureLink.purposeDetail,
+                ownerName: ownerUser?.name || null,
+                ownerEmail: ownerUser?.email || null,
                 isOwner: authResult.context.isOwner,
                 vendorStatus: vendorAccess?.status,
                 lastSavedWork: vendorAccess?.lastSavedWork,

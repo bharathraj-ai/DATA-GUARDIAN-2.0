@@ -176,7 +176,7 @@ export default function OwnerDashboardPage() {
     const handleRevoke = async (link: DashboardLink) => {
         setRevokingId(link.id);
         try {
-            const result = await revokeAccess(link.ownerToken, false);
+            const result = await revokeAccess(link.ownerToken!, false);
             if (result.success) {
                 setLinks(prev => prev.map(l =>
                     l.id === link.id ? { ...l, isRevoked: true, status: 'revoked' as const } : l
@@ -804,7 +804,7 @@ export default function OwnerDashboardPage() {
                                                         {copiedId === link.id ? '✅ Copied!' : '📋 Copy Link'}
                                                     </button>
                                                     <Link
-                                                        href={`/revoke/${link.ownerToken}`}
+                                                        href={`/revoke/${link.ownerToken!}`}
                                                         className="btn btn-secondary btn-sm"
                                                         style={{ fontSize: '0.75rem' }}
                                                     >
