@@ -47,7 +47,7 @@ function resolveCapabilities(
   const canPreview = isAuthorized || isOwner;
   const canEdit = (secureLink.allowEditing || false) && (isAuthorized || isOwner);
   const canComment = isAuthorized || isOwner;
-  const canDownload = isAuthorized || isOwner;
+  const canDownload = isOwner || ((secureLink.allowDownload ?? false) && isAuthorized);
 
   return {
     canEdit,

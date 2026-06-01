@@ -2833,15 +2833,14 @@ body {
 
 .otp-card {
   background: #FFFFFF;
-  border: 1px solid rgba(148, 163, 184, 0.1);
+  border: 1px solid rgba(148, 163, 184, 0.2);
   border-radius: 24px;
   padding: 48px;
   max-width: 600px;
   width: 100%;
   position: relative;
   z-index: 10;
-  
-  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  box-shadow: 0 20px 40px rgba(0,0,0,0.1);
 }
 
 .otp-header {
@@ -2856,14 +2855,14 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: transparent;
+  background: rgba(14, 165, 233, 0.1);
   border-radius: 50%;
   color: var(--primary-blue);
   transition: all 0.3s ease;
 }
 
 .lock-icon.unlocked {
-  background: transparent;
+  background: rgba(16, 185, 129, 0.1);
   color: var(--success);
 }
 
@@ -2876,10 +2875,7 @@ body {
   font-size: 32px;
   font-weight: 700;
   margin-bottom: 12px;
-  background: transparent;
-  
-  
-  
+  color: var(--text-primary);
 }
 
 .otp-subtitle {
@@ -2895,11 +2891,12 @@ body {
   gap: 12px;
   padding: 16px 24px;
   background: #FFFFFF;
-  border: 1px solid rgba(148, 163, 184, 0.1);
+  border: 1px solid rgba(148, 163, 184, 0.2);
   border-radius: 12px;
   margin-bottom: 32px;
   font-size: 14px;
   font-weight: 500;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.02);
 }
 
 .otp-timer.timer-safe {
@@ -2975,8 +2972,8 @@ body {
   font-size: 28px;
   font-weight: 700;
   text-align: center;
-  background: #FFFFFF;
-  border: 2px solid rgba(148, 163, 184, 0.2);
+  background: #F8FAFC;
+  border: 2px solid rgba(148, 163, 184, 0.4);
   border-radius: 12px;
   color: var(--text-primary);
   transition: all 0.2s ease;
@@ -3040,7 +3037,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: transparent;
+  background: rgba(16, 185, 129, 0.1);
   border-radius: 50%;
   color: var(--success);
   animation: scaleIn 0.5s ease;
@@ -3088,7 +3085,7 @@ body {
   font-size: 16px;
   font-weight: 600;
   color: white;
-  background: transparent;
+  background: var(--primary-blue);
   border: none;
   border-radius: 12px;
   cursor: pointer;
@@ -3102,7 +3099,7 @@ body {
 
 .otp-button:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  box-shadow: 0 10px 20px rgba(14, 165, 233, 0.2);
 }
 
 .otp-button:disabled {
@@ -3111,11 +3108,12 @@ body {
 }
 
 .otp-button.loading {
-  background: rgba(148, 163, 184, 0.2);
+  background: var(--primary-blue);
+  opacity: 0.8;
 }
 
 .otp-button.error {
-  background: transparent;
+  background: var(--danger);
 }
 
 .otp-button svg {
@@ -4561,5 +4559,101 @@ body {
   .srv-cta-card { grid-template-columns: 1fr; padding: 40px 24px; text-align: center; }
   .badge-left { margin: 0 auto 20px; }
   .srv-cta-buttons { justify-content: center; }
+}
+
+/* --- Premium OTP Verification Animations --- */
+
+/* Breathing blue glow for loading state */
+.otp-glow-loading input {
+  border-color: rgba(14, 165, 233, 0.8) !important;
+  box-shadow: 0 0 15px rgba(14, 165, 233, 0.4), inset 0 0 8px rgba(14, 165, 233, 0.2);
+  animation: otp-breathe-blue 2s infinite ease-in-out;
+}
+
+@keyframes otp-breathe-blue {
+  0%, 100% { box-shadow: 0 0 15px rgba(14, 165, 233, 0.4), inset 0 0 8px rgba(14, 165, 233, 0.2); border-color: rgba(14, 165, 233, 0.8); }
+  50% { box-shadow: 0 0 25px rgba(14, 165, 233, 0.7), inset 0 0 12px rgba(14, 165, 233, 0.4); border-color: rgba(14, 165, 233, 1); }
+}
+
+/* Success glow state */
+.otp-glow-success input {
+  border-color: rgba(16, 185, 129, 0.8) !important;
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.5);
+  color: var(--success) !important;
+  transition: all 0.5s ease-out;
+}
+
+/* Error glow state */
+.otp-glow-error input {
+  border-color: rgba(239, 68, 68, 0.8) !important;
+  box-shadow: 0 0 15px rgba(239, 68, 68, 0.4);
+  color: var(--danger) !important;
+  animation: otp-breathe-red 2s infinite ease-in-out;
+}
+
+@keyframes otp-breathe-red {
+  0%, 100% { box-shadow: 0 0 15px rgba(239, 68, 68, 0.4); }
+  50% { box-shadow: 0 0 25px rgba(239, 68, 68, 0.7); }
+}
+
+/* Rotating border gradient wrapper */
+.rotating-border-wrapper {
+  position: relative;
+  border-radius: 12px;
+  z-index: 1;
+  padding: 4px; /* Space for the border */
+}
+
+.rotating-border-wrapper::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 14px;
+  background: conic-gradient(from 0deg, transparent 0 320deg, rgba(14, 165, 233, 1) 360deg);
+  z-index: -1;
+  animation: rotate-border 2s linear infinite;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.rotating-border-wrapper.is-verifying::before {
+  opacity: 1;
+}
+
+.rotating-border-wrapper::after {
+  content: '';
+  position: absolute;
+  inset: 2px;
+  background: var(--card-bg);
+  border-radius: 12px;
+  z-index: -1;
+}
+
+@keyframes rotate-border {
+  to { transform: rotate(360deg); }
+}
+
+/* Shimmer sweep effect */
+.shimmer-sweep {
+  position: relative;
+  overflow: hidden;
+}
+
+.shimmer-sweep::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 50%;
+  height: 100%;
+  background: linear-gradient(to right, transparent, rgba(255, 255, 255, 0.2), transparent);
+  transform: skewX(-20deg);
+  animation: shimmer 2s infinite linear;
+  pointer-events: none;
+  z-index: 2;
+}
+
+@keyframes shimmer {
+  100% { left: 200%; }
 }
 
