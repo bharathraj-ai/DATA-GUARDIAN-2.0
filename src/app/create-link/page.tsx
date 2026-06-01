@@ -21,6 +21,7 @@ interface FormDataState {
     vendorEmail: string; 
     topic: string; // Mandatory: describe what data is being shared
     allowEditing: boolean;
+    allowDownload: boolean;
 }
 
 export default function SignupPage() {
@@ -39,6 +40,7 @@ export default function SignupPage() {
         vendorEmail: '',
         topic: '',
         allowEditing: false,
+        allowDownload: false,
     });
     const [files, setFiles] = useState<FileList | null>(null);
     const [generatedLink, setGeneratedLink] = useState('');
@@ -167,6 +169,7 @@ export default function SignupPage() {
             // Also send topic as 'purpose' for backward compatibility with backend
             data.append('purpose', formData.topic);
             data.append('allowEditing', formData.allowEditing ? 'true' : 'false');
+            data.append('allowDownload', formData.allowDownload ? 'true' : 'false');
             
 
 
@@ -599,8 +602,22 @@ export default function SignupPage() {
                                             onChange={handleChange}
                                             style={{ width: '16px', height: '16px', cursor: 'pointer' }}
                                         />
-                                        <label htmlFor="allowEditing" style={{ cursor: 'pointer', margin: 0, fontSize: '14px', color: 'var(--text-primary)' }}>
+                                        <label htmlFor="allowEditing" style={{ cursor: 'pointer', margin: 0, fontSize: '14px', color: '#374151', fontWeight: 500 }}>
                                             Allow vendor to edit files using Universal Editor
+                                        </label>
+                                    </div>
+
+                                    <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '16px' }}>
+                                        <input
+                                            type="checkbox"
+                                            id="allowDownload"
+                                            name="allowDownload"
+                                            checked={formData.allowDownload}
+                                            onChange={handleChange}
+                                            style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                                        />
+                                        <label htmlFor="allowDownload" style={{ cursor: 'pointer', margin: 0, fontSize: '14px', color: '#374151', fontWeight: 500 }}>
+                                            Allow vendor to download files
                                         </label>
                                     </div>
 
@@ -794,6 +811,7 @@ export default function SignupPage() {
                                             vendorEmail: '',
                                             topic: '',
                                             allowEditing: false,
+                                            allowDownload: false,
                                         });
                                         setFiles(null);
                                         // Force full page reload to clear all caches

@@ -93,6 +93,7 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
         }
 
         const allowEditing = formData.get('allowEditing') === 'true';
+        const allowDownload = formData.get('allowDownload') === 'true';
         const validatedData = userDataSchema.safeParse(rawData);
         if (!validatedData.success) {
             return {
@@ -300,6 +301,7 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
                     // Zero Trust: Email binding - only this email can verify OTP
                     allowedVendorEmail: vendorEmail || undefined,
                     allowEditing,
+                    allowDownload,
                     LinkAccess: {
                         create: vendorAccessData.map(v => ({ 
                             vendorEmail: v.email, 
@@ -347,7 +349,8 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
                 metadata: JSON.stringify({
                     fileCount: files.length,
                     purpose: purpose || undefined,
-                    hasNotifications: !!notificationEmail
+                    hasNotifications: !!notificationEmail,
+                    allowDownload,
                 }),
             },
         }).catch(err => logger.warn('Failed to log audit event:', err.message));
