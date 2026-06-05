@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // output: 'standalone', // Uncomment this ONLY for Docker/Linux deployments. Turbopack on Windows throws EINVAL due to 'node:crypto' chunk renaming.
+  output: 'standalone', // Uncomment this ONLY for Docker/Linux deployments. Turbopack on Windows throws EINVAL due to 'node:crypto' chunk renaming.
 
   // Enable GZIP/Brotli compression
   compress: true,
