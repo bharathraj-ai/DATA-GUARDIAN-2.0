@@ -162,6 +162,7 @@ export default function OwnerDashboardPage() {
             CREATED: '🔗', ACCESSED: '👁️', REVOKED: '⛔', EXPIRED: '⏰',
             CLEANUP: '🧹', LOCKED: '🔒', DENIED: '🚫', NOTIFIED: '📧',
             SESSION_END: '🔚', PREVIEW_RESTRICTED: '🛡️',
+            SESSION_ENDED: '📋', BREAK: '☕', LOGOUT: '🚪', LOG_OUT: '🚪'
         };
         return icons[action] || '📋';
     };
@@ -467,33 +468,23 @@ export default function OwnerDashboardPage() {
                                                     const isWarning = log.severity === 'WARNING';
                                                     return (
                                                         <div key={log.id} style={{
-                                                            display: 'flex', alignItems: 'center', gap: '12px', padding: '16px', borderRadius: '10px',
-                                                            background: isCritical ? 'rgba(239, 68, 68, 0.05)' : isWarning ? 'rgba(245, 158, 11, 0.05)' : 'rgba(255,255,255,0.02)',
-                                                            borderLeft: `4px solid ${isCritical ? '#ef4444' : isWarning ? '#f59e0b' : '#3b82f6'}`,
-                                                            borderTop: '1px solid rgba(255,255,255,0.03)', borderRight: '1px solid rgba(255,255,255,0.03)', borderBottom: '1px solid rgba(255,255,255,0.03)'
+                                                            display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 0', borderBottom: '1px solid rgba(255,255,255,0.06)'
                                                         }}>
-                                                            <div style={{ fontSize: '1.5rem', flexShrink: 0 }}>
-                                                                {isCritical ? '🛑' : isWarning ? '⚠️' : 'ℹ️'}
-                                                            </div>
-                                                            <div style={{ flex: 1, minWidth: 0 }}>
-                                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '4px' }}>
-                                                                    <span style={{ fontWeight: '600', fontSize: '0.9rem', color: isCritical ? '#ef4444' : isWarning ? '#f59e0b' : 'var(--color-text)' }}>
+                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                                                                <div style={{ fontSize: '1.25rem', flexShrink: 0, color: 'var(--text-muted)' }}>
+                                                                    {getAuditIcon(log.action)}
+                                                                </div>
+                                                                <div>
+                                                                    <span style={{ fontWeight: '600', fontSize: '0.9rem', color: isCritical ? '#ef4444' : isWarning ? '#f59e0b' : 'var(--color-text)', marginRight: '8px' }}>
                                                                         {log.action}
-                                                                        <span style={{ marginLeft: '8px', fontSize: '0.7rem', padding: '2px 6px', background: 'rgba(255,255,255,0.1)', borderRadius: '4px', color: 'var(--text-muted)' }}>
-                                                                            {log.type}
-                                                                        </span>
                                                                     </span>
-                                                                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-                                                                        {formatDate(log.timestamp)}
+                                                                    <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                                                                        {log.description}
                                                                     </span>
                                                                 </div>
-                                                                <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                                                                    {log.description}
-                                                                </p>
-                                                                <div style={{ display: 'flex', gap: '12px', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                                                                    <span>👤 {log.actor}</span>
-                                                                    {log.ipAddress && <span>🌐 {log.ipAddress}</span>}
-                                                                </div>
+                                                            </div>
+                                                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', whiteSpace: 'nowrap', textAlign: 'right' }}>
+                                                                {formatDate(log.timestamp)}
                                                             </div>
                                                         </div>
                                                     );

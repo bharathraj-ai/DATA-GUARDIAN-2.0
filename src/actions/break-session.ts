@@ -71,6 +71,16 @@ export async function takeBreak(
       }
     });
 
+    // Log the BREAK action
+    await prisma.auditLog.create({
+      data: {
+        action: 'BREAK',
+        linkId: secureLink.id,
+        reason: 'Vendor paused session',
+        metadata: JSON.stringify({ vendorEmail, action: 'break' })
+      }
+    });
+
     cookieStore.delete('session_id');
     cookieStore.delete('vendor_email');
 
