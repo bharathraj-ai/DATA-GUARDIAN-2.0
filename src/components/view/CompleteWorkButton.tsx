@@ -52,41 +52,20 @@ export function CompleteWorkButton({ token }: { token: string }) {
 
     return (
         <button
+            className="btn btn-primary"
             onClick={handleComplete}
             disabled={isLoading}
             id="complete-work-btn"
             style={{
                 width: '100%',
-                padding: '14px 20px',
+                padding: '16px 20px',
                 marginTop: '16px',
-                borderRadius: '12px',
-                border: 'none',
-                background: isLoading
-                    ? 'linear-gradient(135deg, #6b7280, #4b5563)'
-                    : 'linear-gradient(135deg, #10b981, #059669)',
-                color: 'white',
-                fontWeight: 600,
-                fontSize: '15px',
-                cursor: isLoading ? 'not-allowed' : 'pointer',
-                opacity: isLoading ? 0.8 : 1,
-                transition: 'all 0.3s ease',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                gap: '8px',
-                boxShadow: isLoading ? 'none' : '0 4px 14px rgba(16,185,129,0.3)',
-            }}
-            onMouseOver={(e) => {
-                if (!isLoading) {
-                    e.currentTarget.style.transform = 'translateY(-2px)';
-                    e.currentTarget.style.boxShadow = '0 6px 20px rgba(16,185,129,0.4)';
-                }
-            }}
-            onMouseOut={(e) => {
-                if (!isLoading) {
-                    e.currentTarget.style.transform = 'translateY(0)';
-                    e.currentTarget.style.boxShadow = '0 4px 14px rgba(16,185,129,0.3)';
-                }
+                gap: '10px',
+                opacity: isLoading ? 0.8 : 1,
+                cursor: isLoading ? 'not-allowed' : 'pointer'
             }}
         >
             {isLoading ? (
