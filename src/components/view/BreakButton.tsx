@@ -45,45 +45,27 @@ export function BreakButton({ token }: { token: string }) {
 
     return (
         <button
+            className="btn btn-secondary"
             onClick={handleBreak}
             disabled={isLoading}
             id="break-work-btn"
             style={{
                 width: '100%',
-                padding: '14px 20px',
-                marginTop: '16px',
-                borderRadius: '12px',
-                border: '1px solid rgba(245,158,11,0.3)',
-                background: isLoading
-                    ? 'linear-gradient(135deg, #6b7280, #4b5563)'
-                    : 'linear-gradient(135deg, rgba(245,158,11,0.1), rgba(217,119,6,0.1))',
-                color: '#d97706',
-                fontWeight: 600,
-                fontSize: '15px',
-                cursor: isLoading ? 'not-allowed' : 'pointer',
-                opacity: isLoading ? 0.8 : 1,
-                transition: 'all 0.3s ease',
+                padding: '16px 20px',
+                marginTop: '12px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                gap: '8px',
-            }}
-            onMouseOver={(e) => {
-                if (!isLoading) {
-                    e.currentTarget.style.background = 'linear-gradient(135deg, rgba(245,158,11,0.2), rgba(217,119,6,0.2))';
-                }
-            }}
-            onMouseOut={(e) => {
-                if (!isLoading) {
-                    e.currentTarget.style.background = 'linear-gradient(135deg, rgba(245,158,11,0.1), rgba(217,119,6,0.1))';
-                }
+                gap: '10px',
+                opacity: isLoading ? 0.8 : 1,
+                cursor: isLoading ? 'not-allowed' : 'pointer'
             }}
         >
             {isLoading ? (
                 <>
                     <span style={{
-                        width: '16px', height: '16px', border: '2px solid rgba(217,119,6,0.3)',
-                        borderTopColor: '#d97706', borderRadius: '50%',
+                        width: '16px', height: '16px', border: '2px solid rgba(17, 24, 39, 0.3)',
+                        borderTopColor: '#111827', borderRadius: '50%',
                         animation: 'spin 0.8s linear infinite',
                     }} />
                     Saving Session...
