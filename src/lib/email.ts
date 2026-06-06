@@ -5,12 +5,15 @@ import nodemailer from "nodemailer";
 // ============================================
 
 const transporter = nodemailer.createTransport({
-    service: "gmail",
+    host: "smtp.gmail.com",
+    port: 465,
+    secure: true, // Use SSL
+    family: 4, // IMPORTANT: Force IPv4. Railway's IPv6 egress can hang when connecting to Google's IPv6 SMTP
     auth: {
         user: process.env.EMAIL_USER?.trim(),
         pass: process.env.EMAIL_PASS?.trim(),
     },
-});
+} as any);
 
 // ============================================
 // OTP EMAIL DELIVERY
