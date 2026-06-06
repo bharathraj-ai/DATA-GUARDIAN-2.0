@@ -33,15 +33,30 @@ export default async function ViewPage({ params }: { params: Promise<{ token: st
             'Access Denied';
 
         return (
-            <main className="profile-wrapper">
-                <div className="bg-orb bg-orb-1" />
-                <div className="bg-orb bg-orb-2" />
-                <div className="bg-grid" />
-                <div className="profile-card">
-                    <div className="error-container">
-                        <h2 className="error-title">{title}</h2>
-                        <p className="error-message">{result.error}</p>
+            <main 
+                className="profile-wrapper" 
+                style={{ 
+                    paddingTop: '120px', 
+                    minHeight: '100vh', 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    justifyContent: 'center' 
+                }}
+            >
+                <div className="profile-card" style={{ width: '100%', textAlign: 'center', padding: '60px 40px' }}>
+                    <div style={{
+                        width: '64px', height: '64px', borderRadius: '50%', background: '#FEE2E2',
+                        color: '#EF4444', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: '32px', margin: '0 auto 24px'
+                    }}>
+                        ⚠️
                     </div>
+                    <h2 style={{ fontSize: '28px', fontWeight: 800, color: '#0F172A', marginBottom: '12px' }}>
+                        {title}
+                    </h2>
+                    <p style={{ fontSize: '16px', color: '#475569', fontWeight: 500 }}>
+                        {result.error}
+                    </p>
                 </div>
             </main>
         );
@@ -58,7 +73,7 @@ export default async function ViewPage({ params }: { params: Promise<{ token: st
             initialRemainingSeconds={data.remainingSeconds}
         >
           <SecureViewWrapper token={cleanToken} viewerEmail={data.maskedEmail}>
-            <main className="profile-wrapper" style={{ position: 'relative' }}>
+            <main className="profile-wrapper" style={{ position: 'relative', paddingTop: '120px', paddingBottom: '60px' }}>
                 <div className="bg-orb bg-orb-1" />
                 <div className="bg-orb bg-orb-2" />
                 <div className="bg-grid" />
@@ -67,7 +82,7 @@ export default async function ViewPage({ params }: { params: Promise<{ token: st
                     {/* Header */}
                     <div className="profile-header">
                         <div className="header-top">
-                            <h1 className="profile-title">Secure Shared Profile</h1>
+                            <h1 className="profile-title" style={{ color: '#0F172A' }}>Secure Shared Profile</h1>
                             <div className="status-badges">
                                 <span className="status-badge connected">
                                     <span className="status-dot" /> LIVE
@@ -84,8 +99,8 @@ export default async function ViewPage({ params }: { params: Promise<{ token: st
                                 {data.firstName[0]}{data.lastName[0]}
                             </span>
                         </div>
-                        <h2 className="identity-name">{data.firstName} {data.lastName}</h2>
-                        <p className="identity-label">Shared securely for temporary access</p>
+                        <h2 className="identity-name" style={{ color: '#0F172A' }}>{data.firstName} {data.lastName}</h2>
+                        <p className="identity-label" style={{ color: '#475569' }}>Shared securely for temporary access</p>
                     </div>
 
                     {/* Sender Context */}
@@ -115,7 +130,17 @@ export default async function ViewPage({ params }: { params: Promise<{ token: st
                     {/* File List — Client Component: handles edit/preview interactions */}
                     <div className="data-section">
                         <div className="data-card">
-                            <FileList token={cleanToken} files={data.files} isOwner={data.isOwner} />
+                            <FileList 
+                                token={cleanToken} 
+                                files={data.files.map((f: any) => ({
+                                    id: f.id,
+                                    fileName: f.fileName,
+                                    fileSize: f.fileSize,
+                                    fileType: f.fileType,
+                                    status: f.status
+                                }))} 
+                                isOwner={data.isOwner} 
+                            />
                         </div>
                     </div>
 
