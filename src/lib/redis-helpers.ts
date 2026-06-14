@@ -20,6 +20,15 @@
  * └─────────────────────────────────────────────────────────┘
  */
 
+// Cache the imported redis module to avoid dynamic import overhead on every call
+let _redisModule: typeof import('@/lib/redis') | null = null;
+async function getRedisModule() {
+    if (!_redisModule) {
+        _redisModule = await import('@/lib/redis');
+    }
+    return _redisModule;
+}
+
 /** Returns true if Redis env vars are present and look real */
 function isRedisConfigured(): boolean {
     return !!(
@@ -45,7 +54,7 @@ export async function tryCheckRevoked(token: string): Promise<boolean | null> {
 
     // Redis IS configured — errors must FAIL CLOSED
     try {
-        const { isTokenRevoked } = await import('@/lib/redis');
+        const { isTokenRevoked } = await getRedisModule();
         const revoked = await isTokenRevoked(token);
         return revoked === true;
     } catch (err) {
@@ -70,7 +79,7 @@ export async function tryValidateSession(token: string, sessionId: string): Prom
 
     // Redis IS configured — errors must FAIL CLOSED
     try {
-        const { validateSession } = await import('@/lib/redis');
+        const { validateSession } = await getRedisModule();
         const isValid = await validateSession(token, sessionId);
         return isValid === true; // Strict boolean coercion
     } catch (err) {
@@ -89,7 +98,7 @@ export async function tryGetSessionTTL(token: string, sessionId: string, fallbac
     }
 
     try {
-        const { getSessionTTL } = await import('@/lib/redis');
+        const { getSessionTTL } = await getRedisModule();
         const ttl = await getSessionTTL(token, sessionId);
         return ttl > 0 ? ttl : fallback;
     } catch (err) {
@@ -110,7 +119,7 @@ export async function tryCreateSession(token: string, sessionId: string, ttlSeco
     }
 
     try {
-        const { createSession } = await import('@/lib/redis');
+        const { createSession } = await getRedisModule();
         await createSession(token, sessionId, ttlSeconds);
         return true;
     } catch (err) {

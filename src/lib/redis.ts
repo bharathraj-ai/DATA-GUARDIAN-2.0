@@ -1,16 +1,39 @@
 import { Redis } from '@upstash/redis';
 
 // ============================================
-// REDIS CLIENT INITIALIZATION
+// REDIS CLIENT INITIALIZATION (Lazy Singleton)
 // ============================================
 
 /**
  * Serverless Redis client for ephemeral session management
  * Uses Upstash Redis REST API for edge compatibility
+ * 
+ * LAZY INIT: Client is created on first use, not at module import.
+ * This prevents crashes when redis.ts is imported but Redis credentials
+ * are misconfigured or unavailable.
  */
-const redis = new Redis({
-    url: process.env.UPSTASH_REDIS_REST_URL!,
-    token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+let _redis: Redis | null = null;
+
+function getRedis(): Redis {
+    if (!_redis) {
+        _redis = new Redis({
+            url: process.env.UPSTASH_REDIS_REST_URL!,
+            token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+        });
+    }
+    return _redis;
+}
+
+// Proxy object that lazily accesses the real Redis client
+const redis = new Proxy({} as Redis, {
+    get(_target, prop) {
+        const client = getRedis();
+        const value = (client as any)[prop];
+        if (typeof value === 'function') {
+            return value.bind(client);
+        }
+        return value;
+    }
 });
 
 // Session key prefixes for organization
