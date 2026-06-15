@@ -144,6 +144,8 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
                         failedAttempts: true,
                         breakStartedAt: true,
                         totalBreakDuration: true,
+                        currentOtpHash: true,
+                        currentOtpExpiresAt: true,
                     }
                 },
             }
@@ -202,7 +204,8 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
         } else if (secureLink.VendorAccess && secureLink.VendorAccess.length > 0) {
             // If email is not provided, try to find the vendor by matching the OTP hash
             for (const v of secureLink.VendorAccess) {
-                if (v.otpHash && await verifyOTPHash(otp, v.otpHash)) {
+                const checkHash = v.currentOtpHash || v.otpHash;
+                if (checkHash && await verifyOTPHash(otp, checkHash)) {
                     vendor = v;
                     break;
                 }
@@ -359,7 +362,7 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
         }
 
         // Verify OTP (constant-time comparison via bcrypt)
-        const targetHash = vendor?.otpHash || vendorAccess?.otpHash || secureLink.otpHash;
+        const targetHash = vendor?.currentOtpHash || vendor?.otpHash || vendorAccess?.otpHash || secureLink.otpHash;
         
         if (!targetHash) {
              return {

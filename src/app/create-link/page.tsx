@@ -1,12 +1,32 @@
 'use client';
-
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, DragEvent } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { createSecureLinkWithFiles } from '@/actions/create-link-with-files';
 import { getAvailableVendors, VendorOption } from '@/actions/get-vendors';
-import QRCode from 'qrcode';
+import styles from './page.module.css';
+import { 
+    Shield, 
+    Calendar, 
+    Info,
+    User, 
+    Users, 
+    Building2, 
+    Mail, 
+    Edit3, 
+    DownloadCloud, 
+    Paperclip, 
+    UploadCloud, 
+    Lock, 
+    ArrowLeft,
+    CheckCircle2,
+    XCircle,
+    FileText,
+    X,
+    ChevronDown,
+    ChevronUp
+} from 'lucide-react';
 
 interface FormDataState {
     firstName: string;
@@ -19,7 +39,9 @@ interface FormDataState {
     validityUnit: 'minutes' | 'hours' | 'days';
     vendors: { email: string; level: number }[]; // Multi-vendor with levels
     vendorEmail: string; 
+    vendorName?: string;
     topic: string; // Mandatory: describe what data is being shared
+    message: string; // Optional message to the vendor
     allowEditing: boolean;
     allowDownload: boolean;
 }
@@ -34,11 +56,12 @@ export default function SignupPage() {
         phone: '',
         gender: '',
         age: '',
-        validityMinutes: '',
+        validityMinutes: '15',
         validityUnit: 'minutes',
         vendors: [{ email: '', level: 1 }],
         vendorEmail: '',
         topic: '',
+        message: '',
         allowEditing: false,
         allowDownload: false,
     });
@@ -46,15 +69,16 @@ export default function SignupPage() {
     const [generatedLink, setGeneratedLink] = useState('');
     const [ownerUrl, setOwnerUrl] = useState('');
     const [status, setStatus] = useState({ message: '', type: '' });
-    const [vendorError, setVendorError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
-    const [qrDataUrl, setQrDataUrl] = useState('');
     const [countdown, setCountdown] = useState<number | null>(null);
     const countdownRef = useRef<NodeJS.Timeout | null>(null);
     const [vendors, setVendors] = useState<VendorOption[]>([]);
     const [sharingMode, setSharingMode] = useState<'individual' | 'group'>('individual');
     const [selectedVendors, setSelectedVendors] = useState<{email: string, level: number}[]>([]);
-    const [tempVendorEmail, setTempVendorEmail] = useState('');
+    const [isVendorDropdownOpen, setIsVendorDropdownOpen] = useState(false);
+    
+    // Drag and Drop state
+    const [isDragging, setIsDragging] = useState(false);
 
     // Fetch available vendors on mount
     useEffect(() => {
@@ -81,45 +105,49 @@ export default function SignupPage() {
         }
     }, [sessionStatus, userRole, router]);
 
-    // Force refresh on mount to clear any cached data
-    useEffect(() => {
-        router.refresh();
-    }, [router]);
-
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
         const value = e.target.type === 'checkbox' ? (e.target as HTMLInputElement).checked : e.target.value;
         setFormData({ ...formData, [e.target.name]: value });
     };
 
-    const handleVendorChange = (index: number, field: string, value: string | number) => {
-        const newVendors = [...formData.vendors];
-        newVendors[index] = { ...newVendors[index], [field]: value };
-        setFormData({ ...formData, vendors: newVendors });
-    };
-
-    const addVendor = () => {
-        setFormData({ ...formData, vendors: [...formData.vendors, { email: '', level: 2 }] });
-    };
-
-    const removeVendor = (index: number) => {
-        const newVendors = [...formData.vendors];
-        newVendors.splice(index, 1);
-        setFormData({ ...formData, vendors: newVendors });
-    };
-
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        setFiles(e.target.files);
+        if (e.target.files && e.target.files.length > 0) {
+            setFiles(e.target.files);
+        }
+    };
+    
+    const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        setIsDragging(true);
+    };
+
+    const handleDragLeave = (e: DragEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        setIsDragging(false);
+    };
+
+    const handleDrop = (e: DragEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        setIsDragging(false);
+        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            setFiles(e.dataTransfer.files);
+        }
+    };
+
+    const removeFile = (index: number) => {
+        if (!files) return;
+        const dt = new DataTransfer();
+        for (let i = 0; i < files.length; i++) {
+            if (i !== index) dt.items.add(files[i]);
+        }
+        setFiles(dt.files.length > 0 ? dt.files : null);
     };
 
     const validateForm = (): string | null => {
-        if (formData.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) return 'Invalid email format';
-        if (formData.phone && !/^\d{10,15}$/.test(formData.phone)) return 'Phone must be 10-15 digits';
-        if (!formData.validityMinutes) return 'Time in minutes is required';
-        if (!formData.topic.trim()) return 'Topic is required — describe what data you are sharing';
+        if (!formData.validityMinutes) return 'Time is required';
         const minutes = parseInt(formData.validityMinutes);
         if (isNaN(minutes) || minutes <= 0) return 'Time must be a positive number';
         
-        // Check total minutes based on units
         let totalMinutes = minutes;
         if (formData.validityUnit === 'hours') totalMinutes *= 60;
         if (formData.validityUnit === 'days') totalMinutes *= 1440;
@@ -127,7 +155,7 @@ export default function SignupPage() {
         if (totalMinutes > 10080) return 'Total validity cannot exceed 7 days (10,080 minutes)';
 
         if (sharingMode === 'individual') {
-            if (!formData.vendorEmail) return 'Vendor email is required — specify who you are sending data to';
+            if (!formData.vendorEmail) return 'Vendor email is required';
             if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.vendorEmail)) {
                 return 'Invalid vendor email format';
             }
@@ -136,6 +164,24 @@ export default function SignupPage() {
         }
 
         return null;
+    };
+
+    const moveVendorUp = (index: number) => {
+        if (index === 0) return;
+        const newVendors = [...selectedVendors];
+        const temp = newVendors[index - 1];
+        newVendors[index - 1] = newVendors[index];
+        newVendors[index] = temp;
+        setSelectedVendors(newVendors);
+    };
+
+    const moveVendorDown = (index: number) => {
+        if (index === selectedVendors.length - 1) return;
+        const newVendors = [...selectedVendors];
+        const temp = newVendors[index + 1];
+        newVendors[index + 1] = newVendors[index];
+        newVendors[index] = temp;
+        setSelectedVendors(newVendors);
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -154,9 +200,8 @@ export default function SignupPage() {
             const data = new FormData();
             Object.entries(formData).forEach(([key, value]) => {
                 if (key === 'vendors' || key === 'vendorEmail' || key === 'validityUnit') {
-                    return; // Skip — appended separately below with correct data
+                    return; 
                 } else if (key === 'validityMinutes') {
-                    // Convert to total minutes based on selected unit
                     const mins = parseInt(formData.validityMinutes);
                     let totalMins = mins;
                     if (formData.validityUnit === 'hours') totalMins = mins * 60;
@@ -166,19 +211,14 @@ export default function SignupPage() {
                     data.append(key, value as string);
                 }
             });
-            // Also send topic as 'purpose' for backward compatibility with backend
             data.append('purpose', formData.topic);
+            data.append('purposeDetail', formData.message);
             data.append('allowEditing', formData.allowEditing ? 'true' : 'false');
             data.append('allowDownload', formData.allowDownload ? 'true' : 'false');
             
-
-
-            // Backend requires a 'vendors' JSON array
             if (sharingMode === 'individual' && formData.vendorEmail) {
-                // Must be level 1 because exactly one Team Leader is required
                 data.append('vendors', JSON.stringify([{ email: formData.vendorEmail.toLowerCase(), level: 1 }]));
             } else if (sharingMode === 'group' && selectedVendors.length > 0) {
-                // Assign level based on array order (index + 1)
                 data.append('vendors', JSON.stringify(selectedVendors.map((v, index) => ({ email: v.email.toLowerCase(), level: index + 1 }))));
             }
 
@@ -191,14 +231,10 @@ export default function SignupPage() {
             const result = await createSecureLinkWithFiles(data);
 
             if (result.success && result.shareUrl) {
-                // Refresh router cache to ensure fresh data on next navigation
                 router.refresh();
-
                 setGeneratedLink(result.shareUrl);
                 setOwnerUrl(result.ownerUrl || '');
-                setStatus({ message: 'Secure link created! OTP sent to vendor\'s email.', type: 'success' });
-
-                // Start countdown
+                setStatus({ message: 'Secure link created successfully!', type: 'success' });
                 if (result.expiresAt) {
                     startCountdown(new Date(result.expiresAt));
                 }
@@ -208,7 +244,7 @@ export default function SignupPage() {
         } catch (err: any) {
             console.error('Upload Error:', err);
             setStatus({
-                message: err?.message || 'Request failed. Please check your connection or file size.',
+                message: err?.message || 'Request failed. Please check your connection.',
                 type: 'error'
             });
         } finally {
@@ -217,25 +253,17 @@ export default function SignupPage() {
     };
 
     const startCountdown = (expiryDate: Date) => {
-        if (countdownRef.current) {
-            clearInterval(countdownRef.current);
-        }
-
+        if (countdownRef.current) clearInterval(countdownRef.current);
         const updateCountdown = () => {
             const now = Date.now();
             const diff = expiryDate.getTime() - now;
-
             if (diff <= 0) {
                 setCountdown(0);
-                if (countdownRef.current) {
-                    clearInterval(countdownRef.current);
-                }
+                if (countdownRef.current) clearInterval(countdownRef.current);
                 return;
             }
-
             setCountdown(Math.floor(diff / 1000));
         };
-
         updateCountdown();
         countdownRef.current = setInterval(updateCountdown, 1000);
     };
@@ -250,592 +278,477 @@ export default function SignupPage() {
     const copyToClipboard = async () => {
         if (!generatedLink) return;
         try {
-            if (navigator.clipboard && window.isSecureContext) {
-                await navigator.clipboard.writeText(generatedLink);
-            } else {
-                const textArea = document.createElement('textarea');
-                textArea.value = generatedLink;
-                textArea.style.position = 'fixed';
-                textArea.style.left = '-999999px';
-                textArea.style.top = '-999999px';
-                document.body.appendChild(textArea);
-                textArea.focus();
-                textArea.select();
-                document.execCommand('copy');
-                document.body.removeChild(textArea);
-            }
-            setStatus({ message: 'Link copied!', type: 'success' });
-            setTimeout(() => {
-                setStatus({ message: 'Link generated successfully!', type: 'success' });
-            }, 1500);
+            await navigator.clipboard.writeText(generatedLink);
+            setStatus({ message: 'Link copied to clipboard!', type: 'success' });
         } catch (err) {
-            console.error('Copy failed:', err);
             setStatus({ message: 'Failed to copy. Please select and copy manually.', type: 'error' });
         }
     };
 
-    useEffect(() => {
-        return () => {
-            if (countdownRef.current) {
-                clearInterval(countdownRef.current);
-            }
-        };
-    }, []);
-    // Authentication is optional for link creation
-    // If signed in, we can pre-fill the notification email
-    // Auth is required for VENDORS accessing links, not for OWNERS creating them
+    const formatBytes = (bytes: number) => {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    };
 
     return (
-        <main className="app-page">
-            <section className="app-section">
-                <div className="container">
-                    <div className="app-container">
-                        {/* Header */}
-                        <div className="app-header">
-                            <h1 className="app-page-title">
-                                Create <span className="gradient-text">Secure Link</span>
-                            </h1>
-                            <p className="app-page-subtitle">
-                                Fill in the details below to generate an encrypted, time-limited link
-                            </p>
+        <div className={styles.container}>
+            {/* Header */}
+            <div className={styles.header}>
+                <div className={styles.headerIcon}>
+                    <Shield size={24} />
+                </div>
+                <h1 className={styles.title}>
+                    Create <span className={styles.titleBlue}>Secure Link</span>
+                </h1>
+                <p className={styles.subtitle}>
+                    Generate an encrypted, time-limited link to share your files securely.
+                </p>
+            </div>
+
+            {/* Form Card */}
+            <div className={styles.formCard}>
+                <form onSubmit={handleSubmit}>
+                    
+                    {/* SECTION 1: LINK SETTINGS */}
+                    <div className={styles.stepSection}>
+                        <div className={styles.stepHeader}>
+                            <div className={styles.stepIconContainer}>
+                                <Shield size={20} />
+                            </div>
+                            <h2 className={styles.stepTitle}>2. Link Settings</h2>
                         </div>
+                        <p className={styles.stepSubtitle}>Control access and expiration.</p>
 
-                        {/* Form Card */}
-                        <div className="app-form-card">
-                            <form onSubmit={handleSubmit} className="app-form">
-                                {/* Personal Information Section */}
-                                <div className="form-section">
-                                    <h3 className="form-section-title">
-                                        <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-                                            <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
-                                        </svg>
-                                        <span>Personal Information</span>
-                                    </h3>
-
-                                    <div className="form-row">
-                                        <div className="form-group">
-                                            <label className="form-label">First Name</label>
-                                            <input
-                                                type="text"
-                                                name="firstName"
-                                                value={formData.firstName}
-                                                onChange={handleChange}
-                                                className="form-input"
-                                                placeholder="John"
-                                            />
-                                        </div>
-
-                                        <div className="form-group">
-                                            <label className="form-label">Last Name</label>
-                                            <input
-                                                type="text"
-                                                name="lastName"
-                                                value={formData.lastName}
-                                                onChange={handleChange}
-                                                className="form-input"
-                                                placeholder="Doe"
-                                            />
-                                        </div>
-                                    </div>
-
-                                    <div className="form-group">
-                                        <label className="form-label">Email Address</label>
+                        <div className={styles.formGroup}>
+                            <label className={styles.formLabel}>Link Expiration</label>
+                            <div className={styles.gridSettings}>
+                                <div style={{ display: 'flex', gap: '10px', flex: 1 }}>
+                                    <div className={styles.inputWrapper} style={{ flex: 1 }}>
+                                        <Calendar className={styles.inputIcon} size={18} />
                                         <input
-                                            type="email"
-                                            name="email"
-                                            value={formData.email}
+                                            type="number"
+                                            name="validityMinutes"
+                                            value={formData.validityMinutes}
                                             onChange={handleChange}
-                                            className="form-input"
-                                            placeholder="john.doe@example.com"
+                                            className={styles.input}
+                                            style={{ paddingLeft: '2.75rem' }}
+                                            min="1"
+                                            required
                                         />
                                     </div>
-
-                                    <div className="form-row">
-                                        <div className="form-group">
-                                            <label className="form-label">Phone Number</label>
-                                            <input
-                                                type="tel"
-                                                name="phone"
-                                                value={formData.phone}
-                                                onChange={handleChange}
-                                                className="form-input"
-                                                placeholder="1234567890"
-                                                maxLength={10}
-                                            />
-                                        </div>
-
-                                        <div className="form-group">
-                                            <label className="form-label">Age</label>
-                                            <input
-                                                type="number"
-                                                name="age"
-                                                value={formData.age}
-                                                onChange={handleChange}
-                                                className="form-input"
-                                                placeholder="25"
-                                                min={1}
-                                            />
-                                        </div>
-                                    </div>
-
-                                    <div className="form-group">
-                                        <label className="form-label">Gender</label>
+                                    <div className={styles.inputWrapper} style={{ flex: 1 }}>
                                         <select
-                                            name="gender"
-                                            value={formData.gender}
+                                            name="validityUnit"
+                                            value={formData.validityUnit}
                                             onChange={handleChange}
-                                            className="form-select"
+                                            className={styles.input}
                                         >
-                                            <option value="">Not specified</option>
-                                            <option value="male">Male</option>
-                                            <option value="female">Female</option>
-                                            <option value="other">Other</option>
+                                            <option value="minutes">Minutes</option>
+                                            <option value="hours">Hours</option>
+                                            <option value="days">Days</option>
                                         </select>
                                     </div>
                                 </div>
-
-                                {/* Security Settings Section */}
-                                <div className="form-section">
-                                    <h3 className="form-section-title">
-                                        <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-                                            <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
-                                        </svg>
-                                        <span>Security Settings</span>
-                                    </h3>
-
-                                    <div className="form-group">
-                                        <label className="form-label">Topic <span style={{ color: 'var(--danger)' }}>*</span></label>
-                                        <input
-                                            type="text"
-                                            name="topic"
-                                            value={formData.topic}
-                                            onChange={handleChange}
-                                            className="form-input"
-                                            placeholder="e.g., Tax Documents, Medical Records, Contract Draft..."
-                                            required
-                                            maxLength={100}
-                                        />
-                                        <small className="form-hint">
-                                            Describe what data you are sharing. This stays in your history even after data is deleted.
-                                        </small>
-                                    </div>
-
-                                    <div className="form-group">
-                                        <label className="form-label">Link Expiration</label>
-                                        <div style={{ display: 'flex', gap: '8px' }}>
-                                            <input
-                                                type="number"
-                                                name="validityMinutes"
-                                                value={formData.validityMinutes}
-                                                onChange={handleChange}
-                                                className="form-input"
-                                                placeholder="15"
-                                                min={1}
-                                                style={{ flex: 1 }}
-                                            />
-                                            <select
-                                                name="validityUnit"
-                                                value={formData.validityUnit}
-                                                onChange={handleChange}
-                                                className="form-select"
-                                                style={{ width: '120px' }}
-                                            >
-                                                <option value="minutes">Minutes</option>
-                                                <option value="hours">Hours</option>
-                                                <option value="days">Days</option>
-                                            </select>
-                                        </div>
-                                        <small className="form-hint">
-                                            Link will automatically expire after this duration (Max 7 days)
-                                        </small>
-                                    </div>
-
-                                    <div className="form-group">
-                                        <label className="form-label">Sharing Mode</label>
-                                        <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
-                                            <button 
-                                                type="button" 
-                                                className={`btn ${sharingMode === 'individual' ? 'btn-primary' : 'btn-secondary'}`}
-                                                onClick={() => setSharingMode('individual')}
-                                                style={{ flex: 1, padding: '10px' }}
-                                            >
-                                                Individual
-                                            </button>
-                                            <button 
-                                                type="button" 
-                                                className={`btn ${sharingMode === 'group' ? 'btn-primary' : 'btn-secondary'}`}
-                                                onClick={() => setSharingMode('group')}
-                                                style={{ flex: 1, padding: '10px' }}
-                                            >
-                                                Group
-                                            </button>
-                                        </div>
-                                    </div>
-
-                                    {/* Zero Trust: Vendor Binding */}
-                                    {sharingMode === 'individual' ? (
-                                        <div className="form-group">
-                                            <label className="form-label">Vendor Email <span style={{ color: 'var(--danger)' }}>*</span></label>
-                                            <input
-                                                type="email"
-                                                name="vendorEmail"
-                                                value={formData.vendorEmail}
-                                                onChange={handleChange}
-                                                className="form-input"
-                                                placeholder="vendor@example.com"
-                                                required={sharingMode === 'individual'}
-                                                autoComplete="off"
-                                                list="vendor-emails"
-                                            />
-                                            <datalist id="vendor-emails">
-                                                {vendors.map((vendor) => (
-                                                    <option key={vendor.email} value={vendor.email}>
-                                                        {vendor.name || ''}
-                                                    </option>
-                                                ))}
-                                            </datalist>
-                                            <small className="form-hint">
-                                                Only this email will be able to access the shared data.
-                                            </small>
-                                        </div>
-                                    ) : (
-                                        <div className="form-group">
-                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                                                <label className="form-label" style={{ marginBottom: 0 }}>Select Group Members <span style={{ color: 'var(--danger)' }}>*</span></label>
-                                                <span style={{ backgroundColor: selectedVendors.length > 0 ? 'var(--primary)' : 'var(--bg-tertiary)', color: selectedVendors.length > 0 ? 'white' : 'var(--text-secondary)', padding: '2px 8px', borderRadius: '12px', fontSize: '12px', fontWeight: 600 }}>
-                                                    {selectedVendors.length} {selectedVendors.length === 1 ? 'Member' : 'Members'} Selected
-                                                </span>
-                                            </div>
-                                            <div style={{ border: '1px solid var(--border)', borderRadius: '8px', padding: '12px', maxHeight: '250px', overflowY: 'auto' }}>
-                                                {vendors.length === 0 ? (
-                                                    <p style={{ color: 'var(--text-secondary)', textAlign: 'center', margin: '10px 0' }}>No vendors available</p>
-                                                ) : vendors.map((vendor) => {
-                                                    const isSelected = selectedVendors.some(v => v.email === vendor.email);
-                                                    
-                                                    return (
-                                                        <div key={vendor.email} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px', borderBottom: '1px solid var(--border)', background: isSelected ? 'rgba(99, 102, 241, 0.05)' : 'transparent', borderRadius: '4px' }}>
-                                                            <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', flex: 1 }}>
-                                                                <input 
-                                                                    type="checkbox" 
-                                                                    checked={isSelected}
-                                                                    onChange={(e) => {
-                                                                        if (e.target.checked) {
-                                                                            setSelectedVendors([...selectedVendors, { email: vendor.email, level: 2 }]);
-                                                                        } else {
-                                                                            setSelectedVendors(selectedVendors.filter(v => v.email !== vendor.email));
-                                                                        }
-                                                                    }}
-                                                                    style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: 'var(--primary)' }}
-                                                                />
-                                                                <div>
-                                                                    <div style={{ fontWeight: 500, color: 'var(--text-primary)', fontSize: '14px' }}>{vendor.name || vendor.email.split('@')[0]}</div>
-                                                                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{vendor.email}</div>
-                                                                </div>
-                                                            </label>
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
-                                            
-                                            {/* Arranged Hierarchy UI */}
-                                            {selectedVendors.length > 0 && (
-                                                <div style={{ marginTop: '16px', borderTop: '1px dashed var(--border)', paddingTop: '16px' }}>
-                                                    <label className="form-label" style={{ marginBottom: '8px' }}>
-                                                        Arranged Hierarchy <span style={{ color: 'var(--danger)' }}>*</span>
-                                                    </label>
-                                                    <small className="form-hint" style={{ marginBottom: '12px', display: 'block' }}>
-                                                        Use arrows to arrange priority. The top person gets exclusive editing access (Level 1).
-                                                    </small>
-                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                                        {selectedVendors.map((sv, index) => {
-                                                            const vendorObj = vendors.find(v => v.email === sv.email);
-                                                            const name = vendorObj?.name || sv.email.split('@')[0];
-                                                            
-                                                            const moveUp = () => {
-                                                                if (index === 0) return;
-                                                                const newArr = [...selectedVendors];
-                                                                [newArr[index - 1], newArr[index]] = [newArr[index], newArr[index - 1]];
-                                                                setSelectedVendors(newArr);
-                                                            };
-                                                            
-                                                            const moveDown = () => {
-                                                                if (index === selectedVendors.length - 1) return;
-                                                                const newArr = [...selectedVendors];
-                                                                [newArr[index + 1], newArr[index]] = [newArr[index], newArr[index + 1]];
-                                                                setSelectedVendors(newArr);
-                                                            };
-
-                                                            return (
-                                                                <div key={sv.email} style={{ display: 'flex', alignItems: 'center', gap: '12px', background: 'rgba(255,255,255,0.03)', padding: '10px 14px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
-                                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                                                        <button type="button" onClick={moveUp} disabled={index === 0} style={{ border: 'none', background: 'transparent', color: 'var(--color-text)', cursor: index === 0 ? 'not-allowed' : 'pointer', opacity: index === 0 ? 0.3 : 1, padding: 0, fontSize: '14px' }}>▲</button>
-                                                                        <button type="button" onClick={moveDown} disabled={index === selectedVendors.length - 1} style={{ border: 'none', background: 'transparent', color: 'var(--color-text)', cursor: index === selectedVendors.length - 1 ? 'not-allowed' : 'pointer', opacity: index === selectedVendors.length - 1 ? 0.3 : 1, padding: 0, fontSize: '14px' }}>▼</button>
-                                                                    </div>
-                                                                    
-                                                                    <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: index === 0 ? 'var(--primary)' : 'rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 'bold' }}>
-                                                                        {index + 1}
-                                                                    </div>
-                                                                    
-                                                                    <div style={{ flex: 1 }}>
-                                                                        <p style={{ fontSize: '14px', fontWeight: 600, color: index === 0 ? '#60a5fa' : 'var(--text-primary)', margin: 0 }}>
-                                                                            {name} {index === 0 ? '(Team Leader)' : ''}
-                                                                        </p>
-                                                                        <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: 0 }}>
-                                                                            {sv.email}
-                                                                        </p>
-                                                                    </div>
-                                                                </div>
-                                                            );
-                                                        })}
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </div>
-                                    )}
-
-                                    <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '16px' }}>
-                                        <input
-                                            type="checkbox"
-                                            id="allowEditing"
-                                            name="allowEditing"
-                                            checked={formData.allowEditing}
-                                            onChange={handleChange}
-                                            style={{ width: '16px', height: '16px', cursor: 'pointer' }}
-                                        />
-                                        <label htmlFor="allowEditing" style={{ cursor: 'pointer', margin: 0, fontSize: '14px', color: '#374151', fontWeight: 500 }}>
-                                            Allow vendor to edit files using Universal Editor
-                                        </label>
-                                    </div>
-
-                                    <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '16px' }}>
-                                        <input
-                                            type="checkbox"
-                                            id="allowDownload"
-                                            name="allowDownload"
-                                            checked={formData.allowDownload}
-                                            onChange={handleChange}
-                                            style={{ width: '16px', height: '16px', cursor: 'pointer' }}
-                                        />
-                                        <label htmlFor="allowDownload" style={{ cursor: 'pointer', margin: 0, fontSize: '14px', color: '#374151', fontWeight: 500 }}>
-                                            Allow vendor to download files
-                                        </label>
-                                    </div>
-
-                                    <div className="form-group" style={{ marginTop: '16px' }}>
-                                        <label className="form-label">Attach Files (Optional)</label>
-                                        <div className="file-upload-wrapper">
-                                            <input
-                                                type="file"
-                                                multiple
-                                                onChange={handleFileChange}
-                                                className="file-input"
-                                                accept=".xls,.xlsx,.csv,.png,.jpg,.jpeg,.pdf,.txt"
-                                                id="file-upload"
-                                            />
-                                            <label htmlFor="file-upload" className="file-upload-label">
-                                                <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-                                                    <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z" clipRule="evenodd" />
-                                                </svg>
-                                                <span>{files && files.length > 0 ? `${files.length} file(s) selected` : 'Choose files to upload'}</span>
-                                            </label>
-                                        </div>
-                                        <small className="form-hint">
-                                            Max 15MB per file. Supported: Images, PDF, Excel, CSV, Text
-                                        </small>
-                                    </div>
+                                <div className={styles.infoBox}>
+                                    <Info className={styles.infoBoxIcon} size={16} />
+                                    <span>The link will automatically expire after the selected time.</span>
                                 </div>
-
-                                {/* Status Message */}
-                                {status.message && (
-                                    <div className={`status-message status-${status.type}`}>
-                                        {status.type === 'success' ? (
-                                            <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-                                                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                                            </svg>
-                                        ) : (
-                                            <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-                                                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                                            </svg>
-                                        )}
-                                        <span>{status.message}</span>
-                                    </div>
-                                )}
-
-                                {/* Submit Button */}
-                                <button
-                                    type="submit"
-                                    disabled={isLoading}
-                                    className="btn btn-primary btn-large btn-full"
-                                >
-                                    {isLoading ? (
-                                        <>
-                                            <div className="button-spinner"></div>
-                                            <span>Generating Secure Link...</span>
-                                        </>
-                                    ) : (
-                                        <>
-                                            <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-                                                <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
-                                            </svg>
-                                            <span>Generate Secure Link</span>
-                                        </>
-                                    )}
-                                </button>
-                            </form>
-
-                            {/* Results Section */}
-                            {generatedLink && (
-                                <div className="results-section">
-                                    <div className="result-card result-card-success">
-                                        <div className="result-header">
-                                            <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-                                                <path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z" />
-                                                <path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z" />
-                                            </svg>
-                                            <h4>Link Generated and OTP Sent</h4>
-                                        </div>
-                                        
-                                        <p style={{ color: 'var(--text-secondary)', fontSize: '15px', lineHeight: '1.6', margin: '0 0 16px' }}>
-                                            The secure link and OTP have been emailed to:
-                                        </p>
-                                        <div style={{
-                                            background: 'var(--bg-tertiary)',
-                                            borderRadius: '8px',
-                                            padding: '16px',
-                                            textAlign: 'left',
-                                            marginBottom: '16px',
-                                            display: 'flex',
-                                            flexDirection: 'column',
-                                            gap: '8px'
-                                        }}>
-                                            {selectedVendors.length > 0 ? selectedVendors.map((v, idx) => (
-                                                <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', borderBottom: idx < selectedVendors.length - 1 ? '1px solid #E5E7EB' : 'none', paddingBottom: idx < selectedVendors.length - 1 ? '8px' : '0' }}>
-                                                    <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>📧 {v.email}</span>
-                                                    <span style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>Level {v.level}</span>
-                                                </div>
-                                            )) : (
-                                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                                    <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>📧 {formData.vendorEmail}</span>
-                                                    <span style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>Level 1</span>
-                                                </div>
-                                            )}
-                                        </div>
-
-                                        <p style={{ color: 'var(--text-secondary)', fontSize: '15px', lineHeight: '1.6', margin: '0 0 16px' }}>
-                                            Share this link with your vendors manually if needed:
-                                        </p>
-                                        
-                                        <div className="link-display-box" style={{ 
-                                            background: 'rgba(0,0,0,0.3)', 
-                                            padding: '12px', 
-                                            borderRadius: '8px',
-                                            display: 'flex',
-                                            justifyContent: 'space-between',
-                                            alignItems: 'center',
-                                            marginBottom: '16px'
-                                        }}>
-                                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '14px', color: 'var(--primary)' }}>
-                                                {generatedLink}
-                                            </span>
-                                            <button type="button" onClick={copyToClipboard} className="btn-icon" style={{ padding: '6px', background: 'var(--primary)', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
-                                                Copy
-                                            </button>
-                                        </div>
-                                    </div>
-
-                                    {/* Countdown Timer */}
-                                    {countdown !== null && (
-                                        <div className={`result-card ${countdown <= 0 ? 'result-card-danger' : countdown < 300 ? 'result-card-warning' : ''}`}>
-                                            <div className="result-header">
-                                                <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-                                                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
-                                                </svg>
-                                                <h4>{countdown <= 0 ? 'Link Expired' : 'Time Remaining'}</h4>
-                                            </div>
-                                            <div className="countdown-display">
-                                                {formatCountdown(countdown)}
-                                            </div>
-                                            {countdown <= 0 && (
-                                                <p className="result-hint">
-                                                    This link has expired. Generate a new one if needed.
-                                                </p>
-                                            )}
-                                        </div>
-                                    )}
-
-                                    {/* Owner Dashboard Link */}
-                                    {ownerUrl && (
-                                        <div className="result-card result-card-warning">
-                                            <div className="result-header">
-                                                <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-                                                    <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
-                                                </svg>
-                                                <h4>Owner Dashboard (Kill Switch)</h4>
-                                            </div>
-                                            <p className="result-hint" style={{ marginBottom: '12px' }}>
-                                                Save this link to revoke access anytime:
-                                            </p>
-                                            <a href={ownerUrl} target="_blank" className="dashboard-link">
-                                                {ownerUrl}
-                                            </a>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
+                            </div>
                         </div>
 
-                        {/* Back Button */}
-                        <div className="app-footer">
-                            {generatedLink ? (
-                                <button
-                                    onClick={() => {
-                                        // Clear all state
-                                        setGeneratedLink('');
-                                        setOwnerUrl('');
-                                        setQrDataUrl('');
-                                        setCountdown(null);
-                                        setSelectedVendors([]);
-                                        setStatus({ message: '', type: '' });
-                                        setSharingMode('individual');
-                                        setSelectedVendors([]);
-                                        setFormData({
-                                            firstName: '',
-                                            lastName: '',
-                                            email: '',
-                                            phone: '',
-                                            gender: '',
-                                            age: '',
-                                            validityMinutes: '',
-                                            validityUnit: 'minutes',
-                                            vendors: [{ email: '', level: 1 }],
-                                            vendorEmail: '',
-                                            topic: '',
-                                            allowEditing: false,
-                                            allowDownload: false,
-                                        });
-                                        setFiles(null);
-                                        // Force full page reload to clear all caches
-                                        window.location.href = `/create-link?t=${Date.now()}`;
-                                    }}
-                                    className="btn btn-primary"
-                                >
-                                    <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-                                        <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
-                                    </svg>
-                                    <span>Create Another Secure Link</span>
-                                </button>
-                            ) : (
-                                <Link href="/services" className="btn btn-secondary">
-                                    <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-                                        <path fillRule="evenodd" d="M9.707 16.707a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6a1 1 0 011.414 1.414L5.414 9H17a1 1 0 110 2H5.414l4.293 4.293a1 1 0 010 1.414z" clipRule="evenodd" />
-                                    </svg>
-                                    <span>Back to Services</span>
-                                </Link>
-                            )}
+                        <div className={styles.formGroup} style={{ marginTop: '2rem' }}>
+                            <label className={styles.formLabel}>Title</label>
+                            <p className={styles.stepSubtitle} style={{ marginLeft: 0, marginBottom: '0.5rem' }}>Provide a title for this secure link.</p>
+                            <div className={styles.inputWrapper}>
+                                <FileText className={styles.inputIcon} size={18} />
+                                <input
+                                    type="text"
+                                    name="topic"
+                                    value={formData.topic}
+                                    onChange={handleChange}
+                                    className={styles.input}
+                                    placeholder="e.g. Q3 Financial Reports"
+                                    required
+                                    maxLength={100}
+                                />
+                            </div>
+                        </div>
+
+                        <div className={styles.formGroup} style={{ marginTop: '2rem' }}>
+                            <label className={styles.formLabel}>Message to Vendor</label>
+                            <p className={styles.stepSubtitle} style={{ marginLeft: 0, marginBottom: '0.5rem' }}>Add an optional message or instructions for the recipient.</p>
+                            <div className={styles.inputWrapper}>
+                                <FileText className={styles.inputIcon} size={18} style={{ top: '24px' }} />
+                                <textarea
+                                    name="message"
+                                    value={formData.message}
+                                    onChange={handleChange as any}
+                                    className={styles.input}
+                                    placeholder="e.g. Please review the attached files by Friday."
+                                    rows={3}
+                                    maxLength={500}
+                                    style={{ padding: '12px 12px 12px 2.75rem', resize: 'vertical' }}
+                                />
+                            </div>
                         </div>
                     </div>
-                </div>
-            </section>
-        </main>
+
+                    {/* SECTION 2: VENDOR DETAILS & PERMISSIONS */}
+                    <div className={styles.stepSection}>
+                        <div className={styles.stepHeader}>
+                            <div className={styles.stepIconContainer}>
+                                <Building2 size={20} />
+                            </div>
+                            <h2 className={styles.stepTitle}>3. Vendor Details</h2>
+                        </div>
+                        <p className={styles.stepSubtitle}>Provide vendor information for tracking and compliance.</p>
+
+                        <div className={styles.formGroup} style={{ marginTop: '1rem', marginBottom: '2rem' }}>
+                            <label className={styles.formLabel}>Sharing Mode</label>
+                            <p className={styles.stepSubtitle} style={{ marginLeft: 0, marginBottom: '1rem' }}>Choose how the link can be used.</p>
+                            <div className={styles.modeSelection}>
+                                <div 
+                                    className={`${styles.modeCard} ${sharingMode === 'individual' ? styles.modeCardActive : ''}`}
+                                    onClick={() => setSharingMode('individual')}
+                                >
+                                    <div className={styles.radioCircle}>
+                                        <div className={styles.radioInner}></div>
+                                    </div>
+                                    <User className={styles.modeIcon} size={24} />
+                                    <div>
+                                        <div className={styles.modeTitle}>Individual</div>
+                                        <div className={styles.modeDesc}>Only the recipient can access</div>
+                                    </div>
+                                </div>
+                                <div 
+                                    className={`${styles.modeCard} ${sharingMode === 'group' ? styles.modeCardActive : ''}`}
+                                    onClick={() => setSharingMode('group')}
+                                >
+                                    <div className={styles.radioCircle}>
+                                        <div className={styles.radioInner}></div>
+                                    </div>
+                                    <Users className={styles.modeIcon} size={24} />
+                                    <div>
+                                        <div className={styles.modeTitle}>Group</div>
+                                        <div className={styles.modeDesc}>Anyone with the link can access</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className={styles.formGroup} style={{ marginTop: '2rem', marginBottom: '2rem' }}>
+                            <label className={styles.formLabel}>
+                                {sharingMode === 'individual' ? 'Select Vendor' : 'Select Group Members'}
+                            </label>
+
+                            <div 
+                                onClick={() => setIsVendorDropdownOpen(!isVendorDropdownOpen)}
+                                style={{ 
+                                    padding: '12px 16px', 
+                                    border: '1px solid #d1d5db', 
+                                    borderRadius: '6px', 
+                                    display: 'flex', 
+                                    justifyContent: 'space-between', 
+                                    alignItems: 'center',
+                                    cursor: 'pointer',
+                                    backgroundColor: '#f9fafb'
+                                }}
+                            >
+                                <span style={{ color: (sharingMode === 'individual' && (formData.vendorName || formData.vendorEmail)) || (sharingMode === 'group' && selectedVendors.length > 0) ? '#111827' : '#6b7280' }}>
+                                    {sharingMode === 'individual' 
+                                        ? (formData.vendorName || formData.vendorEmail || 'Select a vendor...') 
+                                        : (selectedVendors.length > 0 ? `${selectedVendors.length} vendors selected` : 'Select vendors...')}
+                                </span>
+                                {isVendorDropdownOpen ? <ChevronUp size={20} color="#6b7280" /> : <ChevronDown size={20} color="#6b7280" />}
+                            </div>
+
+                            {isVendorDropdownOpen && (
+                                <div className={styles.vendorList} style={{ marginTop: '8px', border: '1px solid #e5e7eb', borderRadius: '6px', maxHeight: '250px', overflowY: 'auto' }}>
+                                    {vendors.length === 0 ? (
+                                        <p style={{ color: '#6b7280', textAlign: 'center', margin: '20px 0' }}>No vendors available</p>
+                                    ) : vendors.map((vendor) => {
+                                        const isSelected = sharingMode === 'individual' 
+                                            ? formData.vendorEmail === vendor.email 
+                                            : selectedVendors.some(v => v.email === vendor.email);
+                                        return (
+                                            <div key={vendor.email} className={styles.vendorItem}>
+                                                <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', flex: 1, margin: 0 }}>
+                                                    <input 
+                                                        type={sharingMode === 'individual' ? "radio" : "checkbox"}
+                                                        name={sharingMode === 'individual' ? "vendorSelect" : `vendor_${vendor.email}`}
+                                                        checked={isSelected}
+                                                        onChange={(e) => {
+                                                            if (sharingMode === 'individual') {
+                                                                setFormData({ ...formData, vendorEmail: vendor.email, vendorName: vendor.name ?? undefined });
+                                                                setIsVendorDropdownOpen(false); // Close on individual select
+                                                            } else {
+                                                                if (e.target.checked) {
+                                                                    setSelectedVendors([...selectedVendors, { email: vendor.email, level: 2 }]);
+                                                                } else {
+                                                                    setSelectedVendors(selectedVendors.filter(v => v.email !== vendor.email));
+                                                                }
+                                                            }
+                                                        }}
+                                                        style={{ width: '16px', height: '16px', accentColor: '#2563eb' }}
+                                                    />
+                                                    <div>
+                                                        <div style={{ fontWeight: 500, color: '#111827', fontSize: '0.875rem' }}>{vendor.name || vendor.email.split('@')[0]}</div>
+                                                        <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>{vendor.email}</div>
+                                                    </div>
+                                                </label>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                            
+                            {sharingMode === 'individual' && (
+                                <p style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.5rem' }}>
+                                    Only this vendor will be able to access the shared data.
+                                </p>
+                            )}
+
+                            {sharingMode === 'group' && selectedVendors.length > 0 && (
+                                <div style={{ marginTop: '1.5rem' }}>
+                                    <p style={{ fontSize: '0.875rem', fontWeight: 600, color: '#374151', marginBottom: '0.75rem' }}>Hierarchical Order</p>
+                                    <p style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '1rem', marginTop: '-0.5rem' }}>
+                                        Adjust the order in which vendors receive access. Level 1 gets access first.
+                                    </p>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                        {selectedVendors.map((v, index) => {
+                                            const vendorInfo = vendors.find(vend => vend.email === v.email);
+                                            return (
+                                                <div key={v.email} style={{ display: 'flex', alignItems: 'center', gap: '12px', background: '#f9fafb', padding: '8px 12px', borderRadius: '6px', border: '1px solid #e5e7eb' }}>
+                                                    <div style={{ background: '#3b82f6', color: 'white', width: '24px', height: '24px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 'bold', flexShrink: 0 }}>
+                                                        {index + 1}
+                                                    </div>
+                                                    <div style={{ flex: 1, overflow: 'hidden' }}>
+                                                        <div style={{ fontSize: '0.875rem', fontWeight: 500, color: '#111827', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                                            {vendorInfo?.name || v.email.split('@')[0]}
+                                                        </div>
+                                                        <div style={{ fontSize: '0.75rem', color: '#6b7280', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                                            {v.email}
+                                                        </div>
+                                                    </div>
+                                                    <div style={{ display: 'flex', gap: '2px' }}>
+                                                        <button 
+                                                            type="button" 
+                                                            onClick={() => moveVendorUp(index)} 
+                                                            disabled={index === 0}
+                                                            style={{ padding: '4px', cursor: index === 0 ? 'default' : 'pointer', opacity: index === 0 ? 0.3 : 1, border: 'none', background: 'none', color: '#4b5563' }}
+                                                            title="Move Up"
+                                                        >
+                                                            <ChevronUp size={18} />
+                                                        </button>
+                                                        <button 
+                                                            type="button" 
+                                                            onClick={() => moveVendorDown(index)} 
+                                                            disabled={index === selectedVendors.length - 1}
+                                                            style={{ padding: '4px', cursor: index === selectedVendors.length - 1 ? 'default' : 'pointer', opacity: index === selectedVendors.length - 1 ? 0.3 : 1, border: 'none', background: 'none', color: '#4b5563' }}
+                                                            title="Move Down"
+                                                        >
+                                                            <ChevronDown size={18} />
+                                                        </button>
+                                                        <button 
+                                                            type="button" 
+                                                            onClick={() => setSelectedVendors(selectedVendors.filter((_, i) => i !== index))}
+                                                            style={{ padding: '4px', cursor: 'pointer', border: 'none', background: 'none', color: '#ef4444', marginLeft: '4px' }}
+                                                            title="Remove Vendor"
+                                                        >
+                                                            <X size={18} />
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            )
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Vendor Permissions Box */}
+                        <div className={styles.permissionsBox} style={{ marginTop: '2rem' }}>
+                            <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid #e5e7eb', display: 'flex', gap: '12px', alignItems: 'center' }}>
+                                <Building2 size={20} color="#3b82f6" />
+                                <div>
+                                    <div style={{ fontWeight: 600, color: '#111827', fontSize: '0.875rem' }}>Vendor Permissions</div>
+                                    <div style={{ fontSize: '0.8125rem', color: '#6b7280' }}>Grant vendor specific permissions for shared files.</div>
+                                </div>
+                            </div>
+
+                            <div className={styles.permissionRow}>
+                                <div style={{ display: 'flex', alignItems: 'center', flex: 1 }}>
+                                    <div className={styles.permIconBox}>
+                                        <Edit3 size={18} color="#3b82f6" />
+                                    </div>
+                                    <div className={styles.permContent}>
+                                        <div className={styles.permTitle}>Allow vendor to edit files</div>
+                                        <div className={styles.permDesc}>Enable vendor to edit files using Universal Editor.</div>
+                                    </div>
+                                </div>
+                                <label className={styles.toggle}>
+                                    <input 
+                                        type="checkbox" 
+                                        checked={formData.allowEditing}
+                                        onChange={(e) => {
+                                            const checked = e.target.checked;
+                                            setFormData(prev => ({ 
+                                                ...prev, 
+                                                allowEditing: checked,
+                                                allowDownload: checked ? false : prev.allowDownload
+                                            }));
+                                        }}
+                                    />
+                                    <span className={styles.slider}></span>
+                                </label>
+                            </div>
+
+                            <div className={styles.permissionRow}>
+                                <div style={{ display: 'flex', alignItems: 'center', flex: 1 }}>
+                                    <div className={styles.permIconBox}>
+                                        <DownloadCloud size={18} color="#10b981" />
+                                    </div>
+                                    <div className={styles.permContent}>
+                                        <div className={styles.permTitle}>Allow vendor to download files</div>
+                                        <div className={styles.permDesc}>Enable vendor to download shared files.</div>
+                                    </div>
+                                </div>
+                                <label className={styles.toggle}>
+                                    <input 
+                                        type="checkbox" 
+                                        checked={formData.allowDownload}
+                                        onChange={(e) => {
+                                            const checked = e.target.checked;
+                                            setFormData(prev => ({ 
+                                                ...prev, 
+                                                allowDownload: checked,
+                                                allowEditing: checked ? false : prev.allowEditing
+                                            }));
+                                        }}
+                                    />
+                                    <span className={styles.slider}></span>
+                                </label>
+                            </div>
+
+                            <div className={styles.permissionsFooter}>
+                                <Info size={16} color="#3b82f6" />
+                                You can enable either editing or downloading, but not both simultaneously.
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* SECTION 3: FILES TO SHARE */}
+                    <div className={styles.stepSection}>
+                        <div className={styles.stepHeader}>
+                            <div className={styles.stepIconContainer}>
+                                <Paperclip size={20} />
+                            </div>
+                            <h2 className={styles.stepTitle}>4. Files to Share</h2>
+                        </div>
+                        <p className={styles.stepSubtitle}>Add files to include in this secure link.</p>
+
+                        <div 
+                            className={`${styles.dropzone} ${isDragging ? styles.dropzoneActive : ''}`}
+                            onDragOver={handleDragOver}
+                            onDragLeave={handleDragLeave}
+                            onDrop={handleDrop}
+                        >
+                            <input
+                                type="file"
+                                multiple
+                                onChange={handleFileChange}
+                                accept=".xls,.xlsx,.csv,.png,.jpg,.jpeg,.pdf,.txt"
+                                id="file-upload"
+                                style={{ display: 'none' }}
+                            />
+                            <div className={styles.dropzoneContent}>
+                                <div className={styles.dropzoneText}>
+                                    <UploadCloud size={18} />
+                                    Drag and drop files here
+                                </div>
+                                <div className={styles.dropzoneOr}>or</div>
+                                <button type="button" className={styles.chooseFilesBtn} onClick={() => document.getElementById('file-upload')?.click()}>
+                                    Choose Files
+                                </button>
+                            </div>
+                        </div>
+                        <div className={styles.dropzoneHint}>
+                            Max 128MB per file • Supported: Image, PDF, Excel, CSV, Text
+                        </div>
+                        {files && files.length > 0 && (
+                            <div className={styles.fileList}>
+                                {Array.from(files).map((file, index) => (
+                                    <div key={index} className={styles.fileCard}>
+                                        <div className={styles.fileInfo}>
+                                            <FileText className={styles.fileIcon} size={18} />
+                                            <div>
+                                                <div className={styles.fileName}>{file.name}</div>
+                                                <div className={styles.fileSize}>{formatBytes(file.size)}</div>
+                                            </div>
+                                        </div>
+                                        <button 
+                                            type="button" 
+                                            className={styles.removeBtn}
+                                            onClick={() => removeFile(index)}
+                                        >
+                                            <X size={16} />
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        {status.message && (
+                            <div className={`${styles.statusMessage} ${status.type === 'error' ? styles.statusError : styles.statusSuccess}`}>
+                                {status.type === 'success' ? <CheckCircle2 size={18} /> : <XCircle size={18} />}
+                                {status.message}
+                            </div>
+                        )}
+                        <div style={{ marginTop: '2rem' }}>
+                            <button type="submit" disabled={isLoading} className={styles.submitBtn}>
+                                {isLoading ? (
+                                    <span>Generating Link...</span>
+                                ) : (
+                                    <>
+                                        <Lock size={18} />
+                                        Generate Secure Link
+                                    </>
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                    {/* Results Section */}
+                    {generatedLink && (
+                        <div className={styles.resultsSection}>
+                            <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', padding: '1.5rem', borderRadius: '8px', marginBottom: '1.5rem' }}>
+                                <h3 style={{ color: '#047857', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '1rem', fontSize: '1rem' }}>
+                                    <CheckCircle2 size={18} />
+                                    Link Generated Successfully
+                                </h3>
+                                
+                                <div style={{ display: 'flex', gap: '12px', background: '#ffffff', border: '1px solid #e5e7eb', padding: '12px', borderRadius: '6px', alignItems: 'center' }}>
+                                    <div style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#2563eb', fontSize: '0.875rem' }}>
+                                        {generatedLink}
+                                    </div>
+                                    <button type="button" onClick={copyToClipboard} style={{ background: '#2563eb', color: 'white', border: 'none', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer', fontWeight: 500, fontSize: '0.8125rem' }}>
+                                        Copy
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </form>
+            </div>
+            {/* Footer Back Button */}
+            <div className={styles.backBtnWrapper}>
+                <Link href="/services" className={styles.backBtn}>
+                    <ArrowLeft size={16} />
+                    Back to Services
+                </Link>
+            </div>
+        </div>
     );
 }

@@ -191,6 +191,12 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
         const expiresAt = calculateExpiry(validityMinutes);
 
         // Generate per-vendor OTPs
+        const taskDurationHours = Math.floor(validityMinutes / 60);
+        let allowedBreaks = 0;
+        if (taskDurationHours >= 24) allowedBreaks = 8;
+        else if (taskDurationHours >= 16) allowedBreaks = 6;
+        else if (taskDurationHours >= 8) allowedBreaks = 3;
+
         const vendorAccessData = await Promise.all(
             vendors.map(async (v) => {
                 const vendorOtp = generateOTP();
@@ -313,11 +319,20 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
                         create: encryptedFiles,
                     },
                     VendorAccess: {
-                        create: vendors.map(v => ({
-                            email: v.email.toLowerCase(),
-                            level: v.level,
-                            maxLogins: 3
-                        }))
+                        create: vendors.map(v => {
+                            const vData = vendorAccessData.find(vd => vd.email === v.email);
+                            return {
+                                email: v.email.toLowerCase(),
+                                level: v.level,
+                                maxLogins: 3,
+                                taskDurationHours,
+                                allowedBreaks,
+                                breaksUsed: 0,
+                                currentOtpHash: vData?.otpHash,
+                                currentOtpCreatedAt: new Date(),
+                                currentOtpExpiresAt: expiresAt
+                            };
+                        })
                     }
                 },
             });

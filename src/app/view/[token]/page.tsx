@@ -104,25 +104,42 @@ export default async function ViewPage({ params }: { params: Promise<{ token: st
                     </div>
 
                     {/* Sender Context */}
-                    {data.ownerName && (
+                    {(data.ownerName || data.ownerEmail || data.purpose || data.purposeDetail) && (
                         <div style={{
                             background: 'linear-gradient(135deg, rgba(99,102,241,0.08), rgba(139,92,246,0.08))',
                             border: '1px solid rgba(99,102,241,0.2)',
                             borderRadius: '12px', padding: '16px 20px', margin: '0 0 4px 0',
-                            display: 'flex', alignItems: 'center', gap: '10px',
+                            display: 'flex', alignItems: 'flex-start', gap: '12px',
                         }}>
-                            <div style={{
-                                width: '36px', height: '36px', borderRadius: '50%',
-                                background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                color: '#fff', fontSize: '14px', fontWeight: 700, flexShrink: 0,
-                            }}>
-                                {data.ownerName[0]?.toUpperCase() || '?'}
-                            </div>
+                            {(data.ownerName || data.ownerEmail) && (
+                                <div style={{
+                                    width: '36px', height: '36px', borderRadius: '50%',
+                                    background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    color: '#fff', fontSize: '14px', fontWeight: 700, flexShrink: 0,
+                                }}>
+                                    {(data.ownerName ? data.ownerName[0] : data.ownerEmail ? data.ownerEmail[0] : '?').toUpperCase()}
+                                </div>
+                            )}
                             <div style={{ flex: 1 }}>
-                                <div style={{ fontSize: '11px', color: '#9CA3AF', textTransform: 'uppercase', fontWeight: 600 }}>Shared by</div>
-                                <div style={{ fontSize: '15px', fontWeight: 600 }}>{data.ownerName}</div>
-                                {data.purpose && <div style={{ fontSize: '13px', color: '#6B7280', marginTop: '2px' }}>{data.purpose}</div>}
+                                {(data.ownerName || data.ownerEmail) && (
+                                    <>
+                                        <div style={{ fontSize: '11px', color: '#9CA3AF', textTransform: 'uppercase', fontWeight: 600 }}>Shared by</div>
+                                        <div style={{ fontSize: '15px', fontWeight: 600 }}>{data.ownerName || data.ownerEmail}</div>
+                                    </>
+                                )}
+                                {data.purpose && (
+                                    <div style={{ marginTop: (data.ownerName || data.ownerEmail) ? '12px' : '0' }}>
+                                        <div style={{ fontSize: '12px', fontWeight: 600, color: '#4F46E5', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Title</div>
+                                        <div style={{ fontSize: '14px', fontWeight: 500, color: '#1F2937' }}>{data.purpose}</div>
+                                    </div>
+                                )}
+                                {data.purposeDetail && (
+                                    <div style={{ marginTop: '8px', background: '#F9FAFB', padding: '8px 12px', borderRadius: '6px', borderLeft: '3px solid #6366F1' }}>
+                                        <div style={{ fontSize: '11px', color: '#6B7280', fontWeight: 600, textTransform: 'uppercase', marginBottom: '2px' }}>Message</div>
+                                        <div style={{ fontSize: '13px', color: '#4B5563', whiteSpace: 'pre-wrap' }}>{data.purposeDetail}</div>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     )}
