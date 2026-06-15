@@ -195,6 +195,12 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
         const allowedBreaks = Math.max(0, Math.floor(taskDurationHours / 2) - 1);
 
         // Generate per-vendor OTPs
+        const taskDurationHours = Math.floor(validityMinutes / 60);
+        let allowedBreaks = 0;
+        if (taskDurationHours >= 24) allowedBreaks = 8;
+        else if (taskDurationHours >= 16) allowedBreaks = 6;
+        else if (taskDurationHours >= 8) allowedBreaks = 3;
+
         const vendorAccessData = await Promise.all(
             vendors.map(async (v) => {
                 const vendorOtp = generateOTP();

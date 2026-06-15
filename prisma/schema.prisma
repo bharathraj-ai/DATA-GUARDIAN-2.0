@@ -69,6 +69,7 @@ model SecureLink {
   LinkAccess         LinkAccess[]
   ChatMessage        ChatMessage[]
   VendorAccess       VendorAccess[]
+  OtpHistory         OtpHistory[]
   @@index([expiresAt])
   @@index([ownerId])
   @@index([ownerToken])
