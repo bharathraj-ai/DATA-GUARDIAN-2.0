@@ -2,6 +2,7 @@
 
 import { prisma } from '@/lib/prisma';
 import { verifyOTPHash, generateSessionId } from '@/lib/crypto';
+import crypto from 'crypto';
 import { otpVerifySchema, OTPVerifyInput } from '@/lib/validations';
 import { cookies, headers } from 'next/headers';
 import { generateDeviceHash } from '@/lib/fingerprint';
@@ -55,10 +56,74 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
         const currentDeviceHash = generateDeviceHash(_headers);
         const clientIP = extractClientIP(_headers);
 
+        // PERFORMANCE: Run independent async operations in parallel
+        // Rate limit, Redis revoke check, auth session, and DB query are all independent
+        const [rateLimit, revokedInRedis, session, secureLink] = await Promise.all([
+            checkOTPRateLimit(clientIP),
+            tryCheckRevoked(token),
+            auth(),
+            prisma.secureLink.findUnique({
+                where: { token },
+                select: {
+                    id: true,
+                    token: true,
+                    otpHash: true,
+                    expiresAt: true,
+                    isUsed: true,
+                    isRevoked: true,
+                    failedAttempts: true,
+                    lockedAt: true,
+                    deviceHash: true,
+                    userId: true,
+                    createdAt: true,
+                    // V2.1 fields
+                    purpose: true,
+                    purposeDetail: true,
+                    notificationEmail: true,
+                    // Zero Trust: Email binding
+                    LinkAccess: {
+                        select: {
+                            id: true,
+                            vendorEmail: true,
+                            otpHash: true,
+                            isUsed: true,
+                            deviceHash: true,
+                            failedAttempts: true,
+                            lockedAt: true,
+                            otpFirstAttemptAt: true,
+                            otpVerifiedAt: true,
+                        }
+                    },
+                    // Anti-Phishing fields (Legacy fallback)
+                    otpFirstAttemptAt: true,
+                    otpVerifiedAt: true,
+                    VendorAccess: {
+                        select: {
+                            id: true,
+                            email: true,
+                            otpHash: true,
+                            isRevoked: true,
+                            status: true,
+                            activeSessionId: true,
+                            lastSeenAt: true,
+                            loginCount: true,
+                            failedAttempts: true,
+                            breakStartedAt: true,
+                            totalBreakDuration: true,
+                            // Break-Based OTP Rotation fields
+                            currentOtpHash: true,
+                            currentOtpExpiresAt: true,
+                            breaksUsed: true,
+                            allowedBreaks: true,
+                        }
+                    },
+                }
+            }),
+        ]);
+
         // ANTI-PHISHING: Rate limiting check
-        const rateLimit = await checkOTPRateLimit(clientIP);
         if (!rateLimit.allowed) {
-            await prisma.auditLog.create({
+            prisma.auditLog.create({
                 data: {
                     action: 'DENIED',
                     reason: 'Rate limit exceeded',
@@ -68,7 +133,7 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
                         retryAfter: rateLimit.retryAfter
                     })
                 }
-            });
+            }).catch(() => { }); // fire-and-forget audit
 
             return {
                 success: false,
@@ -78,11 +143,6 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
         }
 
         // Check if token is revoked in Redis (if available)
-        // NOTE: For OTP verification (the auth entry point), we only block on
-        // explicit Redis confirmation of revocation. If Redis is unavailable,
-        // we fall through to the authoritative DB check at secureLink.isRevoked
-        // below. This prevents locking out ALL users when Redis is offline.
-        const revokedInRedis = await tryCheckRevoked(token);
         if (revokedInRedis === true) {
             return {
                 success: false,
@@ -92,62 +152,9 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
         }
 
         // ZERO TRUST: Verify authenticated user email
-        const session = await auth();
         const userEmail = session?.user?.email;
 
-        // Find the secure link (V2.1 + Anti-Phishing fields)
-        const secureLink = await prisma.secureLink.findUnique({
-            where: { token },
-            select: {
-                id: true,
-                token: true,
-                otpHash: true,
-                expiresAt: true,
-                isUsed: true,
-                isRevoked: true,
-                failedAttempts: true,
-                lockedAt: true,
-                deviceHash: true,
-                userId: true,
-                createdAt: true,
-                // V2.1 fields
-                purpose: true,
-                purposeDetail: true,
-                notificationEmail: true,
-                // Zero Trust: Email binding
-                LinkAccess: {
-                    select: {
-                        id: true,
-                        vendorEmail: true,
-                        otpHash: true,
-                        isUsed: true,
-                        deviceHash: true,
-                        failedAttempts: true,
-                        lockedAt: true,
-                        otpFirstAttemptAt: true,
-                        otpVerifiedAt: true,
-                    }
-                },
-                // Anti-Phishing fields (Legacy fallback)
-                otpFirstAttemptAt: true,
-                otpVerifiedAt: true,
-                VendorAccess: {
-                    select: {
-                        id: true,
-                        email: true,
-                        otpHash: true,
-                        isRevoked: true,
-                        status: true,
-                        activeSessionId: true,
-                        lastSeenAt: true,
-                        loginCount: true,
-                        failedAttempts: true,
-                        breakStartedAt: true,
-                        totalBreakDuration: true,
-                    }
-                },
-            }
-        });
+        // secureLink already fetched in parallel above
 
         // Link not found
         if (!secureLink) {
@@ -200,11 +207,29 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
                 };
             }
         } else if (secureLink.VendorAccess && secureLink.VendorAccess.length > 0) {
-            // If email is not provided, try to find the vendor by matching the OTP hash
-            for (const v of secureLink.VendorAccess) {
-                if (v.otpHash && await verifyOTPHash(otp, v.otpHash)) {
-                    vendor = v;
-                    break;
+            // Break-Based OTP Rotation: Try currentOtpHash first (active OTP only)
+            const hmacHash = crypto.createHmac('sha256', process.env.ENCRYPTION_KEY!)
+                .update(otp).digest('hex');
+
+            // Priority 1: Match against currentOtpHash (the only valid OTP after rotation)
+            vendor = secureLink.VendorAccess.find(
+                v => v.currentOtpHash && v.currentOtpHash === hmacHash
+            ) || null;
+
+            // Priority 2: Fallback to legacy otpHash for vendors created before OTP rotation migration
+            if (!vendor) {
+                vendor = secureLink.VendorAccess.find(
+                    v => !v.currentOtpHash && v.otpHash && !v.otpHash.startsWith('$2') && v.otpHash === hmacHash
+                ) || null;
+            }
+
+            // Priority 3: Legacy bcrypt hashes (old OTPs from pre-HMAC era)
+            if (!vendor) {
+                for (const v of secureLink.VendorAccess) {
+                    if (!v.currentOtpHash && v.otpHash?.startsWith('$2') && await verifyOTPHash(otp, v.otpHash)) {
+                        vendor = v;
+                        break;
+                    }
                 }
             }
         }
@@ -343,30 +368,29 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
             };
         }
 
-        // ANTI-PHISHING: Track first OTP attempt (start 5-min window)
-        if (!otpFirstAttemptAt) {
-            if (vendorAccess) {
-                await prisma.linkAccess.update({
-                    where: { id: vendorAccess.id },
-                    data: { otpFirstAttemptAt: now }
-                });
-            } else if (!vendor) {
-                await prisma.secureLink.update({
-                    where: { id: secureLink.id },
-                    data: { otpFirstAttemptAt: now }
-                });
-            }
+        // PERFORMANCE: otpFirstAttemptAt tracking moved into the success/failure
+        // transaction below to eliminate a separate DB round-trip
+        const needsFirstAttemptTracking = !otpFirstAttemptAt;
+
+        // Break-Based OTP Rotation: Use currentOtpHash if available (only valid OTP after rotation)
+        // Falls back to legacy otpHash for backward compatibility with pre-rotation vendors
+        const targetHash = vendor?.currentOtpHash || vendor?.otpHash || vendorAccess?.otpHash || secureLink.otpHash;
+
+        if (!targetHash) {
+            return {
+                success: false,
+                error: 'No OTP request found. Please request a new OTP.',
+                errorType: 'EXPIRED',
+            };
         }
 
-        // Verify OTP (constant-time comparison via bcrypt)
-        const targetHash = vendor?.otpHash || vendorAccess?.otpHash || secureLink.otpHash;
-        
-        if (!targetHash) {
-             return {
-                 success: false,
-                 error: 'No OTP request found. Please request a new OTP.',
-                 errorType: 'EXPIRED',
-             };
+        // Check if the vendor's current OTP has expired (break-rotation expiry)
+        if (vendor?.currentOtpExpiresAt && vendor.currentOtpExpiresAt < new Date()) {
+            return {
+                success: false,
+                error: 'Your OTP has expired. Please request a new one.',
+                errorType: 'EXPIRED',
+            };
         }
 
         const isValidOTP = await verifyOTPHash(otp, targetHash);
@@ -398,7 +422,7 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
                     });
                     attemptsRemaining = 3 - updated.failedAttempts;
                     if (updated.failedAttempts >= 3) {
-                         await tx.vendorAccess.update({
+                        await tx.vendorAccess.update({
                             where: { id: vendor.id },
                             data: { isRevoked: true },
                         });
@@ -429,11 +453,24 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
                         reason: shouldLock ? 'Max OTP attempts reached: Locked' : 'Invalid OTP entered',
                     },
                 });
+
+                // Break-Based OTP Rotation: forensic audit for OTP failure
+                await tx.auditLog.create({
+                    data: {
+                        action: 'OTP_LOGIN_FAILURE',
+                        linkId: secureLink.id,
+                        reason: 'OTP verification failed',
+                        metadata: JSON.stringify({
+                            attemptsRemaining: Math.max(0, attemptsRemaining),
+                            wasLocked: shouldLock,
+                        }),
+                    },
+                });
             });
 
             return {
                 success: false,
-                error: attemptsRemaining > 0 
+                error: attemptsRemaining > 0
                     ? `Invalid OTP. You have ${attemptsRemaining} attempt${attemptsRemaining === 1 ? '' : 's'} remaining.`
                     : 'Invalid OTP. Maximum attempts reached.',
                 errorType: 'INVALID_OTP',
@@ -449,6 +486,7 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
         await tryCreateSession(token, sessionId, ttlSeconds);
 
         // Success: Mark link as used, bind device, mark OTP verified, and create audit log
+        // PERFORMANCE: otpFirstAttemptAt tracking merged into this transaction
         await prisma.$transaction(async (tx) => {
             // Only update deviceHash if not already set (Bind on first use)
             const updateData: any = {
@@ -464,6 +502,8 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
                     where: { id: vendorAccess.id },
                     data: {
                         ...updateData,
+                        // PERFORMANCE: merged otpFirstAttemptAt into this write
+                        ...(needsFirstAttemptTracking ? { otpFirstAttemptAt: now } : {}),
                     },
                 });
             } else {
@@ -471,6 +511,8 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
                     where: { id: secureLink.id },
                     data: {
                         ...updateData,
+                        // PERFORMANCE: merged otpFirstAttemptAt into this write
+                        ...(needsFirstAttemptTracking ? { otpFirstAttemptAt: now } : {}),
                     },
                 });
             }
@@ -505,20 +547,30 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
                     }),
                 },
             });
+
+            // Break-Based OTP Rotation: forensic audit for OTP success
+            await tx.auditLog.create({
+                data: {
+                    action: 'OTP_LOGIN_SUCCESS',
+                    linkId: secureLink.id,
+                    reason: 'OTP verification successful',
+                    metadata: JSON.stringify({
+                        isBreakResume: vendor?.status === 'break',
+                        breaksUsed: vendor?.breaksUsed ?? 0,
+                        allowedBreaks: vendor?.allowedBreaks ?? 0,
+                    }),
+                },
+            });
         });
 
         // V2.1: Send access notification if enabled
+        // PERFORMANCE: Fire-and-forget — don't block the response for email delivery
         if (secureLink.notificationEmail) {
-            try {
-                await notifyLinkAccessed(
-                    secureLink.notificationEmail,
-                    secureLink.id,
-                    secureLink.purpose || undefined
-                );
-            } catch (notifError) {
-                console.error('Failed to send access notification:', notifError);
-                // Don't fail the whole operation if notification fails
-            }
+            notifyLinkAccessed(
+                secureLink.notificationEmail,
+                secureLink.id,
+                secureLink.purpose || undefined
+            ).catch((err) => console.error('Failed to send access notification:', err));
         }
 
         // Set session cookie (httpOnly for security)
@@ -533,13 +585,13 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
 
         // Set email cookie to identify the specific vendor in the session
         if (vendor) {
-             cookieStore.set('vendor_email', vendor.email, {
+            cookieStore.set('vendor_email', vendor.email, {
                 httpOnly: true,
                 secure: process.env.NODE_ENV === 'production',
                 sameSite: 'strict',
                 maxAge: ttlSeconds,
                 path: '/',
-             });
+            });
         }
 
         return {
