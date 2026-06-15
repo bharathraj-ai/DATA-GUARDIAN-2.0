@@ -28,11 +28,23 @@ export async function sendVendorOTP(input: { token: string; email: string }) {
 
         const normalizedEmail = email.toLowerCase().trim();
 
-        // Find secure link
+        // Find secure link — PERFORMANCE: Use select to fetch only needed fields
         const secureLink = await prisma.secureLink.findUnique({
             where: { token },
-            include: {
-                VendorAccess: true
+            select: {
+                id: true,
+                isRevoked: true,
+                lockedAt: true,
+                expiresAt: true,
+                VendorAccess: {
+                    select: {
+                        id: true,
+                        email: true,
+                        isRevoked: true,
+                        loginCount: true,
+                        maxLogins: true,
+                    }
+                }
             }
         });
 
@@ -62,17 +74,40 @@ export async function sendVendorOTP(input: { token: string; email: string }) {
         const otp = generateOTP();
         const otpHash = await hashOTP(otp);
 
-        // Update vendor with new OTP hash
-        await prisma.vendorAccess.update({
-            where: { id: vendor.id },
-            data: { otpHash }
-        });
-
-        // Track first OTP attempt (starts 5-min window)
+        // PERFORMANCE: Batch DB writes into a single transaction
         const now = new Date();
-        await prisma.secureLink.update({
-            where: { id: secureLink.id },
-            data: { otpFirstAttemptAt: now }
+        await prisma.$transaction(async (tx) => {
+            // Invalidate any existing ACTIVE OtpHistory entries for this vendor
+            await tx.otpHistory.updateMany({
+                where: { vendorAccessId: vendor.id, status: 'ACTIVE' },
+                data: { status: 'INVALIDATED', invalidatedAt: now, reason: 'NEW_OTP_REQUESTED' },
+            });
+
+            // Update vendor with new OTP (both legacy and current fields)
+            await tx.vendorAccess.update({
+                where: { id: vendor.id },
+                data: {
+                    otpHash,
+                    currentOtpHash: otpHash,
+                    currentOtpCreatedAt: now,
+                    currentOtpExpiresAt: secureLink.expiresAt,
+                },
+            });
+
+            // Create new OtpHistory entry
+            await tx.otpHistory.create({
+                data: {
+                    vendorAccessId: vendor.id,
+                    otpHash,
+                    reason: 'OTP_REQUESTED',
+                    status: 'ACTIVE',
+                },
+            });
+
+            await tx.secureLink.update({
+                where: { id: secureLink.id },
+                data: { otpFirstAttemptAt: now },
+            });
         });
 
         // Send email
@@ -91,10 +126,9 @@ export async function sendVendorOTP(input: { token: string; email: string }) {
                 });
         });
 
-        // LOCAL DEV FALLBACK: Always log the OTP to the console so the user can test
+        // Log OTP request (without revealing the actual OTP)
         import('@/lib/logger').then(({ logger, redactEmail }) => {
             logger.info(`OTP REQUESTED FOR: ${redactEmail(normalizedEmail)}`);
-            logger.debug(`[LOCAL DEV] OTP CODE: ${otp}`);
         });
 
         return { success: true };

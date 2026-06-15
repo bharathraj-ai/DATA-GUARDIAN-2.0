@@ -23,7 +23,10 @@ export async function getMongoClient(): Promise<MongoClient> {
   const uri = getRequiredEnv('MONGODB_URI');
   _mongoClient = new MongoClient(uri, {
     maxPoolSize: 10,
-    minPoolSize: 2,
+    minPoolSize: 0,            // Don't force connections on startup (prevents cold-start hangs)
+    connectTimeoutMS: 10000,   // 10s connection timeout (was unlimited)
+    socketTimeoutMS: 30000,    // 30s socket timeout
+    serverSelectionTimeoutMS: 10000, // 10s server selection timeout
     serverApi: {
       version: ServerApiVersion.v1,
       strict: true,

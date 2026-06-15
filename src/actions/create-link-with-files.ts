@@ -190,6 +190,10 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
         const globalOtp = generateOTP(); // Fallback/Global OTP
         const expiresAt = calculateExpiry(validityMinutes);
 
+        // Break-Based OTP Rotation: compute task duration and break limits
+        const taskDurationHours = Math.max(1, Math.round(validityMinutes / 60));
+        const allowedBreaks = Math.max(0, Math.floor(taskDurationHours / 2) - 1);
+
         // Generate per-vendor OTPs
         const taskDurationHours = Math.floor(validityMinutes / 60);
         let allowedBreaks = 0;
@@ -210,6 +214,11 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
             })
         );
 
+        // PERFORMANCE: Import modules ONCE before parallel file processing (not per-file)
+        const { createEncryptionStream, generateDek, encryptDek } = await import('@/lib/crypto');
+        const { uploadStreamToMongo } = await import('@/lib/mongo/operations');
+        const { Readable } = await import('stream');
+
         // Run global OTP hashing, user data encryption, and file encryption IN PARALLEL
         const [globalOtpHash, encryptedUserData, dataHash, encryptedFiles] = await Promise.all([
             hashOTP(globalOtp),
@@ -229,11 +238,6 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
                     // Sanitize filename: strip path components, limit length
                     const sanitizedName = path.basename(file.name).substring(0, 255);
 
-                    // Use streams for crypto and GridFS upload
-                    const { createEncryptionStream, generateDek, encryptDek } = await import('@/lib/crypto');
-                    const { uploadStreamToMongo } = await import('@/lib/mongo/operations');
-                    const { Readable } = await import('stream');
-                    
                     const dek = generateDek();
                     const { cipher, iv, getAuthTag } = createEncryptionStream(dek);
                     const encryptedDekStr = encryptDek(dek);
@@ -320,17 +324,17 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
                     },
                     VendorAccess: {
                         create: vendors.map(v => {
-                            const vData = vendorAccessData.find(vd => vd.email === v.email);
+                            const vendorOtpData = vendorAccessData.find(vd => vd.email === v.email);
                             return {
                                 email: v.email.toLowerCase(),
                                 level: v.level,
                                 maxLogins: 3,
+                                // Break-Based OTP Rotation fields
                                 taskDurationHours,
                                 allowedBreaks,
-                                breaksUsed: 0,
-                                currentOtpHash: vData?.otpHash,
+                                currentOtpHash: vendorOtpData?.otpHash ?? null,
                                 currentOtpCreatedAt: new Date(),
-                                currentOtpExpiresAt: expiresAt
+                                currentOtpExpiresAt: expiresAt,
                             };
                         })
                     }
@@ -349,6 +353,24 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
                     expiredAt: expiresAt,
                 },
             });
+
+            // Create initial OtpHistory entries for forensic audit
+            const createdVendors = await tx.vendorAccess.findMany({
+                where: { secureLinkId: secureLink.id },
+                select: { id: true, currentOtpHash: true },
+            });
+            if (createdVendors.length > 0) {
+                await tx.otpHistory.createMany({
+                    data: createdVendors
+                        .filter(v => v.currentOtpHash)
+                        .map(v => ({
+                            vendorAccessId: v.id,
+                            otpHash: v.currentOtpHash!,
+                            reason: 'INITIAL',
+                            status: 'ACTIVE',
+                        })),
+                });
+            }
 
             return secureLink;
         }, {

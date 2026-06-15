@@ -256,7 +256,7 @@ export function decryptDek(encryptedDekString: string): Buffer {
         // Fallback to legacy ENCRYPTION_KEY only if it's an authentication tag failure.
         // Node's crypto module throws this specific message when GCM auth fails due to a wrong key.
         const isAuthTagFailure = e instanceof Error && e.message.includes('Unsupported state or unable to authenticate data');
-        
+
         if (isAuthTagFailure) {
             try {
                 const legacyKey = getEncryptionKey();
@@ -264,7 +264,7 @@ export function decryptDek(encryptedDekString: string): Buffer {
                     authTagLength: AUTH_TAG_LENGTH,
                 });
                 legacyDecipher.setAuthTag(authTag);
-                
+
                 return Buffer.concat([
                     legacyDecipher.update(ciphertext),
                     legacyDecipher.final(),
@@ -273,7 +273,7 @@ export function decryptDek(encryptedDekString: string): Buffer {
                 throw new Error('Failed to decrypt DEK: Invalid key or tampered data');
             }
         }
-        
+
         // Re-throw if it's any other kind of unexpected error
         throw e;
     }
@@ -287,12 +287,12 @@ export function decryptDek(encryptedDekString: string): Buffer {
 export function encryptBuffer(buffer: Buffer, dek: Buffer): { iv: string; authTag: string; encryptedContent: Buffer } {
     const iv = crypto.randomBytes(IV_LENGTH);
     const cipher = crypto.createCipheriv(ALGORITHM, dek, iv);
-    
+
     const encrypted = Buffer.concat([
         cipher.update(buffer),
         cipher.final()
     ]);
-    
+
     return {
         iv: iv.toString('hex'),
         authTag: cipher.getAuthTag().toString('hex'),
@@ -306,7 +306,7 @@ export function encryptBuffer(buffer: Buffer, dek: Buffer): { iv: string; authTa
 export function createEncryptionStream(dek: Buffer) {
     const iv = crypto.randomBytes(IV_LENGTH);
     const cipher = crypto.createCipheriv(ALGORITHM, dek, iv);
-    
+
     return {
         iv: iv.toString('hex'),
         cipher, // This is a Transform stream
