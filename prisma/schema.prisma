@@ -69,6 +69,7 @@ model SecureLink {
   LinkAccess         LinkAccess[]
   ChatMessage        ChatMessage[]
   VendorAccess       VendorAccess[]
+  OtpHistory         OtpHistory[]
   @@index([expiresAt])
   @@index([ownerId])
   @@index([ownerToken])
@@ -107,11 +108,35 @@ model VendorAccess {
   lastLoginAt        DateTime?
   lastSeenAt         DateTime?
 
+  // Break-Based OTP Rotation
+  taskDurationHours  Int        @default(0)
+  allowedBreaks      Int        @default(0)
+  breaksUsed         Int        @default(0)
+  currentOtpHash     String?
+  currentOtpCreatedAt DateTime?
+  currentOtpExpiresAt DateTime?
+
   SecureLink     SecureLink @relation(fields: [secureLinkId], references: [id], onDelete: Cascade)
 
   @@unique([secureLinkId, email])
   @@index([secureLinkId])
   @@index([email])
+}
+
+model OtpHistory {
+  id            String     @id @default(cuid())
+  secureLinkId  String
+  vendorEmail   String
+  otpHash       String
+  createdAt     DateTime
+  invalidatedAt DateTime
+  reason        String
+  status        String     @default("INVALIDATED")
+  
+  SecureLink    SecureLink @relation(fields: [secureLinkId], references: [id], onDelete: Cascade)
+
+  @@index([secureLinkId])
+  @@index([vendorEmail])
 }
 
 

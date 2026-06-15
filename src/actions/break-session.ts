@@ -33,11 +33,32 @@ export async function takeBreak(
 
     const secureLink = await prisma.secureLink.findUnique({
       where: { token },
-      select: { id: true }
+      select: { id: true, allowDownload: true, expiresAt: true }
     });
 
     if (!secureLink) {
       return { success: false, error: 'Link not found' };
+    }
+
+    // Download Override: If downloads are allowed, taking a break just revokes access.
+    if (secureLink.allowDownload) {
+      await prisma.secureLink.update({
+        where: { id: secureLink.id },
+        data: { isRevoked: true }
+      });
+      
+      await prisma.auditLog.create({
+        data: {
+          action: 'BREAK',
+          linkId: secureLink.id,
+          reason: 'Vendor closed session (Download only mode)',
+          metadata: JSON.stringify({ vendorEmail, action: 'revoke_on_break' })
+        }
+      });
+      
+      cookieStore.delete('session_id');
+      cookieStore.delete('vendor_email');
+      return { success: true, message: 'Access revoked' };
     }
 
     const vendorAccess = await prisma.vendorAccess.findUnique({
@@ -53,7 +74,42 @@ export async function takeBreak(
       return { success: false, error: 'Vendor access not found' };
     }
 
+    // Enforce Break Limits
+    if (vendorAccess.breaksUsed >= vendorAccess.allowedBreaks) {
+      await prisma.auditLog.create({
+        data: {
+          action: 'BREAK_LIMIT_EXCEEDED',
+          linkId: secureLink.id,
+          reason: 'Vendor attempted to take a break but reached the allowed limit.',
+          metadata: JSON.stringify({ vendorEmail, breaksUsed: vendorAccess.breaksUsed, allowedBreaks: vendorAccess.allowedBreaks })
+        }
+      });
+      return { success: false, error: 'Maximum break limit reached' };
+    }
+
     const now = new Date();
+    
+    // OTP Rotation: Archive current OTP securely
+    if (vendorAccess.currentOtpHash && vendorAccess.currentOtpCreatedAt) {
+      await prisma.otpHistory.create({
+        data: {
+          SecureLink: { connect: { id: secureLink.id } },
+          vendorEmail: vendorEmail,
+          otpHash: vendorAccess.currentOtpHash,
+          createdAt: vendorAccess.currentOtpCreatedAt,
+          invalidatedAt: now,
+          reason: 'BREAK_STARTED',
+          status: 'INVALIDATED'
+        }
+      });
+    }
+
+    // Generate New OTP
+    const { generateOTP, hashOTP } = await import('@/lib/crypto');
+    const { sendOTPEmail } = await import('@/lib/email');
+    const newOtp = generateOTP();
+    const newOtpHash = await hashOTP(newOtp);
+
     await prisma.vendorAccess.update({
       where: { id: vendorAccess.id },
       data: {
@@ -67,17 +123,36 @@ export async function takeBreak(
         status: 'break',
         breakStartedAt: now,
         activeSessionId: null, // Clear active session
-        lastSeenAt: now
+        lastSeenAt: now,
+        // OTP Rotation Fields
+        breaksUsed: { increment: 1 },
+        currentOtpHash: newOtpHash,
+        currentOtpCreatedAt: now,
       }
     });
 
-    // Log the BREAK action
+    // Send the new OTP email to the vendor
+    const remainingMinutes = Math.max(1, Math.floor((secureLink.expiresAt.getTime() - now.getTime()) / 60000));
+    await sendOTPEmail(vendorEmail, token, newOtp, remainingMinutes).catch(err => {
+      console.error('Failed to send rotation OTP email:', err);
+    });
+
+    // Log the BREAK and ROTATION actions
     await prisma.auditLog.create({
       data: {
         action: 'BREAK',
         linkId: secureLink.id,
         reason: 'Vendor paused session',
         metadata: JSON.stringify({ vendorEmail, action: 'break' })
+      }
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        action: 'OTP_ROTATED',
+        linkId: secureLink.id,
+        reason: 'Generated new OTP for vendor break',
+        metadata: JSON.stringify({ vendorEmail, breaksUsed: vendorAccess.breaksUsed + 1 })
       }
     });
 
