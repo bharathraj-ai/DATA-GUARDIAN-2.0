@@ -109,13 +109,14 @@ model VendorAccess {
   lastSeenAt         DateTime?
 
   // Break-Based OTP Rotation
-  taskDurationHours  Int        @default(0)
-  allowedBreaks      Int        @default(0)
-  breaksUsed         Int        @default(0)
-  currentOtpHash     String?
+  taskDurationHours   Int        @default(8)
+  allowedBreaks       Int        @default(3)     // Math.floor(taskDurationHours / 2) - 1
+  breaksUsed          Int        @default(0)
+  currentOtpHash      String?                    // Only this hash is accepted for authentication
   currentOtpCreatedAt DateTime?
   currentOtpExpiresAt DateTime?
 
+  OtpHistory     OtpHistory[]
   SecureLink     SecureLink @relation(fields: [secureLinkId], references: [id], onDelete: Cascade)
 
   @@unique([secureLinkId, email])
@@ -123,20 +124,22 @@ model VendorAccess {
   @@index([email])
 }
 
+/// Append-only OTP history for forensic audit.
+/// Records are NEVER deleted — only marked INVALIDATED when a break occurs.
+/// Only the newest ACTIVE OTP is accepted for authentication.
 model OtpHistory {
-  id            String     @id @default(cuid())
-  secureLinkId  String
-  vendorEmail   String
-  otpHash       String
-  createdAt     DateTime
-  invalidatedAt DateTime
-  reason        String
-  status        String     @default("INVALIDATED")
-  
-  SecureLink    SecureLink @relation(fields: [secureLinkId], references: [id], onDelete: Cascade)
+  id              String       @id @default(cuid())
+  vendorAccessId  String
+  otpHash         String
+  createdAt       DateTime     @default(now())
+  invalidatedAt   DateTime?
+  reason          String       @default("INITIAL")      // INITIAL | BREAK_STARTED | EXPIRED | REVOKED
+  status          String       @default("ACTIVE")       // ACTIVE | INVALIDATED
 
-  @@index([secureLinkId])
-  @@index([vendorEmail])
+  VendorAccess    VendorAccess @relation(fields: [vendorAccessId], references: [id], onDelete: Cascade)
+
+  @@index([vendorAccessId])
+  @@index([status])
 }
 
 
