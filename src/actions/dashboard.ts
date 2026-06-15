@@ -7,7 +7,7 @@ import { auth } from '@/lib/auth';
 export interface DashboardLink {
     id: string;
     token: string;
-    ownerToken: string;
+    ownerToken?: string;
     expiresAt: Date;
     isUsed: boolean;
     isRevoked: boolean;
@@ -28,6 +28,24 @@ export interface DashboardLink {
     vendors: { vendorEmail: string; level: number }[];
     files: { id: string; fileName: string; fileSize: number; fileType: string; status: string }[];
     auditLogs: { action: string; timestamp: Date; reason: string | null }[];
+}
+
+/**
+ * Shared mapper: converts a raw Prisma link into a DashboardLink.
+ */
+function mapLinkToBase(link: any, effectiveIsUsed: boolean): DashboardLink {
+    const primaryVendor = link.LinkAccess?.[0]?.vendorEmail || link.allowedVendorEmail || null;
+    return {
+        ...link,
+        allowedVendorEmail: primaryVendor,
+        vendorAccess: link.VendorAccess || [],
+        vendors: link.LinkAccess || [],
+        files: link.UserFile,
+        auditLogs: link.AuditLog,
+        status: getStatus({ ...link, isUsed: effectiveIsUsed }),
+        fileCount: link.UserFile.length,
+        otp: null,
+    } as DashboardLink;
 }
 
 /**
@@ -103,23 +121,8 @@ export async function getOwnedLinks(userId: string): Promise<DashboardLink[]> {
         });
 
         const mappedLinks = (links as any[]).map((link: any) => {
-            const primaryVendor = link.LinkAccess?.[0]?.vendorEmail || (link as any).allowedVendorEmail || null;
-            
-            // For the owner, the link is "Used" if any vendor has viewed it, or if it was globally used.
             const anyVendorUsed = link.LinkAccess?.some((a: any) => a.isUsed) || false;
-            const effectiveIsUsed = link.isUsed || anyVendorUsed;
-
-            return {
-                ...link,
-                allowedVendorEmail: primaryVendor,
-                vendorAccess: link.VendorAccess || [],
-                vendors: link.LinkAccess || [],
-                files: link.UserFile,
-                auditLogs: link.AuditLog,
-                status: getStatus({ ...link, isUsed: effectiveIsUsed }),
-                fileCount: link.UserFile.length,
-                otp: null,
-            } as DashboardLink;
+            return mapLinkToBase(link, link.isUsed || anyVendorUsed);
         });
 
         // AUTO-CLEANUP: If any expired/revoked links exist, trigger background purge
@@ -160,7 +163,6 @@ export async function getReceivedLinks(email: string): Promise<DashboardLink[]> 
             select: {
                 id: true,
                 token: true,
-                ownerToken: true,
                 expiresAt: true,
                 isUsed: true,
                 isRevoked: true,
@@ -212,33 +214,18 @@ export async function getReceivedLinks(email: string): Promise<DashboardLink[]> 
         });
 
         const mappedLinks = (links as any[]).map((link: any) => {
-            const primaryVendor = link.LinkAccess?.[0]?.vendorEmail || (link as any).allowedVendorEmail || null;
-            
             // For the vendor, the link is "Used" ONLY if THEIR specific LinkAccess record is marked as used.
-            // (Since the query filters by their email, LinkAccess[0] is guaranteed to be theirs if it exists).
             const vendorIsUsed = link.LinkAccess?.[0]?.isUsed ?? link.isUsed;
+            const mapped = mapLinkToBase(link, vendorIsUsed);
 
-            let finalStatus = getStatus({ ...link, isUsed: vendorIsUsed }) as any;
-            const vendorAccess = link.VendorAccess?.find((v: any) => v.email.toLowerCase() === email.toLowerCase());
+            const vendorAccessRecord = link.VendorAccess?.find((v: any) => v.email.toLowerCase() === email.toLowerCase());
             
             // If vendor has accessed but NOT completed work, let them resume
-            // 'active' = accessed but session ended without completing
-            // 'break' = explicitly took a break
-            if (finalStatus === 'used' && vendorAccess?.status && vendorAccess.status !== 'completed') {
-                finalStatus = 'break';
+            if (mapped.status === 'used' && vendorAccessRecord?.status && vendorAccessRecord.status !== 'completed') {
+                (mapped as any).status = 'break';
             }
 
-            return {
-                ...link,
-                allowedVendorEmail: primaryVendor,
-                vendors: link.LinkAccess || [],
-                vendorAccess: link.VendorAccess || [],
-                files: link.UserFile,
-                auditLogs: link.AuditLog,
-                status: finalStatus,
-                fileCount: link.UserFile.length,
-                otp: null,
-            } as DashboardLink;
+            return mapped;
         });
 
         // AUTO-CLEANUP: If any expired/revoked links exist, trigger background purge

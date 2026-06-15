@@ -39,8 +39,8 @@ export default function Navbar() {
         <nav className={`navbar ${isScrolled ? 'navbar-scrolled' : ''}`}>
             <div className="container navbar-container">
                 <Link href="/" className="navbar-logo">
-                    <Image src="/logo.svg" alt="Data Guardian" width={28} height={28} style={{ opacity: 1 }} />
-                    <span style={{ fontWeight: 600, letterSpacing: '-0.02em', fontSize: '18px' }}>Data Guardian</span>
+                    <Image src="/logo.jpg" alt="Secure Protocol" width={32} height={32} style={{ opacity: 0.9, borderRadius: '4px' }} />
+                    <span style={{ fontWeight: 600, letterSpacing: '-0.02em', fontSize: '18px' }}>Secure Protocol</span>
                 </Link>
 
                 {/* Desktop Menu */}
@@ -55,12 +55,7 @@ export default function Navbar() {
                         </Link>
                     ))}
 
-                    {!hasMounted ? null : status === 'loading' ? (
-                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', opacity: 0 }}>
-                            <div className="btn btn-sm">...</div>
-                            <div className="btn btn-sm">...</div>
-                        </div>
-                    ) : isAuthenticated ? (
+                    {isAuthenticated ? (
                             <>
                                 {isOwnerSide && (
                                     <Link
@@ -186,12 +181,7 @@ export default function Navbar() {
                     )}
 
                     <div className="navbar-mobile-cta">
-                        {!hasMounted ? null : status === 'loading' ? (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', opacity: 0 }}>
-                                <div className="btn btn-full">...</div>
-                                <div className="btn btn-full">...</div>
-                            </div>
-                        ) : isAuthenticated ? (
+                        {isAuthenticated ? (
                                 <>
                                     {/* Mobile Profile Badge */}
                                     <div style={{

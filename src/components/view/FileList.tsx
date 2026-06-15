@@ -25,18 +25,12 @@ export const FileList = memo(function FileList({ token, files, isOwner }: FileLi
     const [isEditLoading, setIsEditLoading] = useState<string | null>(null);
     const [previewData, setPreviewData] = useState<FilePreviewResult | null>(null);
     const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+    const [isDownloadLoading, setIsDownloadLoading] = useState<string | null>(null);
 
     const handleEdit = useCallback(async (fileId: string) => {
         if (!capabilities.canEdit) return;
         setIsEditLoading(fileId);
-        try {
-            router.push(`/editor/${token}/${fileId}`);
-        } catch (err) {
-            console.error('Edit navigation error:', err);
-            alert('Error navigating to editor');
-        } finally {
-            setIsEditLoading(null);
-        }
+        router.push(`/editor/${token}/${fileId}`);
     }, [token, capabilities.canEdit, router]);
 
     const handlePreview = useCallback(async (fileId: string) => {
@@ -56,6 +50,33 @@ export const FileList = memo(function FileList({ token, files, isOwner }: FileLi
 
     const closePreview = useCallback(() => setPreviewData(null), []);
 
+    const handleDownload = useCallback(async (fileId: string, fileName: string) => {
+        if (!capabilities.canDownload) return;
+        setIsDownloadLoading(fileId);
+        try {
+            const response = await fetch(`/api/stream/${token}/download/${fileId}`);
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                alert(errorData.error || 'Failed to download file');
+                return;
+            }
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+        } catch (error) {
+            console.error('Download error:', error);
+            alert('An error occurred while downloading.');
+        } finally {
+            setIsDownloadLoading(null);
+        }
+    }, [token, capabilities.canDownload]);
+
     if (!files || files.length === 0) return null;
 
     return (
@@ -66,8 +87,13 @@ export const FileList = memo(function FileList({ token, files, isOwner }: FileLi
                 </p>
             }>
                 <div className="data-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
-                    <div className="data-label" style={{ marginBottom: '10px' }}>
-                        Attached Files ({files.length})
+                    <div className="data-label" style={{ marginBottom: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span>Attached Files ({files.length})</span>
+                        {!capabilities.canDownload && (
+                            <span style={{ fontSize: '12px', color: '#fbbf24', background: 'rgba(251, 191, 36, 0.1)', padding: '4px 8px', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                🔒 File download has been disabled by the owner.
+                            </span>
+                        )}
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                         {files.map((file) => (
@@ -117,6 +143,20 @@ export const FileList = memo(function FileList({ token, files, isOwner }: FileLi
                                             }}
                                         >
                                             {isEditLoading === file.id ? '⏳' : file.fileType === 'application/pdf' ? '🔒 Secure Preview' : '✍️ Edit'}
+                                        </button>
+                                    </PermissionGuard>
+                                    <PermissionGuard requiredCapability="canDownload">
+                                        <button
+                                            onClick={() => handleDownload(file.id, file.fileName)}
+                                            disabled={isDownloadLoading === file.id}
+                                            style={{
+                                                background: 'rgba(168,85,247,0.2)', border: '1px solid rgba(168,85,247,0.4)',
+                                                color: '#c084fc', padding: '4px 8px', fontSize: '12px',
+                                                borderRadius: '4px', cursor: isDownloadLoading === file.id ? 'wait' : 'pointer',
+                                                display: 'flex', alignItems: 'center', gap: '4px'
+                                            }}
+                                        >
+                                            {isDownloadLoading === file.id ? '⏳ Downloading...' : '⬇️ Download'}
                                         </button>
                                     </PermissionGuard>
                                     <button

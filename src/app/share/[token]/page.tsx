@@ -2,10 +2,12 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import { motion, AnimatePresence } from 'framer-motion';
 import { verifyOTP } from '@/actions/verify-otp';
 import { validateShareAccess } from '@/actions/validate-share-access';
 import { sendVendorOTP } from '@/actions/send-vendor-otp';
 import { useSession, signIn } from 'next-auth/react';
+import { logger, redactToken } from '@/lib/logger';
 
 interface SharePageProps {
     params: any;
@@ -49,15 +51,14 @@ export default function SharePage({ params }: SharePageProps) {
         }
     }, [accessState, sessionData]);
 
-    // Resolve params
     useEffect(() => {
         params.then((p: any) => {
-            console.log('Token resolved:', p.token);
+            logger.debug(`Token resolved: ${redactToken(p.token)}`);
             // Remove any query parameters (like timestamp) from token
             const cleanToken = p.token.split('?')[0];
             setToken(cleanToken);
         }).catch((err: any) => {
-            console.error('Failed to resolve params:', err);
+            logger.error('Failed to resolve params', err);
             setIsLoading(false);
         });
     }, [params]);
@@ -466,55 +467,111 @@ export default function SharePage({ params }: SharePageProps) {
                     </div>
                 )}
 
-                {/* Step 2: OTP Input */}
-                {isStepOtp && state !== 'success' && (
-                    <div className={`otp-input-container ${shake ? 'shake' : ''}`}>
-                        <label className="otp-label">{email ? `Enter OTP sent to ${email}` : 'Enter the 6-digit OTP from your email'}</label>
-                        <div className="otp-boxes">
-                            {otp.map((digit, index) => (
-                                <input
-                                    key={index}
-                                    ref={(el) => { inputRefs.current[index] = el; }}
-                                    type="password"
-                                    inputMode="numeric"
-                                    maxLength={1}
-                                    value={digit}
-                                    onChange={(e) => handleChange(index, e.target.value)}
-                                    onKeyDown={(e) => handleKeyDown(index, e)}
-                                    onPaste={handlePaste}
-                                    className={`otp-box ${digit ? 'filled' : ''} ${error ? 'error' : ''}`}
-                                    disabled={state === 'loading' || countdown <= 0}
-                                    autoComplete="one-time-code"
-                                />
-                            ))}
-                        </div>
-                        {error && <div style={{ color: '#ef4444', fontSize: '0.875rem', marginTop: '12px', textAlign: 'center' }}>{error}</div>}
-                        
-                        <button
-                            onClick={handleSubmit}
-                            disabled={state === 'loading' || countdown <= 0 || otp.some((d) => !d)}
-                            className={`otp-button ${state}`}
-                            style={{ marginTop: '24px' }}
+                {/* Step 2: OTP Input & Success Transition */}
+                <AnimatePresence mode="wait">
+                    {isStepOtp && state !== 'success' && (
+                        <motion.div
+                            key="otp-input"
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0, x: state === 'error' ? [-10, 10, -10, 10, 0] : 0 }}
+                            exit={{ opacity: 0, y: -20, scale: 0.95 }}
+                            transition={{ duration: 0.3 }}
+                            className={`otp-input-container ${shake ? 'shake' : ''}`}
                         >
-                            {state === 'loading' ? (
-                                <>
-                                    <span className="button-spinner" />
-                                    Verifying...
-                                </>
-                            ) : state === 'error' ? (
-                                'Try Again'
-                            ) : (
-                                <>
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                        <path d="M9 12l2 2 4-4" />
-                                        <circle cx="12" cy="12" r="10" />
-                                    </svg>
-                                    Verify Access
-                                </>
-                            )}
-                        </button>
-                    </div>
-                )}
+                            <label className="otp-label">{email ? `Enter OTP sent to ${email}` : 'Enter the 6-digit OTP from your email'}</label>
+                            
+                            <div className={`rotating-border-wrapper ${state === 'loading' ? 'is-verifying' : ''}`}>
+                                <div className={`otp-boxes ${state === 'loading' ? 'otp-glow-loading shimmer-sweep' : state === 'error' ? 'otp-glow-error' : ''}`}>
+                                    {otp.map((digit, index) => (
+                                        <input
+                                            key={index}
+                                            ref={(el) => { inputRefs.current[index] = el; }}
+                                            type="password"
+                                            inputMode="numeric"
+                                            maxLength={1}
+                                            value={digit}
+                                            onChange={(e) => handleChange(index, e.target.value)}
+                                            onKeyDown={(e) => handleKeyDown(index, e)}
+                                            onPaste={handlePaste}
+                                            className={`otp-box ${digit ? 'filled' : ''} ${error ? 'error' : ''}`}
+                                            disabled={state === 'loading' || countdown <= 0}
+                                            autoComplete="one-time-code"
+                                        />
+                                    ))}
+                                </div>
+                            </div>
+
+                            <AnimatePresence>
+                                {error && (
+                                    <motion.div
+                                        initial={{ opacity: 0, height: 0 }}
+                                        animate={{ opacity: 1, height: 'auto' }}
+                                        exit={{ opacity: 0, height: 0 }}
+                                        style={{ overflow: 'hidden' }}
+                                    >
+                                        <div style={{ color: '#ef4444', fontSize: '0.875rem', marginTop: '12px', textAlign: 'center' }}>{error}</div>
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
+
+                            <button
+                                onClick={handleSubmit}
+                                disabled={state === 'loading' || countdown <= 0 || otp.some((d) => !d)}
+                                className={`otp-button ${state}`}
+                                style={{ marginTop: '24px' }}
+                            >
+                                {state === 'loading' ? (
+                                    <motion.div
+                                        animate={{ opacity: [0.5, 1, 0.5] }}
+                                        transition={{ duration: 1.5, repeat: Infinity }}
+                                        style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+                                    >
+                                        <span className="button-spinner" />
+                                        Verifying OTP...
+                                    </motion.div>
+                                ) : state === 'error' ? (
+                                    'Try Again'
+                                ) : (
+                                    <>
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                            <path d="M9 12l2 2 4-4" />
+                                            <circle cx="12" cy="12" r="10" />
+                                        </svg>
+                                        Verify Access
+                                    </>
+                                )}
+                            </button>
+                        </motion.div>
+                    )}
+
+                    {isStepOtp && state === 'success' && (
+                        <motion.div
+                            key="otp-success"
+                            initial={{ opacity: 0, scale: 0.8 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            transition={{ type: 'spring', bounce: 0.5 }}
+                            style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 0' }}
+                        >
+                            <motion.div
+                                initial={{ scale: 0 }}
+                                animate={{ scale: 1 }}
+                                transition={{ type: 'spring', damping: 12, delay: 0.1 }}
+                                style={{ width: '80px', height: '80px', borderRadius: '50%', background: 'rgba(16, 185, 129, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '24px', boxShadow: '0 0 30px rgba(16, 185, 129, 0.4)' }}
+                            >
+                                <svg viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="3" style={{ width: '40px', height: '40px' }}>
+                                    <motion.path
+                                        initial={{ pathLength: 0 }}
+                                        animate={{ pathLength: 1 }}
+                                        transition={{ duration: 0.5, delay: 0.2 }}
+                                        d="M5 13l4 4L19 7"
+                                    />
+                                </svg>
+                            </motion.div>
+                            <h2 style={{ fontSize: '24px', fontWeight: 700, color: '#10b981', marginBottom: '8px' }}>Verified!</h2>
+                            <p style={{ color: '#6B7280' }}>Securing your connection...</p>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
 
                 {/* Trust Indicators */}
                 <div className="trust-indicators">

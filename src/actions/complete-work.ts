@@ -5,6 +5,7 @@ import { authorizeSecureLink } from '@/lib/linkAuthorization';
 import { decryptBuffer, decryptDek } from '@/lib/crypto';
 import { downloadFromMongo } from '@/lib/mongo/operations';
 import { sendCompletedWorkEmail, type FileAttachment } from '@/lib/email';
+import { logger, redactEmail } from '@/lib/logger';
 
 export type CompleteWorkResult = {
     success: boolean;
@@ -33,13 +34,20 @@ export async function completeWork(token: string): Promise<CompleteWorkResult> {
         const ownerEmail = ownerUser?.email || (secureLink as any).notificationEmail;
 
         if (!ownerEmail) {
-            console.error('[Complete Work] No owner email found — cannot deliver files.');
+            logger.error('No owner email found — cannot deliver files.');
             return { success: false, error: 'Could not determine owner email for file delivery.' };
         }
 
         // 3. Collect all files and decrypt them for email attachment
         const files = secureLink.UserFile || [];
         const attachments: FileAttachment[] = [];
+
+        // Pre-load dynamic imports outside the file loop (loaded once, reused)
+        let PDFLib: typeof import('pdf-lib') | null = null;
+        let XLSXLib: typeof import('xlsx') | null = null;
+
+        // JSON editor state signature as bytes: {"type":"
+        const JSON_EDITOR_SIGNATURE = Buffer.from('{"type":"');
 
         for (const file of files) {
             try {
@@ -58,7 +66,7 @@ export async function completeWork(token: string): Promise<CompleteWorkResult> {
                         file.authTag!,
                         dek
                     );
-                    console.log(`[Complete Work] Decrypted inline file ${file.fileName}: ${buffer.length} bytes`);
+                    logger.info(`Decrypted inline file ${file.fileName}: ${buffer.length} bytes`);
                 } else if ((file as any).mongoFileId) {
                     // Mongo-backed file — download from GridFS
                     const mongoFile = await prisma.mongoFile.findUnique({
@@ -68,7 +76,7 @@ export async function completeWork(token: string): Promise<CompleteWorkResult> {
 
                     if (mongoFile) {
                         const downloadedBuffer = await downloadFromMongo(mongoFile.gridFSId);
-                        console.log(`[Complete Work] Downloaded GridFS file ${file.fileName}: ${downloadedBuffer.length} bytes, hasEncryption=${!!hasEncryption}, status=${mongoFile.status}`);
+                        logger.info(`Downloaded GridFS file ${file.fileName}: ${downloadedBuffer.length} bytes, hasEncryption=${!!hasEncryption}, status=${mongoFile.status}`);
 
                         if (hasEncryption) {
                             // Original upload was encrypted — decrypt it
@@ -84,10 +92,10 @@ export async function completeWork(token: string): Promise<CompleteWorkResult> {
                             buffer = downloadedBuffer;
                         }
                     } else {
-                        console.warn(`[Complete Work] MongoFile record not found for ${file.fileName} (mongoFileId: ${(file as any).mongoFileId})`);
+                        logger.warn(`MongoFile record not found for ${file.fileName} (mongoFileId: ${(file as any).mongoFileId})`);
                     }
                 } else {
-                    console.warn(`[Complete Work] File ${file.fileName} has no content (no encryptedContent, no mongoFileId)`);
+                    logger.warn(`File ${file.fileName} has no content (no encryptedContent, no mongoFileId)`);
                 }
 
                 if (buffer) {
@@ -99,120 +107,128 @@ export async function completeWork(token: string): Promise<CompleteWorkResult> {
                     let finalContentType = file.fileType;
 
                     try {
-                        const textContent = buffer.toString('utf-8');
-                        // Only attempt JSON parse for text-like MIME types or small files
-                        // that could plausibly be wrapped editor state
-                        if (textContent.startsWith('{"type":"') && textContent.includes('"pages":[')) {
-                            const parsed = JSON.parse(textContent);
-                            if (parsed && Array.isArray(parsed.pages)) {
-                                console.warn(`[Complete Work] Detected JSON-wrapped editor state for file ${file.fileName} — extracting real content (type: ${parsed.type}, pages: ${parsed.pages.length})`);
+                        // Quick check: only attempt JSON parse if the first 9 bytes match the
+                        // editor state signature. This avoids a full UTF-8 decode on binary files.
+                        const hasEditorSignature =
+                            buffer.length >= JSON_EDITOR_SIGNATURE.length &&
+                            buffer.subarray(0, JSON_EDITOR_SIGNATURE.length).equals(JSON_EDITOR_SIGNATURE);
 
-                                // Extract content in the SAME format the owner originally uploaded
-                                if (parsed.type === 'pdf') {
-                                    // PDF: render all pages with all elements
-                                    const { PDFDocument, rgb, StandardFonts } = await import('pdf-lib');
-                                    const pdfDoc = await PDFDocument.create();
+                        if (hasEditorSignature) {
+                            const textContent = buffer.toString('utf-8');
+                            if (textContent.includes('"pages":[')) {
+                                const parsed = JSON.parse(textContent);
+                                if (parsed && Array.isArray(parsed.pages)) {
+                                    logger.info(`Detected JSON-wrapped editor state for file ${file.fileName} — extracting real content (type: ${parsed.type}, pages: ${parsed.pages.length})`);
 
-                                    for (const page of parsed.pages) {
-                                        const pdfPage = pdfDoc.addPage([page.width || 794, page.height || 1122]);
-                                        pdfPage.drawRectangle({ x: 0, y: 0, width: page.width || 794, height: page.height || 1122, color: rgb(1, 1, 1) });
+                                    // Extract content in the SAME format the owner originally uploaded
+                                    if (parsed.type === 'pdf') {
+                                        // PDF: render all pages with all elements
+                                        if (!PDFLib) PDFLib = await import('pdf-lib');
+                                        const { PDFDocument, rgb, StandardFonts } = PDFLib;
+                                        const pdfDoc = await PDFDocument.create();
 
-                                        for (const el of (page.elements || [])) {
-                                            if (el.type === 'text') {
-                                                try {
-                                                    const font = await pdfDoc.embedFont(el.bold ? StandardFonts.HelveticaBold : StandardFonts.Helvetica);
-                                                    const fs = el.size || 12;
-                                                    pdfPage.drawText(el.content || '', {
-                                                        x: el.x || 0,
-                                                        y: Math.max(0, (page.height || 1122) - (el.y || 0) - fs),
-                                                        size: fs, font, color: rgb(0, 0, 0),
-                                                    });
-                                                } catch { }
-                                            } else if (el.type === 'image' && el.src) {
-                                                try {
-                                                    const matches = el.src.match(/^data:([^;]+);base64,(.+)$/);
-                                                    if (matches) {
-                                                        const imgBytes = Buffer.from(matches[2], 'base64');
-                                                        const img = matches[1].includes('png')
-                                                            ? await pdfDoc.embedPng(imgBytes)
-                                                            : await pdfDoc.embedJpg(imgBytes);
-                                                        pdfPage.drawImage(img, {
+                                        for (const page of parsed.pages) {
+                                            const pdfPage = pdfDoc.addPage([page.width || 794, page.height || 1122]);
+                                            pdfPage.drawRectangle({ x: 0, y: 0, width: page.width || 794, height: page.height || 1122, color: rgb(1, 1, 1) });
+
+                                            for (const el of (page.elements || [])) {
+                                                if (el.type === 'text') {
+                                                    try {
+                                                        const font = await pdfDoc.embedFont(el.bold ? StandardFonts.HelveticaBold : StandardFonts.Helvetica);
+                                                        const fs = el.size || 12;
+                                                        pdfPage.drawText(el.content || '', {
                                                             x: el.x || 0,
-                                                            y: (page.height || 1122) - (el.y || 0) - (el.height || 150),
-                                                            width: el.width || 200,
-                                                            height: el.height || 150,
+                                                            y: Math.max(0, (page.height || 1122) - (el.y || 0) - fs),
+                                                            size: fs, font, color: rgb(0, 0, 0),
                                                         });
-                                                    }
-                                                } catch { }
-                                            } else if (el.type === 'table') {
-                                                try {
-                                                    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-                                                    const { rows = [], colW = 100, rowH = 24 } = el;
-                                                    for (let r = 0; r < rows.length; r++) {
-                                                        for (let c = 0; c < (rows[r] || []).length; c++) {
-                                                            const cx = (el.x || 0) + c * colW;
-                                                            const cy = (page.height || 1122) - (el.y || 0) - (r + 1) * rowH;
-                                                            pdfPage.drawRectangle({
-                                                                x: cx, y: cy, width: colW, height: rowH,
-                                                                borderColor: rgb(0.7, 0.7, 0.7), borderWidth: 0.5,
-                                                                color: r === 0 ? rgb(0.88, 0.88, 0.95) : rgb(1, 1, 1),
-                                                            });
-                                                            pdfPage.drawText(String(rows[r][c] || ''), {
-                                                                x: cx + 4, y: cy + 6, size: 9, font, color: rgb(0, 0, 0),
+                                                    } catch { }
+                                                } else if (el.type === 'image' && el.src) {
+                                                    try {
+                                                        const matches = el.src.match(/^data:([^;]+);base64,(.+)$/);
+                                                        if (matches) {
+                                                            const imgBytes = Buffer.from(matches[2], 'base64');
+                                                            const img = matches[1].includes('png')
+                                                                ? await pdfDoc.embedPng(imgBytes)
+                                                                : await pdfDoc.embedJpg(imgBytes);
+                                                            pdfPage.drawImage(img, {
+                                                                x: el.x || 0,
+                                                                y: (page.height || 1122) - (el.y || 0) - (el.height || 150),
+                                                                width: el.width || 200,
+                                                                height: el.height || 150,
                                                             });
                                                         }
-                                                    }
-                                                } catch { }
+                                                    } catch { }
+                                                } else if (el.type === 'table') {
+                                                    try {
+                                                        const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+                                                        const { rows = [], colW = 100, rowH = 24 } = el;
+                                                        for (let r = 0; r < rows.length; r++) {
+                                                            for (let c = 0; c < (rows[r] || []).length; c++) {
+                                                                const cx = (el.x || 0) + c * colW;
+                                                                const cy = (page.height || 1122) - (el.y || 0) - (r + 1) * rowH;
+                                                                pdfPage.drawRectangle({
+                                                                    x: cx, y: cy, width: colW, height: rowH,
+                                                                    borderColor: rgb(0.7, 0.7, 0.7), borderWidth: 0.5,
+                                                                    color: r === 0 ? rgb(0.88, 0.88, 0.95) : rgb(1, 1, 1),
+                                                                });
+                                                                pdfPage.drawText(String(rows[r][c] || ''), {
+                                                                    x: cx + 4, y: cy + 6, size: 9, font, color: rgb(0, 0, 0),
+                                                                });
+                                                            }
+                                                        }
+                                                    } catch { }
+                                                }
                                             }
                                         }
-                                    }
 
-                                    const pdfBytes = await pdfDoc.save();
-                                    finalBuffer = Buffer.from(pdfBytes);
-                                    finalContentType = 'application/pdf';
+                                        const pdfBytes = await pdfDoc.save();
+                                        finalBuffer = Buffer.from(pdfBytes);
+                                        finalContentType = 'application/pdf';
 
-                                } else if (parsed.type === 'csv' || parsed.type === 'xlsx' || parsed.type === 'xls') {
-                                    // Spreadsheet: extract ALL table rows from ALL pages
-                                    const allRows: any[][] = [];
-                                    for (const page of parsed.pages) {
-                                        for (const el of (page.elements || [])) {
-                                            if (el.type === 'table' && el.rows) {
-                                                allRows.push(...el.rows);
+                                    } else if (parsed.type === 'csv' || parsed.type === 'xlsx' || parsed.type === 'xls') {
+                                        // Spreadsheet: extract ALL table rows from ALL pages
+                                        const allRows: any[][] = [];
+                                        for (const page of parsed.pages) {
+                                            for (const el of (page.elements || [])) {
+                                                if (el.type === 'table' && el.rows) {
+                                                    allRows.push(...el.rows);
+                                                }
                                             }
                                         }
-                                    }
-                                    if (allRows.length > 0) {
-                                        const XLSX = await import('xlsx');
-                                        const worksheet = XLSX.utils.aoa_to_sheet(allRows);
-                                        if (parsed.type === 'csv') {
-                                            const csvStr = XLSX.utils.sheet_to_csv(worksheet);
-                                            finalBuffer = Buffer.from(csvStr, 'utf-8');
-                                            finalContentType = 'text/csv';
-                                        } else {
-                                            const workbook = XLSX.utils.book_new();
-                                            XLSX.utils.book_append_sheet(workbook, worksheet, 'Sheet1');
-                                            const buf = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
-                                            finalBuffer = Buffer.from(buf);
-                                            finalContentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+                                        if (allRows.length > 0) {
+                                            if (!XLSXLib) XLSXLib = await import('xlsx');
+                                            const XLSX = XLSXLib;
+                                            const worksheet = XLSX.utils.aoa_to_sheet(allRows);
+                                            if (parsed.type === 'csv') {
+                                                const csvStr = XLSX.utils.sheet_to_csv(worksheet);
+                                                finalBuffer = Buffer.from(csvStr, 'utf-8');
+                                                finalContentType = 'text/csv';
+                                            } else {
+                                                const workbook = XLSX.utils.book_new();
+                                                XLSX.utils.book_append_sheet(workbook, worksheet, 'Sheet1');
+                                                const buf = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+                                                finalBuffer = Buffer.from(buf);
+                                                finalContentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+                                            }
                                         }
-                                    }
-                                } else if (parsed.type === 'image') {
-                                    // Image: extract image binary from base64 data URL
-                                    const imgEl = parsed.pages.flatMap((p: any) => p.elements || []).find((e: any) => e.type === 'image' && e.src);
-                                    if (imgEl?.src) {
-                                        const matches = imgEl.src.match(/^data:([^;]+);base64,(.+)$/);
-                                        if (matches) {
-                                            finalBuffer = Buffer.from(matches[2], 'base64');
-                                            finalContentType = matches[1];
+                                    } else if (parsed.type === 'image') {
+                                        // Image: extract image binary from base64 data URL
+                                        const imgEl = parsed.pages.flatMap((p: any) => p.elements || []).find((e: any) => e.type === 'image' && e.src);
+                                        if (imgEl?.src) {
+                                            const matches = imgEl.src.match(/^data:([^;]+);base64,(.+)$/);
+                                            if (matches) {
+                                                finalBuffer = Buffer.from(matches[2], 'base64');
+                                                finalContentType = matches[1];
+                                            }
                                         }
+                                    } else {
+                                        // Text (TXT and other): join ALL text elements across ALL pages
+                                        const text = parsed.pages
+                                            .flatMap((p: any) => (p.elements || []).filter((e: any) => e.type === 'text').map((e: any) => e.content))
+                                            .join('\n');
+                                        finalBuffer = Buffer.from(text, 'utf-8');
+                                        finalContentType = 'text/plain';
                                     }
-                                } else {
-                                    // Text (TXT and other): join ALL text elements across ALL pages
-                                    const text = parsed.pages
-                                        .flatMap((p: any) => (p.elements || []).filter((e: any) => e.type === 'text').map((e: any) => e.content))
-                                        .join('\n');
-                                    finalBuffer = Buffer.from(text, 'utf-8');
-                                    finalContentType = 'text/plain';
                                 }
                             }
                         }
@@ -225,10 +241,10 @@ export async function completeWork(token: string): Promise<CompleteWorkResult> {
                         content: finalBuffer,
                         contentType: finalContentType,
                     });
-                    console.log(`[Complete Work] Prepared attachment: ${file.fileName} (${finalBuffer.length} bytes, ${finalContentType})`);
+                    logger.info(`Prepared attachment: ${file.fileName} (${finalBuffer.length} bytes, ${finalContentType})`);
                 }
             } catch (err) {
-                console.error(`[Complete Work] Failed to retrieve file ${file.id} (${file.fileName}):`, err);
+                logger.error(`Failed to retrieve file ${file.id} (${file.fileName}):`, err);
                 // Continue with other files — don't fail the entire operation
             }
         }
@@ -242,16 +258,26 @@ export async function completeWork(token: string): Promise<CompleteWorkResult> {
                     (secureLink as any).purpose || '',
                     attachments
                 );
-                console.log(`[Complete Work] Delivered ${attachments.length} file(s) to owner: ${ownerEmail.substring(0, 3)}***`);
+                logger.info(`Delivered ${attachments.length} file(s) to owner: ${redactEmail(ownerEmail)}`);
             } catch (emailErr) {
-                console.error('[Complete Work] Email delivery failed:', emailErr);
+                logger.error('Email delivery failed:', emailErr);
                 return { success: false, error: 'Failed to deliver files to the owner via email. Please try again. Your work has been saved.' };
             }
         } else {
-            console.log('[Complete Work] No files to deliver.');
+            logger.info('No files to deliver.');
         }
 
-        // 5. Mark the link as revoked
+        // 5. Lock editing on all files — editing is only locked at delivery time
+        const fileIds = files.map((f: any) => f.id).filter(Boolean);
+        if (fileIds.length > 0) {
+            await prisma.userFile.updateMany({
+                where: { id: { in: fileIds } },
+                data: { editingLocked: true } as any,
+            });
+            logger.info(`Locked editing on ${fileIds.length} file(s).`);
+        }
+
+        // 6. Mark the link as revoked
         await prisma.secureLink.update({
             where: { id: secureLink.id },
             data: { isRevoked: true }
@@ -278,9 +304,9 @@ export async function completeWork(token: string): Promise<CompleteWorkResult> {
                 data: { isUsed: false }
             });
 
-            console.log(`[Complete Work] Revoked access for ${lowerEmail}. VendorAccess: ${revokedVA.count}, LinkAccess: ${revokedLA.count}`);
+            logger.info(`Revoked access for ${redactEmail(lowerEmail)}. VendorAccess: ${revokedVA.count}, LinkAccess: ${revokedLA.count}`);
         } else {
-            console.log(`[Complete Work] No specific vendor email found, but marking action.`);
+            logger.info(`No specific vendor email found, but marking action.`);
         }
 
         // 6. Create Audit Log
@@ -309,20 +335,20 @@ export async function completeWork(token: string): Promise<CompleteWorkResult> {
                 const { invalidateSession } = await import('@/lib/redis');
                 await invalidateSession(token, true);
             } catch (err) {
-                console.error('[Complete Work] Failed to invalidate Redis session:', err);
+                logger.error('Failed to invalidate Redis session:', err);
             }
         }
 
         // 8. AUTO-CLEANUP: Purge ALL data for this link (async, non-blocking)
         import('@/actions/cleanup').then(({ cleanupSingleLink }) => {
             cleanupSingleLink(token).catch(err => {
-                console.error('[Complete Work] Failed to cleanup link data:', err);
+                logger.error('Failed to cleanup link data:', err);
             });
         });
 
         return { success: true };
     } catch (error) {
-        console.error('completeWork error:', error);
+        logger.error('completeWork error:', error);
         return { success: false, error: 'Failed to complete work.' };
     }
 }

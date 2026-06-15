@@ -18,6 +18,7 @@ import { canCreateSecureLinks } from '@/lib/security/roles';
 import { checkUploadRateLimit, extractClientIP, formatRateLimitError } from '@/lib/rate-limit';
 import { headers } from 'next/headers';
 import path from 'path';
+import { logger, redactToken, redactEmail } from '@/lib/logger';
 
 export type CreateSecureLinkResult = {
     success: boolean;
@@ -92,6 +93,7 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
         }
 
         const allowEditing = formData.get('allowEditing') === 'true';
+        const allowDownload = formData.get('allowDownload') === 'true';
         const validatedData = userDataSchema.safeParse(rawData);
         if (!validatedData.success) {
             return {
@@ -189,7 +191,7 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
         const expiresAt = calculateExpiry(validityMinutes);
 
         // Generate per-vendor OTPs
-        const vendorAcessData = await Promise.all(
+        const vendorAccessData = await Promise.all(
             vendors.map(async (v) => {
                 const vendorOtp = generateOTP();
                 const vendorOtpHash = await hashOTP(vendorOtp);
@@ -299,8 +301,9 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
                     // Zero Trust: Email binding - only this email can verify OTP
                     allowedVendorEmail: vendorEmail || undefined,
                     allowEditing,
+                    allowDownload,
                     LinkAccess: {
-                        create: vendorAcessData.map(v => ({ 
+                        create: vendorAccessData.map(v => ({ 
                             vendorEmail: v.email, 
                             level: v.level,
                             otpHash: v.otpHash,
@@ -346,24 +349,25 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
                 metadata: JSON.stringify({
                     fileCount: files.length,
                     purpose: purpose || undefined,
-                    hasNotifications: !!notificationEmail
+                    hasNotifications: !!notificationEmail,
+                    allowDownload,
                 }),
             },
-        }).catch(err => console.warn('[AUDIT] Failed to log:', err.message));
+        }).catch(err => logger.warn('Failed to log audit event:', err.message));
 
         const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
         const shareUrl = `${baseUrl}/share/${token}`;
         const ownerUrl = `${baseUrl}/revoke/${ownerToken}`;
 
-        console.log(`[SECURE] Link created with ${files.length} files. ID: ${result.id}`);
+        logger.info(`Link created with ${files.length} files. ID: ${redactToken(result.id)}`);
 
         // 📧 Send OTP email to all vendors per their unique OTPs (fire-and-forget)
-        if (vendorAcessData.length > 0) {
+        if (vendorAccessData.length > 0) {
             import('@/lib/email').then(({ sendOTPEmail }) => {
-                vendorAcessData.forEach(v => {
+                vendorAccessData.forEach(v => {
                     sendOTPEmail(v.email, token, v.otp, validityMinutes)
-                        .then(() => console.log(`[EMAIL] OTP sent to ${v.email.substring(0, 3)}***`))
-                        .catch((err) => console.error('[EMAIL] Failed to send OTP:', err.message));
+                        .then(() => logger.info(`OTP sent to ${redactEmail(v.email)}`))
+                        .catch((err) => logger.error('Failed to send OTP:', err.message));
                 });
             });
         }
@@ -378,7 +382,7 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
         };
 
     } catch (error) {
-        console.error('Error creating secure link:', error instanceof Error ? error.message : 'Unknown error');
+        logger.error('Error creating secure link:', error instanceof Error ? error.message : 'Unknown error');
         return {
             success: false,
             error: 'Failed to create secure link. Please try again.',

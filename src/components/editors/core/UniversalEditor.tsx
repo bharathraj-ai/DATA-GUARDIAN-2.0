@@ -55,6 +55,7 @@ export default function UniversalEditor({
   const onSaveRef = useRef(onSave);
   const onSubmitRef = useRef(onSubmit);
   const isSavingRef = useRef(false);
+  const isDirtyRef = useRef(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   // Table tools state
@@ -128,6 +129,7 @@ export default function UniversalEditor({
     setLoading(false);
   };
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (initialFileProp) {
       handleFile(initialFileProp);
@@ -223,11 +225,11 @@ export default function UniversalEditor({
     handleSaveToLink(false, nd);
   };
 
-  const handleSaveToLink = async (isSubmit = false, overrideDoc: DocumentData | null = null, silent = false) => {
+  const handleSaveToLink = useCallback(async (isSubmit = false, overrideDoc: DocumentData | null = null, silent = false) => {
     if (isSavingRef.current) return;
     isSavingRef.current = true;
     
-    const currentDoc = overrideDoc || doc;
+    const currentDoc = overrideDoc || docRef.current;
     const actionFn = isSubmit ? onSubmitRef.current : onSaveRef.current;
     if (!actionFn || !currentDoc) {
       isSavingRef.current = false;
@@ -253,6 +255,7 @@ export default function UniversalEditor({
       }
 
       await actionFn(savedFile);
+      isDirtyRef.current = false;
       if (!silent) setLoading(false);
     } catch (e: any) {
       console.error("Save error:", e);
@@ -263,10 +266,11 @@ export default function UniversalEditor({
     } finally {
       isSavingRef.current = false;
     }
-  };
+  }, []);
 
   useEffect(() => {
     docRef.current = doc;
+    if (doc) isDirtyRef.current = true;
   }, [doc]);
 
   useEffect(() => {
@@ -277,12 +281,12 @@ export default function UniversalEditor({
   useEffect(() => {
     if (isReadOnly) return;
     const interval = setInterval(() => {
-      if (docRef.current) {
+      if (docRef.current && isDirtyRef.current) {
         handleSaveToLink(false, docRef.current, true).catch(err => console.error("Autosave error:", err));
       }
-    }, 5000);
+    }, 30000);
     return () => clearInterval(interval);
-  }, [isReadOnly]);
+  }, [isReadOnly, handleSaveToLink]);
 
   useEffect(() => {
     if (forceAutoSave && doc && !isReadOnly && !loading) {

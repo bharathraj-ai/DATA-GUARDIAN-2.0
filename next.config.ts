@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // output: 'standalone', // Uncomment this ONLY for Docker/Linux deployments. Turbopack on Windows throws EINVAL due to 'node:crypto' chunk renaming.
+  output: 'standalone', // Uncomment this ONLY for Docker/Linux deployments. Turbopack on Windows throws EINVAL due to 'node:crypto' chunk renaming.
 
   // Enable GZIP/Brotli compression
   compress: true,
@@ -33,7 +33,9 @@ const nextConfig: NextConfig = {
       '@prisma/client',
       'qrcode',
       'next-auth',
-      'exceljs',
+      'xlsx',
+      'pdf-lib',
+      'mongodb',
     ],
   },
 
@@ -59,6 +61,8 @@ const nextConfig: NextConfig = {
 
   // Security headers + aggressive caching for static assets
   async headers() {
+    const isDev = process.env.NODE_ENV === 'development';
+    
     return [
       // Global security headers
       {
@@ -75,12 +79,15 @@ const nextConfig: NextConfig = {
             key: 'Content-Security-Policy',
             value: [
               "default-src 'self'",
-              "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+              `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
               "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
               "font-src 'self' https://fonts.gstatic.com",
               "img-src 'self' data: blob: https://lh3.googleusercontent.com https://avatars.githubusercontent.com",
               "connect-src 'self' https://*.upstash.io https://*.neon.tech",
               "frame-ancestors 'none'",
+              "base-uri 'self'",
+              "form-action 'self'",
+              "object-src 'none'",
             ].join('; '),
           },
         ],
@@ -91,7 +98,7 @@ const nextConfig: NextConfig = {
         headers: [
           {
             key: 'Content-Security-Policy',
-            value: `frame-src 'self' ${process.env.ONLYOFFICE_SERVER_URL || 'http://localhost:8080'}; script-src 'self' 'unsafe-inline' 'unsafe-eval' ${process.env.ONLYOFFICE_SERVER_URL || 'http://localhost:8080'}`,
+            value: `frame-src 'self' ${process.env.ONLYOFFICE_SERVER_URL || 'http://localhost:8080'}; script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""} ${process.env.ONLYOFFICE_SERVER_URL || 'http://localhost:8080'}`,
           },
         ],
       },

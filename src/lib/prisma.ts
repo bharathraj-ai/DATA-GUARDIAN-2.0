@@ -9,10 +9,17 @@ const globalForPrisma = globalThis as unknown as {
 function createPrismaClient(): PrismaClient {
   // Ensure DATABASE_URL has connection_limit=20
   let url = process.env.DATABASE_URL || '';
-  if (url && !url.includes('connection_limit=')) {
-      url = url.includes('?') ? `${url}&connection_limit=20` : `${url}?connection_limit=20`;
-  } else if (url) {
-      url = url.replace(/connection_limit=\d+/, 'connection_limit=20');
+  if (url) {
+      try {
+          const parsed = new URL(url);
+          parsed.searchParams.set('connection_limit', '20');
+          url = parsed.toString();
+      } catch {
+          // If URL parsing fails (e.g. non-standard format), fall back to string approach
+          if (!url.includes('connection_limit=')) {
+              url = url.includes('?') ? `${url}&connection_limit=20` : `${url}?connection_limit=20`;
+          }
+      }
   }
 
   const client = new PrismaClient({

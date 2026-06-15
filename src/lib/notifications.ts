@@ -6,6 +6,7 @@
  */
 
 import { prisma } from './prisma';
+import { logger, redactEmail } from '@/lib/logger';
 
 // ============================================
 // NOTIFICATION EVENT TYPES
@@ -203,8 +204,8 @@ export async function sendAccessNotification(payload: NotificationPayload): Prom
     try {
         const { subject, html, text } = createEmailTemplate(payload);
 
-        console.log('📧 Notification:', {
-            to: payload.email,
+        logger.info('📧 Notification:', {
+            to: redactEmail(payload.email),
             subject,
             event: payload.event,
             tokenId: payload.tokenId.substring(0, 8)
@@ -215,9 +216,9 @@ export async function sendAccessNotification(payload: NotificationPayload): Prom
             try {
                 const { sendNotificationEmail } = await import('@/lib/email');
                 await sendNotificationEmail(payload.email, subject, html, text);
-                console.log(`📧 Email delivered to ${payload.email.substring(0, 3)}***`);
+                logger.info(`📧 Email delivered to ${redactEmail(payload.email)}`);
             } catch (emailError) {
-                console.error('📧 Email delivery failed (audit log still created):', emailError);
+                logger.error('📧 Email delivery failed (audit log still created):', emailError);
             }
         }
 
@@ -238,7 +239,7 @@ export async function sendAccessNotification(payload: NotificationPayload): Prom
 
         return true;
     } catch (error) {
-        console.error('Failed to send notification:', error);
+        logger.error('Failed to send notification:', error);
         return false;
     }
 }
