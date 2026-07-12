@@ -218,15 +218,10 @@ export async function getLinkStatus(ownerToken: string): Promise<{
             };
         }
 
-        // Log success
-        await prisma.auditLog.create({
-            data: {
-                action: 'GET_LINK_STATUS_SUCCESS',
-                linkId: secureLink.id,
-                reason: 'Owner viewed link status',
-                metadata: JSON.stringify({ viewedBy: session.user.id })
-            }
-        }).catch(e => logger.warn('Failed to log GET_LINK_STATUS_SUCCESS', e.message));
+        // SEC-2: Success audit log removed — getLinkStatus is a read-only polling
+        // operation called frequently from the dashboard. Logging every successful
+        // read creates significant DB bloat with no security benefit.
+        // The GET_LINK_STATUS_DENIED log above (unauthorized access) is preserved.
 
         const now = new Date();
         const isExpired = secureLink.expiresAt < now;

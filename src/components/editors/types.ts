@@ -41,6 +41,7 @@ export interface TableElementData extends BaseElement {
   rows: TableCellData[][];
   colW?: number;
   rowH?: number;
+  colWidths?: number[];
 }
 
 export interface ZipEntryElementData extends BaseElement {
@@ -67,4 +68,9 @@ export interface DocumentData {
   type: string;
   name: string;
   pages: PageData[];
+  metadata?: {
+    sheetNames?: string[];
+    activeSheet?: number;
+    [key: string]: any;
+  };
 }

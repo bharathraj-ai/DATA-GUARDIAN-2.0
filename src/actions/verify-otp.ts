@@ -1,7 +1,7 @@
 'use server';
 
 import { prisma } from '@/lib/prisma';
-import { verifyOTPHash, generateSessionId } from '@/lib/crypto';
+import { verifyOTPHash, generateSessionId, encryptData } from '@/lib/crypto';
 import crypto from 'crypto';
 import { otpVerifySchema, OTPVerifyInput } from '@/lib/validations';
 import { cookies, headers } from 'next/headers';
@@ -10,17 +10,18 @@ import { notifyLinkAccessed } from '@/lib/notifications';
 import { checkOTPRateLimit, extractClientIP, formatRateLimitError } from '@/lib/rate-limit';
 import { auth } from '@/lib/auth';
 
-// Anti-Phishing Configuration
-const OTP_VERIFY_WINDOW_MINUTES = 3;  // OTP valid for 3 minutes (reduced from 5 for tighter security)
+// NOTE: OTP verification window is intentionally disabled (infinite reuse allowed per product design).
+// Break-Based OTP rotation handles expiry at the OTP level via currentOtpExpiresAt.
 
 import { tryCheckRevoked, tryCreateSession } from '@/lib/redis-helpers';
+import { incrementAndCheckLimit } from '@/lib/limits';
 
 export type VerifyOTPResult = {
     success: boolean;
     accessGranted?: boolean;
     sessionId?: string;
     error?: string;
-    errorType?: 'EXPIRED' | 'USED' | 'INVALID_OTP' | 'NOT_FOUND' | 'VALIDATION_ERROR' | 'REVOKED' | 'LOCKED' | 'DENIED' | 'EMAIL_MISMATCH';
+    errorType?: 'EXPIRED' | 'USED' | 'INVALID_OTP' | 'NOT_FOUND' | 'VALIDATION_ERROR' | 'REVOKED' | 'LOCKED' | 'DENIED' | 'EMAIL_MISMATCH' | 'LIMIT_EXCEEDED';
 };
 
 /**
@@ -76,6 +77,7 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
                     deviceHash: true,
                     userId: true,
                     createdAt: true,
+                    maxViews: true,
                     // V2.1 fields
                     purpose: true,
                     purposeDetail: true,
@@ -481,6 +483,31 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
         const remainingMs = secureLink.expiresAt.getTime() - now.getTime();
         const ttlSeconds = Math.max(1, Math.floor(remainingMs / 1000));
 
+        // 7. Enforce View Limit (Hybrid Architecture)
+        const limitCheck = await incrementAndCheckLimit(
+            secureLink.id,
+            'view',
+            secureLink.maxViews,
+            secureLink.expiresAt
+        );
+
+        if (!limitCheck.allowed) {
+            // Log the denied access due to limit
+            await prisma.auditLog.create({
+                data: {
+                    action: 'DENIED',
+                    linkId: secureLink.id,
+                    reason: 'Maximum view limit reached',
+                    metadata: JSON.stringify({ maxViews: secureLink.maxViews })
+                }
+            });
+            return {
+                success: false,
+                error: limitCheck.error || 'Maximum view limit reached.',
+                errorType: 'LIMIT_EXCEEDED',
+            };
+        }
+
         // Generate session ID and try to create Redis session
         const sessionId = generateSessionId();
         await tryCreateSession(token, sessionId, ttlSeconds);
@@ -583,9 +610,13 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
             path: '/',
         });
 
-        // Set email cookie to identify the specific vendor in the session
+        // Set email cookie to identify the specific vendor in the session.
+        // SEC-3: The email is AES-256-GCM encrypted before storage to prevent
+        // plaintext exposure in browser DevTools / extensions. The server decrypts
+        // it on every request via decryptData() in linkAuthorization.ts.
         if (vendor) {
-            cookieStore.set('vendor_email', vendor.email, {
+            const encryptedEmail = encryptData({ email: vendor.email });
+            cookieStore.set('vendor_email', encryptedEmail, {
                 httpOnly: true,
                 secure: process.env.NODE_ENV === 'production',
                 sameSite: 'strict',

@@ -15,6 +15,8 @@ export interface TableActions {
   currentCell: TableCellData | null;
   canDeleteRow: boolean;
   canDeleteCol: boolean;
+  toggleFreezeCol?: () => void;
+  isFrozenCol?: boolean;
 }
 
 interface TableElementProps {
@@ -27,11 +29,43 @@ interface TableElementProps {
 }
 
 export const TableElement = React.memo(({ el, scale, onUpdate, selected, onSelect, onRegisterActions }: TableElementProps) => {
-  const { rows = [], colW = 100, rowH = 28, hasHeader = true } = el;
+  const { rows = [], colW = 100, colWidths = [], rowH = 28, hasHeader = true } = el;
   const [activeCell, setActiveCell] = useState<{ r: number; c: number } | null>(null);
   const [editingCell, setEditingCell] = useState<{ r: number; c: number } | null>(null);
   const [editValue, setEditValue] = useState("");
   const editInputRef = useRef<HTMLTextAreaElement>(null);
+
+  const [resizingCol, setResizingCol] = useState<{ c: number, startX: number, startW: number } | null>(null);
+  const [liveWidth, setLiveWidth] = useState<number | null>(null);
+
+  const handleMouseMove = useCallback((e: MouseEvent) => {
+    if (!resizingCol) return;
+    const diff = e.clientX - resizingCol.startX;
+    const newW = resizingCol.startW + diff / scale;
+    setLiveWidth(Math.max(40, Math.min(newW, 800)));
+  }, [resizingCol, scale]);
+
+  const handleMouseUp = useCallback(() => {
+    if (resizingCol && liveWidth !== null) {
+      const newWidths = [...(colWidths.length ? colWidths : Array(rows[0]?.length || 0).fill(colW))];
+      newWidths[resizingCol.c] = liveWidth;
+      const newTableWidth = newWidths.reduce((a, b) => a + b, 0);
+      onUpdate({ colWidths: newWidths, width: Math.max(el.width, newTableWidth) });
+    }
+    setResizingCol(null);
+    setLiveWidth(null);
+  }, [resizingCol, liveWidth, colWidths, colW, rows, onUpdate, el.width]);
+
+  useEffect(() => {
+    if (resizingCol) {
+      window.addEventListener("mousemove", handleMouseMove);
+      window.addEventListener("mouseup", handleMouseUp);
+      return () => {
+        window.removeEventListener("mousemove", handleMouseMove);
+        window.removeEventListener("mouseup", handleMouseUp);
+      };
+    }
+  }, [resizingCol, handleMouseMove, handleMouseUp]);
 
   // Auto focus input when editing starts
   useEffect(() => {
@@ -42,29 +76,29 @@ export const TableElement = React.memo(({ el, scale, onUpdate, selected, onSelec
     }
   }, [editingCell]);
 
-  // Click outside to clear active cell if not selecting table
-  useEffect(() => {
-    if (!selected) {
-      setActiveCell(null);
-      if (editingCell) finishEditing();
-    }
-  }, [selected]);
-
-  const finishEditing = () => {
-    if (editingCell) {
-      updateCell(editingCell.r, editingCell.c, { value: editValue });
-      setEditingCell(null);
-    }
-  };
-
-  const updateCell = (r: number, c: number, patch: Partial<TableCellData>) => {
+  const updateCell = useCallback((r: number, c: number, patch: Partial<TableCellData>) => {
     const newRows = rows.map((row, ri) =>
       ri === r
         ? row.map((cell, ci) => (ci === c ? { ...cell, ...patch } : cell))
         : row
     );
     onUpdate({ rows: newRows });
-  };
+  }, [rows, onUpdate]);
+
+  const finishEditing = useCallback(() => {
+    if (editingCell) {
+      updateCell(editingCell.r, editingCell.c, { value: editValue });
+      setEditingCell(null);
+    }
+  }, [editingCell, editValue, updateCell]);
+
+  // Click outside to clear active cell if not selecting table
+  useEffect(() => {
+    if (!selected) {
+      setActiveCell(null);
+      if (editingCell) finishEditing();
+    }
+  }, [selected, editingCell, finishEditing]);
 
   const addRow = () => {
     const cols = rows[0] ? rows[0].length : 3;
@@ -135,9 +169,10 @@ export const TableElement = React.memo(({ el, scale, onUpdate, selected, onSelec
   const applyStyle = useCallback((key: keyof TableCellData, val: any) => {
     if (!activeCell) return;
     updateCell(activeCell.r, activeCell.c, { [key]: val });
-  }, [activeCell, rows]);
+  }, [activeCell, updateCell]);
 
   // Register actions with parent when selected
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!onRegisterActions) return;
     if (selected) {
@@ -161,7 +196,6 @@ export const TableElement = React.memo(({ el, scale, onUpdate, selected, onSelec
     }
   }, [selected, activeCell, rows, hasHeader, onRegisterActions]);
 
-  const currentCell = activeCell ? rows[activeCell.r]?.[activeCell.c] : null;
 
   const renderCell = (cell: TableCellData, r: number, c: number) => {
     const isHeader = hasHeader && r === 0;
@@ -173,6 +207,9 @@ export const TableElement = React.memo(({ el, scale, onUpdate, selected, onSelec
     const bold = cell.bold ?? isHeader;
     const italic = cell.italic ?? false;
     const align = cell.align || "left";
+
+    const isResizingThis = resizingCol?.c === c;
+    const currentWidth = isResizingThis && liveWidth !== null ? liveWidth : (colWidths[c] || colW);
 
     return (
       <td
@@ -200,10 +237,11 @@ export const TableElement = React.memo(({ el, scale, onUpdate, selected, onSelec
           border: isActive ? "2px solid #3b82f6" : "1px solid #27272a",
           background: bg,
           padding: 0,
-          minWidth: colW * scale,
-          height: rowH * scale,
-          verticalAlign: "top",
-          transition: "background 0.2s",
+          minWidth: currentWidth * scale,
+          width: currentWidth * scale,
+          minHeight: rowH * scale,
+          verticalAlign: "middle",
+          transition: isResizingThis ? "none" : "background 0.2s",
           position: "relative",
         }}
       >
@@ -250,16 +288,39 @@ export const TableElement = React.memo(({ el, scale, onUpdate, selected, onSelec
               fontStyle: italic ? "italic" : "normal",
               textAlign: align,
               padding: `${2 * scale}px ${4 * scale}px`,
-              whiteSpace: "pre-wrap",
+              whiteSpace: isHeader ? "nowrap" : "pre-wrap",
               wordBreak: "break-word",
             }}
           >
             {cell.value || "\u00A0"}
           </div>
         )}
+        {r === 0 && (
+          <div
+            onMouseDown={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              setResizingCol({ c, startX: e.clientX, startW: currentWidth });
+            }}
+            style={{
+              position: 'absolute',
+              right: -3,
+              top: 0,
+              bottom: 0,
+              width: 6,
+              cursor: 'col-resize',
+              zIndex: 10,
+              backgroundColor: isResizingThis ? '#3b82f6' : 'transparent',
+            }}
+          />
+        )}
       </td>
     );
   };
+
+  const totalTableWidth = colWidths.length > 0 
+    ? colWidths.reduce((a, b) => a + b, 0)
+    : (rows[0]?.length || 0) * colW;
 
   return (
     <div
@@ -277,7 +338,7 @@ export const TableElement = React.memo(({ el, scale, onUpdate, selected, onSelec
       }}
     >
       <div style={{ width: "100%", height: "100%", overflow: "auto" }}>
-        <table style={{ borderCollapse: "collapse", fontSize: 11 * scale, width: "100%", tableLayout: "fixed" }}>
+        <table style={{ borderCollapse: "collapse", fontSize: 11 * scale, width: totalTableWidth * scale, tableLayout: "fixed" }}>
           <tbody>
             {rows.map((row, r) => (
               <tr key={r}>

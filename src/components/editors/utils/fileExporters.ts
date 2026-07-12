@@ -45,7 +45,12 @@ export async function exportDocument(currentDoc: DocumentData): Promise<File> {
     const pdfBytes = await pdfDoc.save();
     return new File([pdfBytes as any], currentDoc.name || "document.pdf", { type: "application/pdf" });
 
-  } else if (currentDoc.type === "csv" || currentDoc.type === "xlsx" || currentDoc.type === "xls") {
+  } else if (currentDoc.type === "xlsx" || currentDoc.type === "xls") {
+    const { WorkbookAdapter } = await import("@/lib/workbookAdapter");
+    const buf = await WorkbookAdapter.generateWorkbook(currentDoc);
+    return new File([buf as any], currentDoc.name || "edited.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+
+  } else if (currentDoc.type === "csv") {
     const allRows: any[] = [];
     for (const page of currentDoc.pages) {
       for (const el of page.elements) {
@@ -59,17 +64,10 @@ export async function exportDocument(currentDoc: DocumentData): Promise<File> {
     if (allRows.length > 0) {
       const XLSX = await import("xlsx");
       const worksheet = XLSX.utils.aoa_to_sheet(allRows);
-      if (currentDoc.type === "csv") {
-        const csvStr = XLSX.utils.sheet_to_csv(worksheet);
-        return new File([csvStr], currentDoc.name || "edited.csv", { type: "text/csv" });
-      } else {
-        const workbook = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(workbook, worksheet, "Sheet1");
-        const buf = XLSX.write(workbook, { type: "array", bookType: "xlsx" });
-        return new File([buf], currentDoc.name || "edited.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-      }
+      const csvStr = XLSX.utils.sheet_to_csv(worksheet);
+      return new File([csvStr], currentDoc.name || "edited.csv", { type: "text/csv" });
     } else {
-      return new File([""], currentDoc.name || "edited.csv", { type: currentDoc.type === "csv" ? "text/csv" : "text/plain" });
+      return new File([""], currentDoc.name || "edited.csv", { type: "text/csv" });
     }
 
   } else if (currentDoc.type === "image") {

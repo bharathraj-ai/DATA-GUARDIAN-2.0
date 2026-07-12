@@ -5,6 +5,7 @@ import { authorizeSecureLink } from '@/lib/linkAuthorization';
 import { downloadFromMongo } from '@/lib/mongo/operations';
 import { extractRequestInfo } from '@/lib/security/auditLog';
 import { logger } from '@/lib/logger';
+import { incrementAndCheckLimit } from '@/lib/limits';
 
 export async function GET(
     request: NextRequest,
@@ -29,6 +30,29 @@ export async function GET(
             return NextResponse.json(
                 { error: 'File not found' },
                 { status: 404 }
+            );
+        }
+
+        // ── 1.5 Enforce Download Limit ─────────────────────────────
+        const limitCheck = await incrementAndCheckLimit(
+            secureLink.id,
+            'download',
+            secureLink.maxDownloads,
+            secureLink.expiresAt
+        );
+
+        if (!limitCheck.allowed) {
+            await prisma.auditLog.create({
+                data: {
+                    action: 'DENIED',
+                    linkId: secureLink.id,
+                    reason: 'Maximum download limit reached',
+                    metadata: JSON.stringify({ maxDownloads: secureLink.maxDownloads, fileId })
+                }
+            }).catch(() => {});
+            return NextResponse.json(
+                { error: limitCheck.error || 'Maximum download limit reached' },
+                { status: 403 }
             );
         }
 

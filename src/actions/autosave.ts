@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { auth } from '@/lib/auth';
 import { cookies } from 'next/headers';
 import { authorizeSecureLink } from '@/lib/linkAuthorization';
+import { decryptData } from '@/lib/crypto';
 
 export async function autosaveSession(
   token: string, 
@@ -24,7 +25,17 @@ export async function autosaveSession(
     let vendorEmail = session?.user?.email;
     const cookieStore = await cookies();
     if (!vendorEmail) {
-      vendorEmail = cookieStore.get('vendor_email')?.value;
+      // SEC-3: vendor_email cookie is AES-256-GCM encrypted — decrypt before use
+      const rawCookie = cookieStore.get('vendor_email')?.value;
+      if (rawCookie) {
+        try {
+          const decoded = decryptData<{ email: string }>(rawCookie);
+          vendorEmail = decoded.email;
+        } catch {
+          // Graceful fallback: accept plaintext cookie for backward compatibility
+          vendorEmail = rawCookie.includes(':') ? undefined : rawCookie;
+        }
+      }
     }
 
     if (!vendorEmail) {
@@ -76,8 +87,9 @@ export async function autosaveSession(
         lastError = err;
         retries--;
         if (retries === 0) throw err;
-        // Wait 1 second before retrying
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        // PERF-2: Exponential backoff — 1s, 2s, 3s for retries 3, 2, 1.
+        // Spreads retry pressure and gives the DB more time to recover after a transient drop.
+        await new Promise(resolve => setTimeout(resolve, 1000 * (4 - retries)));
       }
     }
 
