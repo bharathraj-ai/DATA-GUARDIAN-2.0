@@ -23,6 +23,19 @@ export function middleware(request: NextRequest) {
     response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
     response.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
 
+    // Content-Security-Policy — strongest XSS mitigation
+    response.headers.set('Content-Security-Policy', [
+        "default-src 'self'",
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval'",  // Next.js requires inline + eval in dev
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+        "font-src 'self' https://fonts.gstatic.com",
+        "img-src 'self' data: blob: https:",
+        "connect-src 'self'",
+        "frame-ancestors 'none'",
+        "base-uri 'self'",
+        "form-action 'self'",
+    ].join('; '));
+
     // HSTS — only in production (HTTPS)
     if (process.env.NODE_ENV === 'production') {
         response.headers.set(

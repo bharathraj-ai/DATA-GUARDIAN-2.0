@@ -61,6 +61,8 @@ model SecureLink {
   allowEditing       Boolean    @default(false)
   allowDownload      Boolean    @default(true)
   allowComment       Boolean    @default(true)
+  maxViews           Int?       // Null means unlimited
+  maxDownloads       Int?       // Null means unlimited
   ownerId            String?
   AuditLog           AuditLog[]
   User               User?      @relation(fields: [ownerId], references: [id])
@@ -69,7 +71,6 @@ model SecureLink {
   LinkAccess         LinkAccess[]
   ChatMessage        ChatMessage[]
   VendorAccess       VendorAccess[]
-  OtpHistory         OtpHistory[]
   @@index([expiresAt])
   @@index([ownerId])
   @@index([ownerToken])

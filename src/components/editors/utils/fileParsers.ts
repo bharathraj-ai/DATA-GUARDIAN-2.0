@@ -30,11 +30,24 @@ export async function parseImage(file: File): Promise<DocumentData> {
 export async function parseCSV(file: File): Promise<DocumentData> {
   const text = await file.text();
   const rows = text.split("\n").filter(Boolean).map(r => r.split(",").map(c => ({ value: c.replace(/^"|"$/g, "").trim() })));
-  const cols = Math.max(...rows.map(r => r.length));
-  const colW = Math.min(120, Math.floor(680 / cols));
+  const cols = Math.max(...rows.map(r => r.length), 1);
+  rows.forEach(r => { while (r.length < cols) r.push({ value: "" }); });
+  const colWidths = Array(cols).fill(60);
+  for (let c = 0; c < cols; c++) {
+    let maxLen = 5;
+    for (const row of rows) {
+      if (row[c] && row[c].value.length > maxLen) {
+        maxLen = row[c].value.length;
+      }
+    }
+    colWidths[c] = Math.min(400, Math.max(60, maxLen * 8));
+  }
+  const tableWidth = colWidths.reduce((a, b) => a + b, 0);
+  const pageWidth = Math.max(794, tableWidth + 57 * 2);
+  
   return { 
     type: "csv", name: file.name, 
-    pages: [{ id: uid(), width: 794, height: Math.max(1122, rows.length * 28 + 120), elements: [{ id: uid(), type: "table", x: 57, y: 60, width: cols * colW, height: rows.length * 28 + 2, rows, colW, rowH: 28, selected: false, hasHeader: true } as TableElementData], bgImage: null }] 
+    pages: [{ id: uid(), width: pageWidth, height: Math.max(1122, rows.length * 28 + 120), elements: [{ id: uid(), type: "table", x: 57, y: 60, width: tableWidth, height: rows.length * 28 + 2, rows, colW: 100, colWidths, rowH: 28, selected: false, hasHeader: true } as TableElementData], bgImage: null }] 
   };
 }
 
@@ -75,16 +88,64 @@ export async function parseExcel(file: File): Promise<DocumentData> {
   const XLSX = await import("xlsx");
   const ab = await file.arrayBuffer();
   const workbook = XLSX.read(ab, { type: "array" });
-  const firstSheetName = workbook.SheetNames[0];
-  const worksheet = workbook.Sheets[firstSheetName];
-  const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-  const strRows = rows.map((r: any) => (r || []).map((c: any) => ({ value: c !== undefined && c !== null ? String(c) : "" })));
-  const cols = Math.max(...strRows.map(r => r.length), 1);
-  strRows.forEach(r => { while (r.length < cols) r.push({ value: "" }); });
-  const colW = Math.max(60, Math.min(120, Math.floor(680 / cols)));
+  
+  const pages: any[] = [];
+  const sheetNames = workbook.SheetNames;
+
+  for (const sheetName of sheetNames) {
+    const worksheet = workbook.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+    const strRows = rows.map((r: any) => (r || []).map((c: any) => ({ value: c !== undefined && c !== null ? String(c) : "" })));
+    const cols = Math.max(...strRows.map(r => r.length), 1);
+    strRows.forEach(r => { while (r.length < cols) r.push({ value: "" }); });
+    
+    const colWidths = Array(cols).fill(60);
+    const excelCols = worksheet['!cols'];
+    
+    for (let c = 0; c < cols; c++) {
+      if (excelCols && excelCols[c] && typeof excelCols[c] === 'object') {
+        const colMeta = excelCols[c] as any;
+        if (colMeta.wpx) {
+          colWidths[c] = Math.max(60, colMeta.wpx);
+        } else if (colMeta.width) {
+          colWidths[c] = Math.max(60, colMeta.width * 8);
+        } else {
+          let maxLen = 5;
+          for (const row of strRows) {
+            if (row[c] && row[c].value.length > maxLen) {
+              maxLen = row[c].value.length;
+            }
+          }
+          colWidths[c] = Math.min(400, Math.max(60, maxLen * 8));
+        }
+      } else {
+        let maxLen = 5;
+        for (const row of strRows) {
+          if (row[c] && row[c].value.length > maxLen) {
+            maxLen = row[c].value.length;
+          }
+        }
+        colWidths[c] = Math.min(400, Math.max(60, maxLen * 8));
+      }
+    }
+
+    const tableWidth = colWidths.reduce((a, b) => a + b, 0);
+    const pageWidth = Math.max(794, tableWidth + 57 * 2);
+
+    pages.push({
+      id: uid(), width: pageWidth, height: Math.max(1122, strRows.length * 28 + 120), 
+      elements: [{ id: uid(), type: "table", x: 57, y: 60, width: tableWidth, height: strRows.length * 28 + 2, rows: strRows, colW: 100, colWidths, rowH: 28, selected: false, hasHeader: true } as TableElementData], 
+      bgImage: null
+    });
+  }
+
   return { 
     type: file.name.endsWith(".csv") ? "csv" : "xlsx", name: file.name, 
-    pages: [{ id: uid(), width: 794, height: Math.max(1122, strRows.length * 28 + 120), elements: [{ id: uid(), type: "table", x: 57, y: 60, width: cols * colW, height: strRows.length * 28 + 2, rows: strRows, colW, rowH: 28, selected: false, hasHeader: true } as TableElementData], bgImage: null }] 
+    pages,
+    metadata: {
+      sheetNames,
+      activeSheet: 0
+    }
   };
 }
 

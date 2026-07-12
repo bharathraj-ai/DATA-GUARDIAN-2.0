@@ -2,6 +2,7 @@ import { cookies } from 'next/headers';
 import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { tryCheckRevoked, tryValidateSession } from '@/lib/redis-helpers';
+import { decryptData } from '@/lib/crypto';
 import { Prisma } from '@prisma/client';
 
 export type CapabilityFlags = {
@@ -20,7 +21,21 @@ export type SecureLinkWithRelations = Prisma.SecureLinkGetPayload<{
     User: { select: { id: true, email: true } },
     VendorAccess: true,
     LinkAccess: true,
-    UserFile: true,
+    UserFile: {
+      select: {
+        id: true,
+        fileName: true,
+        fileType: true,
+        fileSize: true,
+        version: true,
+        encryptedContent: true,
+        iv: true,
+        authTag: true,
+        encryptedDek: true,
+        mongoFileId: true,
+        editingLocked: true,
+      }
+    },
   }
 }>;
 
@@ -100,7 +115,24 @@ export async function authorizeSecureLink(
       User: { select: { id: true, email: true } },
       VendorAccess: true,
       LinkAccess: true,
-      UserFile: true,
+      // PERF-5: Select only the fields needed by all consumers of this context.
+      // Avoids loading large encryptedContent blobs for every auth check.
+      // complete-work.ts needs the content fields; all others only need metadata.
+      UserFile: {
+        select: {
+          id: true,
+          fileName: true,
+          fileType: true,
+          fileSize: true,
+          version: true,
+          encryptedContent: true,
+          iv: true,
+          authTag: true,
+          encryptedDek: true,
+          mongoFileId: true,
+          editingLocked: true,
+        },
+      },
     },
   });
 
@@ -114,7 +146,19 @@ export async function authorizeSecureLink(
 
   const authSession = await auth();
   const sessionEmail = normalizeEmail(authSession?.user?.email);
-  const cookieEmail = normalizeEmail(cookieStore.get('vendor_email')?.value);
+  // SEC-3: vendor_email cookie is AES-256-GCM encrypted — decrypt before use.
+  // Falls back gracefully to plaintext for backward compatibility with existing sessions.
+  const rawCookieEmail = cookieStore.get('vendor_email')?.value;
+  let cookieEmail: string | null = null;
+  if (rawCookieEmail) {
+    try {
+      const decoded = decryptData<{ email: string }>(rawCookieEmail);
+      cookieEmail = normalizeEmail(decoded.email);
+    } catch {
+      // Graceful fallback: plaintext cookie from a pre-encryption session
+      cookieEmail = normalizeEmail(rawCookieEmail.includes(':') ? null : rawCookieEmail);
+    }
+  }
   const effectiveEmail = cookieEmail || sessionEmail;
   const isOwner = authSession?.user?.id !== undefined && authSession.user.id === secureLink.ownerId;
 

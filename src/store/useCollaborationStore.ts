@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-
 export interface Participant {
   name: string;
   email: string;
@@ -37,6 +36,7 @@ interface CollaborationState {
   token: string | null;
   remainingSeconds: number;
   latestFileInputTimestamp: number | null;
+  accessStatus: 'active' | 'revoked' | 'expired' | 'session_invalid';
   
   // Actions
   setCapabilities: (caps: Partial<CapabilityFlags>) => void;
@@ -45,7 +45,9 @@ interface CollaborationState {
   addChats: (newChats: ChatMessage[]) => void;
   setChatOpen: (isOpen: boolean) => void;
   updateRemainingSeconds: (seconds: number) => void;
+  setLatestFileInputTimestamp: (ts: number | null) => void;
   setToken: (token: string) => void;
+  setAccessStatus: (status: 'active' | 'revoked' | 'expired' | 'session_invalid') => void;
 }
 
 export const useCollaborationStore = create<CollaborationState>((set, get) => ({
@@ -62,6 +64,7 @@ export const useCollaborationStore = create<CollaborationState>((set, get) => ({
   token: null,
   remainingSeconds: 0,
   latestFileInputTimestamp: null,
+  accessStatus: 'active',
 
   setCapabilities: (caps) => set((state) => ({ capabilities: { ...state.capabilities, ...caps } })),
   setConnectionStatus: (status) => set({ connectionStatus: status }),
@@ -79,5 +82,7 @@ export const useCollaborationStore = create<CollaborationState>((set, get) => ({
   }),
   setChatOpen: (isOpen) => set({ isChatOpen: isOpen, unreadCount: isOpen ? 0 : get().unreadCount }),
   updateRemainingSeconds: (seconds) => set({ remainingSeconds: seconds }),
-  setToken: (token) => set({ token })
+  setLatestFileInputTimestamp: (ts) => set({ latestFileInputTimestamp: ts }),
+  setToken: (token) => set({ token }),
+  setAccessStatus: (status) => set({ accessStatus: status })
 }));

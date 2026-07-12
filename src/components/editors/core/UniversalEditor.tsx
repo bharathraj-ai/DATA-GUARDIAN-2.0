@@ -8,6 +8,7 @@ import { exportDocument } from "../utils/fileExporters";
 import { useEditorState } from "../hooks/useEditorState";
 import { Page } from "../layout/Page";
 import { TableActions } from "../elements/TableElement";
+import { SpreadsheetApp } from "../elements/SpreadsheetApp";
 
 interface UniversalEditorProps {
   token?: string;
@@ -474,6 +475,10 @@ export default function UniversalEditor({
                       Col −
                     </button>
                     <div className="toolbar-mini-sep" />
+                    <button className={`toolbar-btn ${tableActions?.isFrozenCol ? "active" : ""}`} onClick={() => tableActions?.toggleFreezeCol?.()} disabled={!tableActions} title="Freeze 1st Column">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /><line x1="9" y1="3" x2="9" y2="21" /></svg>
+                      Freeze
+                    </button>
                     <button className={`toolbar-btn ${tableActions?.hasHeader ? "active" : ""}`} onClick={() => tableActions?.toggleHeader()} disabled={!tableActions} title="Toggle Header">
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /><line x1="3" y1="9" x2="21" y2="9" /></svg>
                       Header
@@ -550,20 +555,31 @@ export default function UniversalEditor({
 
             {/* ═══ Canvas Area (full width) ═══ */}
             <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", background: "#09090b", position: "relative" }} onClick={() => setSelectedId(null)}>
-              <div style={{ minHeight: "100%", padding: "40px", display: "flex", flexDirection: "column", alignItems: "center" }}>
-                {doc.pages[activePage] && (
-                  <Page 
-                    page={doc.pages[activePage]} 
-                    scale={scale} 
-                    selectedId={selectedId} 
-                    onSelect={setSelectedId} 
-                    onUpdate={updatePage} 
-                    onDelete={deleteElement} 
-                    showBg={showBg} 
-                    onRegisterTableActions={onRegisterTableActions}
-                  />
-                )}
-              </div>
+              {(doc.type === "xlsx" || doc.type === "csv") ? (
+                <SpreadsheetApp
+                  doc={doc}
+                  scale={scale}
+                  activePage={activePage}
+                  setActivePage={setActivePage}
+                  updatePage={updatePage}
+                  onRegisterTableActions={onRegisterTableActions}
+                />
+              ) : (
+                <div style={{ minHeight: "100%", padding: "40px", display: "flex", flexDirection: "column", alignItems: "center" }}>
+                  {doc.pages[activePage] && (
+                    <Page 
+                      page={doc.pages[activePage]} 
+                      scale={scale} 
+                      selectedId={selectedId} 
+                      onSelect={setSelectedId} 
+                      onUpdate={updatePage} 
+                      onDelete={deleteElement} 
+                      showBg={showBg} 
+                      onRegisterTableActions={onRegisterTableActions}
+                    />
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Chat Drawer */}

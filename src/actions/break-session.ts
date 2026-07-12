@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { auth } from '@/lib/auth';
 import { cookies } from 'next/headers';
 import { authorizeSecureLink } from '@/lib/linkAuthorization';
-import { generateOTP, hashOTP } from '@/lib/crypto';
+import { generateOTP, hashOTP, decryptData } from '@/lib/crypto';
 import { logger, redactEmail } from '@/lib/logger';
 
 export type TakeBreakResult = {
@@ -51,41 +51,34 @@ export async function takeBreak(
         let vendorEmail = session?.user?.email;
         const cookieStore = await cookies();
         if (!vendorEmail) {
-            vendorEmail = cookieStore.get('vendor_email')?.value;
+            // SEC-3: vendor_email cookie is AES-256-GCM encrypted — decrypt before use
+            const rawCookie = cookieStore.get('vendor_email')?.value;
+            if (rawCookie) {
+                try {
+                    const decoded = decryptData<{ email: string }>(rawCookie);
+                    vendorEmail = decoded.email;
+                } catch {
+                    // Graceful fallback: accept plaintext cookie for backward compatibility
+                    vendorEmail = rawCookie.includes(':') ? undefined : rawCookie;
+                }
+            }
         }
 
         if (!vendorEmail) {
             return { success: false, error: 'Unauthorized vendor session' };
         }
 
-        // 2. Find the secure link and vendor access
-        const secureLink = await prisma.secureLink.findUnique({
-            where: { token },
-            select: {
-                id: true,
-                expiresAt: true,
-                isRevoked: true,
-                notificationEmail: true,
-                purpose: true,
-            },
-        });
-
-        if (!secureLink) {
-            return { success: false, error: 'Link not found' };
-        }
+        // 2. Reuse secureLink from authorization result — zero extra DB queries
+        const secureLink = authResult.context.secureLink;
 
         if (secureLink.isRevoked || secureLink.expiresAt < new Date()) {
             return { success: false, error: 'This link has expired or been revoked.' };
         }
 
-        const vendorAccess = await prisma.vendorAccess.findUnique({
-            where: {
-                secureLinkId_email: {
-                    secureLinkId: secureLink.id,
-                    email: vendorEmail.toLowerCase(),
-                },
-            },
-        });
+        // Reuse vendorAccess from the already-loaded VendorAccess array
+        const vendorAccess = (secureLink as any).VendorAccess?.find(
+            (v: any) => v.email.toLowerCase() === vendorEmail!.toLowerCase()
+        );
 
         if (!vendorAccess) {
             return { success: false, error: 'Vendor access not found' };
@@ -230,7 +223,10 @@ export async function takeBreak(
             const remainingMs = secureLink.expiresAt.getTime() - Date.now();
             const validityMinutes = Math.max(1, Math.floor(remainingMs / 60000));
 
-            sendOTPEmail(vendorEmail!, token, newOtp, Math.min(validityMinutes, 30))
+            // SEC-4: Cap break OTP validity at 10 minutes (reduced from 30).
+            // Break-resumption OTPs need a tighter window since the vendor already
+            // has full context — 30 minutes was unnecessarily permissive.
+            sendOTPEmail(vendorEmail!, token, newOtp, Math.min(validityMinutes, 10))
                 .then(() => logger.info(`Break OTP sent to ${redactEmail(vendorEmail)}`))
                 .catch((err) => logger.error('Failed to send break OTP email:', err.message));
         });
@@ -239,7 +235,7 @@ export async function takeBreak(
 
         return {
             success: true,
-            message: 'Break started. New OTP sent to your email.',
+            message: 'Break started. New OTP sent to your email for when you resume.',
             breaksUsed: vendorAccess.breaksUsed + 1,
             breaksRemaining: vendorAccess.allowedBreaks - vendorAccess.breaksUsed - 1,
         };

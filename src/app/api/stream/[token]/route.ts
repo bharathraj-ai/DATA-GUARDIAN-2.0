@@ -83,9 +83,20 @@ export async function GET(
 
     // Determine current user's level
     let userLevel = 2;
-    const vendorEmail = request.cookies.get('vendor_email')?.value;
+    // SEC-3: vendor_email cookie is AES-256-GCM encrypted — decrypt before use
+    const rawVendorEmailCookie = request.cookies.get('vendor_email')?.value;
+    let vendorEmail: string | undefined;
+    if (rawVendorEmailCookie) {
+        try {
+            const decoded = decryptData<{ email: string }>(rawVendorEmailCookie);
+            vendorEmail = decoded.email;
+        } catch {
+            // Graceful fallback: plaintext cookie from a pre-encryption session
+            vendorEmail = rawVendorEmailCookie.includes(':') ? undefined : rawVendorEmailCookie;
+        }
+    }
     if (vendorEmail && secureLink.VendorAccess) {
-        const vendor = secureLink.VendorAccess.find(v => v.email === vendorEmail.toLowerCase());
+        const vendor = secureLink.VendorAccess.find(v => v.email === vendorEmail!.toLowerCase());
         if (vendor) userLevel = vendor.level;
     }
 
