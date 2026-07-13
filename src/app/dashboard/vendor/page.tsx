@@ -22,21 +22,28 @@ export default function VendorDashboardPage() {
 
     // Fetch received links
     useEffect(() => {
-        async function fetchLinks() {
+        async function fetchLinks(showLoading = true) {
             if (session?.user?.email) {
-                setIsLoading(true);
+                if (showLoading) setIsLoading(true);
                 try {
                     const received = await getReceivedLinks(session.user.email);
                     setLinks(received);
                 } catch (error) {
                     console.error('Error fetching links:', error);
                 } finally {
-                    setIsLoading(false);
+                    if (showLoading) setIsLoading(false);
                 }
             }
         }
         if (sessionStatus === 'authenticated') {
-            fetchLinks();
+            fetchLinks(true);
+            
+            // Poll for new links every 5 seconds silently
+            const interval = setInterval(() => {
+                fetchLinks(false);
+            }, 5000);
+            
+            return () => clearInterval(interval);
         }
     }, [session, sessionStatus]);
 

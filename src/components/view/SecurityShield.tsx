@@ -53,10 +53,18 @@ const BLOCKED_SHORTCUTS: Array<{
         { meta: true, shift: true, key: 'i', event: 'DEVTOOLS_SHORTCUT', message: 'Developer tools are restricted' },
         { ctrl: true, shift: true, key: 's', event: 'SCREENSHOT_ATTEMPT', message: 'Screenshot is disabled for security' },
         { meta: true, shift: true, key: 's', event: 'SCREENSHOT_ATTEMPT', message: 'Screenshot is disabled for security' },
-        { key: 'PrintScreen', event: 'SCREENSHOT_ATTEMPT', message: 'Screenshots are restricted for security' },
-        { alt: true, key: 'PrintScreen', event: 'SCREENSHOT_ATTEMPT', message: 'Screenshots are restricted for security' },
+        { key: 'printscreen', event: 'SCREENSHOT_ATTEMPT', message: 'Screenshots are restricted for security' },
+        { alt: true, key: 'printscreen', event: 'SCREENSHOT_ATTEMPT', message: 'Screenshots are restricted for security' },
+        { shift: true, key: 'printscreen', event: 'SCREENSHOT_ATTEMPT', message: 'Screenshots are restricted for security' },
+        { ctrl: true, key: 'printscreen', event: 'SCREENSHOT_ATTEMPT', message: 'Screenshots are restricted for security' },
+        { ctrl: true, shift: true, key: 'printscreen', event: 'SCREENSHOT_ATTEMPT', message: 'Screenshots are restricted for security' },
+        { ctrl: true, alt: true, key: 'printscreen', event: 'SCREENSHOT_ATTEMPT', message: 'Screenshots are restricted for security' },
+        { ctrl: true, alt: true, shift: true, key: 'r', event: 'SCREENSHOT_ATTEMPT', message: 'Screen recording is restricted for security' },
+        { meta: true, shift: true, key: '3', event: 'SCREENSHOT_ATTEMPT', message: 'Screenshot is disabled for security' },
+        { meta: true, shift: true, key: '4', event: 'SCREENSHOT_ATTEMPT', message: 'Screenshot is disabled for security' },
+        { meta: true, shift: true, key: '5', event: 'SCREENSHOT_ATTEMPT', message: 'Screenshot is disabled for security' },
         
-        { key: 'F12', event: 'DEVTOOLS_SHORTCUT', message: 'Developer tools are restricted' },
+        { key: 'f12', event: 'DEVTOOLS_SHORTCUT', message: 'Developer tools are restricted' },
     ];
 
 // ─── Component ──────────────────────────────────────────────────────

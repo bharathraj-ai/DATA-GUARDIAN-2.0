@@ -2875,12 +2875,12 @@ body {
   font-size: 32px;
   font-weight: 700;
   margin-bottom: 12px;
-  color: var(--text-primary);
+  color: #0f172a;
 }
 
 .otp-subtitle {
   font-size: 16px;
-  color: var(--text-secondary);
+  color: #475569;
   line-height: 1.6;
 }
 
