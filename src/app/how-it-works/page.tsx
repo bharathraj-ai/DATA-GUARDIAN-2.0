@@ -42,34 +42,6 @@ export default function HowItWorksPage() {
                     </div>
 
                     <div className="hiw-hero-right">
-                        <div className="hiw-hero-visual">
-                            {/* Decorative shield */}
-                            <div className="hiw-hero-shield">
-                                <svg viewBox="0 0 120 140" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                    <path d="M60 4L108 22V70C108 100 60 136 60 136C60 136 12 100 12 70V22L60 4Z" fill="url(#shieldGrad)" stroke="#bae6fd" strokeWidth="2" />
-                                    <path d="M40 68l14 14 26-28" stroke="white" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" />
-                                    <defs>
-                                        <linearGradient id="shieldGrad" x1="60" y1="4" x2="60" y2="136" gradientUnits="userSpaceOnUse">
-                                            <stop stopColor="#0ea5e9" />
-                                            <stop offset="1" stopColor="#2563eb" />
-                                        </linearGradient>
-                                    </defs>
-                                </svg>
-                            </div>
-                            {/* Floating pills */}
-                            <div className="hiw-pill hiw-pill-1">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0284c7" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
-                                AES-256 Encrypted
-                            </div>
-                            <div className="hiw-pill hiw-pill-2">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
-                                OTP Protected
-                            </div>
-                            <div className="hiw-pill hiw-pill-3">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
-                                Auto-Expires
-                            </div>
-                        </div>
                     </div>
                 </div>
             </section>

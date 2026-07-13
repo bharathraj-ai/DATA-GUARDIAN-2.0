@@ -44,8 +44,7 @@ export function BreakButton({ token }: { token: string }) {
                 showToast('success', 'Break Started', res.message || 'New OTP sent to your email.');
                 // Small delay so user sees the toast before redirect
                 setTimeout(() => {
-                    router.push(`/share/${token}?status=break`);
-                    router.refresh();
+                    window.location.href = '/dashboard';
                 }, 1500);
             } else {
                 showToast('error', 'Break Failed', res.error || 'Failed to take break.');
