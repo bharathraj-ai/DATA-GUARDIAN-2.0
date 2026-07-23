@@ -47,7 +47,7 @@ class WorkbookBuilder {
             const tableElements = elements.filter((el: any) => el.type === 'table' && Array.isArray(el.rows) && el.rows.length > 0);
 
             for (const tableEl of tableElements) {
-                let sheetName = (this.doc.metadata?.sheetNames?.[pageIndex]) || `Sheet${pageIndex + 1}`;
+                let sheetName = (this.doc.pages[pageIndex]?.title) || (this.doc.metadata?.sheetNames?.[pageIndex]) || `Sheet${pageIndex + 1}`;
                 while (this.workbook.getWorksheet(sheetName)) {
                     sheetName = `${sheetName}_dup`;
                 }

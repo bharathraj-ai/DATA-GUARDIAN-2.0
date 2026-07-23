@@ -51,7 +51,10 @@ export default function UniversalEditor({
   const [messages, setMessages] = useState<any[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [showConfirmModal, setShowConfirmModal] = useState(false);
-  
+  const [pageModalOpen, setPageModalOpen] = useState<'add' | 'rename' | null>(null);
+  const [pageModalTitle, setPageModalTitle] = useState("");
+  const [pageModalError, setPageModalError] = useState("");
+  const [pageToRenameIdx, setPageToRenameIdx] = useState<number | null>(null);
   const docRef = useRef(doc);
   const onSaveRef = useRef(onSave);
   const onSubmitRef = useRef(onSubmit);
@@ -182,14 +185,53 @@ export default function UniversalEditor({
     updatePage(page.id, [...page.elements, el]); setSelectedId(el.id);
   };
 
-  const addPage = () => {
+  const triggerAddPage = () => {
+    if (isReadOnly) return;
+    setPageModalTitle("");
+    setPageModalError("");
+    setPageModalOpen('add');
+  };
+  
+  const triggerRenamePage = (idx: number) => {
+    if (isReadOnly) return;
+    setPageToRenameIdx(idx);
+    setPageModalTitle(doc?.pages[idx]?.title || doc?.metadata?.sheetNames?.[idx] || `Page ${idx + 1}`);
+    setPageModalError("");
+    setPageModalOpen('rename');
+  };
+
+  const handlePageModalSubmit = () => {
     if (!doc) return;
-    const np = { id: uid(), order: doc.pages.length, createdAt: Date.now(), width: 794, height: 1122, elements: [], bgImage: null };
-    const nd = { ...doc, pages: [...doc.pages, np] };
-    setDoc(nd);
-    pushHistory(nd);
-    setActivePage(nd.pages.length - 1);
-    handleSaveToLink(false, nd);
+    const title = pageModalTitle.trim();
+    if (!title) {
+      setPageModalError("Title is required.");
+      return;
+    }
+    if (title.length > 100) {
+      setPageModalError("Title maximum length is 100 characters.");
+      return;
+    }
+    if (doc.pages.some((p, i) => p.title === title && (pageModalOpen === 'rename' ? i !== pageToRenameIdx : true))) {
+      setPageModalError("Title must be unique.");
+      return;
+    }
+
+    if (pageModalOpen === 'add') {
+      const np = { id: uid(), title, order: doc.pages.length, createdAt: Date.now(), width: 794, height: 1122, elements: [], bgImage: null };
+      const nd = { ...doc, pages: [...doc.pages, np] };
+      setDoc(nd);
+      pushHistory(nd);
+      setActivePage(nd.pages.length - 1);
+      handleSaveToLink(false, nd);
+    } else if (pageModalOpen === 'rename' && pageToRenameIdx !== null) {
+      const newPages = [...doc.pages];
+      newPages[pageToRenameIdx] = { ...newPages[pageToRenameIdx], title };
+      const nd = { ...doc, pages: newPages };
+      setDoc(nd);
+      pushHistory(nd);
+      handleSaveToLink(false, nd);
+    }
+    setPageModalOpen(null);
   };
 
   const handleDragStart = (e: React.DragEvent, idx: number) => {
@@ -339,6 +381,35 @@ export default function UniversalEditor({
         </div>
       )}
 
+      {pageModalOpen && (
+        <div className="confirm-overlay">
+          <div className="confirm-card">
+            <h2 style={{ fontFamily: "'Inter', sans-serif", fontSize: 20, fontWeight: 600, color: "#fafafa", marginBottom: 16 }}>
+              {pageModalOpen === 'add' ? 'New Page' : 'Rename Page'}
+            </h2>
+            {pageModalError && <div style={{ color: "#ef4444", fontSize: 13, marginBottom: 12 }}>{pageModalError}</div>}
+            <input 
+              type="text" 
+              value={pageModalTitle} 
+              onChange={e => { setPageModalTitle(e.target.value); setPageModalError(""); }}
+              placeholder="Page Title"
+              style={{ width: "100%", padding: "10px 14px", borderRadius: 8, background: "#18181b", border: "1px solid #3f3f46", color: "#fafafa", fontSize: 14, marginBottom: 24 }}
+              autoFocus
+              onKeyDown={e => {
+                if (e.key === 'Enter') { e.preventDefault(); handlePageModalSubmit(); }
+                if (e.key === 'Escape') { e.preventDefault(); setPageModalOpen(null); }
+              }}
+            />
+            <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
+              <button className="btn btn-outline" onClick={() => setPageModalOpen(null)} style={{ padding: "8px 16px" }}>Cancel</button>
+              <button className="btn btn-primary" onClick={handlePageModalSubmit} style={{ padding: "8px 16px" }}>
+                {pageModalOpen === 'add' ? 'Create' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ═══ Top Navbar ═══ */}
       <div className="glass-bar" style={{ height: 56, display: "flex", alignItems: "center", padding: "0 20px", flexShrink: 0, zIndex: 100, position: "relative" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
@@ -399,9 +470,9 @@ export default function UniversalEditor({
       {/* ═══ Main Editor Content ═══ */}
       <div style={{ flex: 1, position: "relative", display: "flex", flexDirection: "column", overflow: "hidden" }}>
         {loading ? (
-          <div className="fup" style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "#09090b", zIndex: 1000 }}>
-            <svg className="spin" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#fafafa" strokeWidth="2" strokeLinecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
-            <div style={{ marginTop: 24, fontSize: 16, fontWeight: 500, color: "#d4d4d8", letterSpacing: "-0.01em" }}>{loadingMsg}</div>
+          <div className="fup" style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "#ffffff", zIndex: 1000 }}>
+            <svg className="spin" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#111827" strokeWidth="2" strokeLinecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+            <div style={{ marginTop: 24, fontSize: 16, fontWeight: 500, color: "#374151", letterSpacing: "-0.01em" }}>{loadingMsg}</div>
           </div>
         ) : !doc ? (
           <div className="fup" style={{ margin: "auto", maxWidth: 440, width: "100%", padding: 24 }}>
@@ -424,9 +495,9 @@ export default function UniversalEditor({
                   <div className="toolbar-label">Pages</div>
                   <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
                     {doc.pages.map((p, i) => (
-                      <button key={p.id} className={`toolbar-page-btn ${activePage === i ? "active" : ""}`} onClick={() => setActivePage(i)} draggable onDragStart={e => handleDragStart(e, i)} onDragOver={e => handleDragOver(e, i)} onDrop={e => handleDropPage(e, i)} title={`Page ${i + 1}`}>{i + 1}</button>
+                      <button key={p.id} className={`toolbar-page-btn ${activePage === i ? "active" : ""}`} onClick={() => setActivePage(i)} onDoubleClick={() => triggerRenamePage(i)} draggable onDragStart={e => handleDragStart(e, i)} onDragOver={e => handleDragOver(e, i)} onDrop={e => handleDropPage(e, i)} title={p.title || doc.metadata?.sheetNames?.[i] || `Page ${i + 1}`}>{p.title || doc.metadata?.sheetNames?.[i] || String(i + 1)}</button>
                     ))}
-                    <button className="toolbar-page-btn add" onClick={addPage} title="Add Page">+ Add Page</button>
+                    <button className="toolbar-page-btn add" onClick={triggerAddPage} title="Add Page">+ Add Page</button>
                   </div>
                 </div>
 
@@ -554,7 +625,7 @@ export default function UniversalEditor({
             )}
 
             {/* ═══ Canvas Area (full width) ═══ */}
-            <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", background: "#09090b", position: "relative" }} onClick={() => setSelectedId(null)}>
+            <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", background: "#ffffff", position: "relative" }} onClick={() => setSelectedId(null)}>
               {(doc.type === "xlsx" || doc.type === "csv") ? (
                 <SpreadsheetApp
                   doc={doc}
@@ -563,6 +634,7 @@ export default function UniversalEditor({
                   setActivePage={setActivePage}
                   updatePage={updatePage}
                   onRegisterTableActions={onRegisterTableActions}
+                  onRenameTab={triggerRenamePage}
                 />
               ) : (
                 <div style={{ minHeight: "100%", padding: "40px", display: "flex", flexDirection: "column", alignItems: "center" }}>
