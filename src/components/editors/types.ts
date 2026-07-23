@@ -56,6 +56,7 @@ export type EditorElement = TextElementData | ImageElementData | TableElementDat
 
 export interface PageData {
   id: string;
+  title?: string;
   width: number;
   height: number;
   elements: EditorElement[];

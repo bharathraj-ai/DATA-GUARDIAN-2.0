@@ -118,7 +118,7 @@ export default function EditorPage({ params }: EditorPageProps) {
 
     if (loading) {
         return (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#0f1117', color: '#fff' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#ffffff', color: '#000' }}>
                 <div style={{ width: 40, height: 40, border: '3px solid rgba(99,102,241,0.2)', borderTopColor: '#6366f1', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
                 <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
                 <div style={{ marginTop: 20 }}>Loading secure workspace...</div>
@@ -128,7 +128,7 @@ export default function EditorPage({ params }: EditorPageProps) {
 
     if (error || !file) {
         return (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#0f1117', color: '#fff' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#ffffff', color: '#000' }}>
                 <div style={{ padding: '20px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '8px', color: '#f87171' }}>
                     {error || 'File not found'}
                 </div>
@@ -143,7 +143,7 @@ export default function EditorPage({ params }: EditorPageProps) {
 
     return (
         <SecureViewWrapper token={token}>
-            <div style={{ width: '100vw', height: '100vh', background: '#0f1117', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ width: '100vw', height: '100vh', background: '#ffffff', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
                 <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
                     {isPdf ? (
                         <SecurePDFViewer

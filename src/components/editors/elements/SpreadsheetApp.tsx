@@ -11,16 +11,17 @@ interface SpreadsheetAppProps {
   setActivePage: (idx: number) => void;
   updatePage: (pageId: string, elements: any[]) => void;
   onRegisterTableActions?: (actions: TableActions | null) => void;
+  onRenameTab?: (idx: number) => void;
 }
 
-export function SpreadsheetApp({ doc, scale, activePage, setActivePage, updatePage, onRegisterTableActions }: SpreadsheetAppProps) {
+export function SpreadsheetApp({ doc, scale, activePage, setActivePage, updatePage, onRegisterTableActions, onRenameTab }: SpreadsheetAppProps) {
   const [sheetStates, setSheetStates] = useState<Record<string, SheetRuntimeState>>({});
 
   const handleStateChange = React.useCallback((pageId: string, state: SheetRuntimeState) => {
     setSheetStates(prev => ({ ...prev, [pageId]: state }));
   }, []);
 
-  const sheetNames = doc.metadata?.sheetNames || doc.pages.map((_, i) => `Sheet${i + 1}`);
+  const sheetNames = doc.pages.map((p, i) => p.title || doc.metadata?.sheetNames?.[i] || `Sheet${i + 1}`);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", flex: 1, width: "100%", height: "100%", overflow: "hidden" }}>
@@ -28,6 +29,7 @@ export function SpreadsheetApp({ doc, scale, activePage, setActivePage, updatePa
         sheets={sheetNames} 
         activeSheet={activePage} 
         onTabChange={setActivePage} 
+        onTabDoubleClick={onRenameTab}
       />
       <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
         {doc.pages[activePage] && (

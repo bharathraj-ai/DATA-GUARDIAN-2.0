@@ -219,8 +219,8 @@ export const SpreadsheetView = React.memo(({ page, scale, initialState, onStateC
     const isActive = activeCell?.r === r && activeCell?.c === c;
     const isEditing = editingCell?.r === r && editingCell?.c === c;
 
-    const bg = cell.bgColor || (isHeader ? "#18181b" : "#09090b");
-    const color = cell.textColor || (isHeader ? "#fafafa" : "#d4d4d8");
+    const bg = cell.bgColor || (isHeader ? "#f3f4f6" : "#ffffff");
+    const color = cell.textColor || (isHeader ? "#111827" : "#000000");
     const bold = cell.bold ?? isHeader;
     const italic = cell.italic ?? false;
     const align = cell.align || "left";
@@ -248,8 +248,8 @@ export const SpreadsheetView = React.memo(({ page, scale, initialState, onStateC
           setEditingCell({ r, c });
         }}
         style={{
-          border: isActive ? "2px solid #3b82f6" : "1px solid #27272a",
-          background: isActive && !isEditing ? "#1f1f22" : bg, 
+          border: isActive ? "2px solid #3b82f6" : "1px solid #e5e7eb",
+          background: isActive && !isEditing ? "#f8fafc" : bg, 
           padding: 0,
           minWidth: currentWidth * scale,
           width: currentWidth * scale,
@@ -320,7 +320,7 @@ export const SpreadsheetView = React.memo(({ page, scale, initialState, onStateC
       ref={scrollRef}
       onScroll={handleScroll}
       onClick={() => setActiveCell(null)}
-      style={{ width: "100%", height: "100%", overflow: "auto", position: "relative", background: "#09090b" }}
+      style={{ width: "100%", height: "100%", overflow: "auto", position: "relative", background: "#ffffff" }}
     >
       <table style={{ borderCollapse: "collapse", fontSize: 11 * scale, width: totalTableWidth * scale, tableLayout: "fixed" }}>
         {hasHeader && rows[0] && (

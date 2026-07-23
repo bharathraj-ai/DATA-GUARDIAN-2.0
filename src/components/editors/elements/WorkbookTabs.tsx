@@ -4,15 +4,17 @@ interface WorkbookTabsProps {
   sheets: string[];
   activeSheet: number;
   onTabChange: (idx: number) => void;
+  onTabDoubleClick?: (idx: number) => void;
 }
 
-export function WorkbookTabs({ sheets, activeSheet, onTabChange }: WorkbookTabsProps) {
+export function WorkbookTabs({ sheets, activeSheet, onTabChange, onTabDoubleClick }: WorkbookTabsProps) {
   return (
     <div style={{ display: "flex", borderBottom: "1px solid #333", background: "#1a1a1a", overflowX: "auto", flexShrink: 0 }}>
       {sheets.map((sheet, idx) => (
         <div
           key={idx}
           onClick={() => onTabChange(idx)}
+          onDoubleClick={() => onTabDoubleClick?.(idx)}
           style={{
             padding: "8px 16px",
             fontSize: "13px",
