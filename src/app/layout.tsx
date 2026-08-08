@@ -12,7 +12,8 @@ const inter = Inter({
   subsets: ['latin'],
   display: 'swap',
   variable: '--font-inter',
-  preload: true,
+  // Avoid blocking first paint while the font file loads
+  preload: false,
 });
 
 // Viewport export (Next.js 16 best practice — separate from metadata)

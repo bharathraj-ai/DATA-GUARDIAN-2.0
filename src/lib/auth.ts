@@ -7,13 +7,11 @@ import { logger, redactEmail } from '@/lib/logger';
 
 /**
  * NextAuth Configuration for Data Guardian (v4 Compatible)
- * 
- * ZERO TRUST PRINCIPLES:
- * - Server-side identity verification via Google OAuth
- * - Roles assigned server-side, never trusted from client
- * - Session strategy: database (more secure than JWT for sensitive apps)
+ *
+ * Session strategy is JWT so /api/auth/session does not hit Postgres on every
+ * page navigation (database sessions were adding 2–4s latency via Neon).
+ * User/Account records still live in Prisma via the adapter.
  */
-// Determine if running on localhost (non-HTTPS)
 const useSecureCookies = process.env.NEXTAUTH_URL?.startsWith('https://') ?? false;
 const cookiePrefix = useSecureCookies ? '__Secure-' : '';
 
@@ -26,7 +24,6 @@ export const authOptions: NextAuthOptions = {
             httpOptions: {
                 timeout: 10000,
             },
-            // Force account selection every time for security
             authorization: {
                 params: {
                     prompt: 'select_account',
@@ -34,8 +31,6 @@ export const authOptions: NextAuthOptions = {
             },
         }),
     ],
-    // Explicit cookie config to prevent "State cookie was missing" error
-    // This ensures cookies are properly set/read during OAuth redirects on localhost
     useSecureCookies,
     cookies: {
         sessionToken: {
@@ -71,7 +66,7 @@ export const authOptions: NextAuthOptions = {
                 sameSite: 'lax',
                 path: '/',
                 secure: useSecureCookies,
-                maxAge: 60 * 15, // 15 minutes
+                maxAge: 60 * 15,
             },
         },
         state: {
@@ -81,7 +76,7 @@ export const authOptions: NextAuthOptions = {
                 sameSite: 'lax',
                 path: '/',
                 secure: useSecureCookies,
-                maxAge: 60 * 15, // 15 minutes
+                maxAge: 60 * 15,
             },
         },
         nonce: {
@@ -95,50 +90,59 @@ export const authOptions: NextAuthOptions = {
         },
     },
     session: {
-        // Use database sessions for better security (revocable)
-        strategy: 'database',
+        strategy: 'jwt',
         maxAge: 24 * 60 * 60, // 24 hours
     },
     callbacks: {
-        /**
-         * Control access based on authentication status
-         * Vendor routes require authentication
-         */
         async signIn({ user, account }) {
-            // Log sign-in for audit trail (non-blocking)
             logger.info(`Sign-in: ${redactEmail(user.email)} via ${account?.provider}`);
             return true;
         },
 
-        /**
-         * Redirect new users to role selection page after sign-in
-         */
         async redirect({ url, baseUrl }) {
-            // Always use NEXTAUTH_URL as the baseUrl to prevent port mismatches
             const canonicalBase = process.env.NEXTAUTH_URL || baseUrl;
 
-            // Don't redirect if already going to role-select or auth pages
             if (url.includes('/auth/role-select') || url.includes('/auth/signin')) {
                 if (url.startsWith('/')) return `${canonicalBase}${url}`;
                 return url;
             }
 
-            // For all post-sign-in redirects, force through role-select
-            // (the role-select page itself will auto-redirect if role is already chosen)
             return `${canonicalBase}/auth/role-select`;
         },
 
-        /**
-         * Add custom fields to the session
-         * CRITICAL: Role is fetched from DB, never from client
-         */
-        async session({ session, user }) {
+        async jwt({ token, user, trigger, session }) {
+            // Initial sign-in: copy identity from adapter user
+            if (user) {
+                token.id = user.id;
+                token.role = normalizeRole((user as { role?: string }).role);
+                token.roleSelected = (user as { roleSelected?: boolean }).roleSelected ?? false;
+            }
+
+            // Client called update() after role selection — prefer payload, else DB
+            if (trigger === 'update') {
+                if (session?.role !== undefined) {
+                    token.role = normalizeRole(session.role as string);
+                    token.roleSelected = Boolean(session.roleSelected ?? true);
+                } else if (token.id) {
+                    const dbUser = await prisma.user.findUnique({
+                        where: { id: token.id as string },
+                        select: { role: true, roleSelected: true },
+                    });
+                    if (dbUser) {
+                        token.role = normalizeRole(dbUser.role);
+                        token.roleSelected = dbUser.roleSelected ?? false;
+                    }
+                }
+            }
+
+            return token;
+        },
+
+        async session({ session, token }) {
             if (session.user) {
-                session.user.id = user.id;
-                // NextAuth PrismaAdapter already fetches the full user object from the database.
-                // We can access custom fields directly without an extra database query.
-                session.user.role = normalizeRole((user as { role?: string }).role);
-                session.user.roleSelected = (user as { roleSelected?: boolean }).roleSelected ?? false;
+                session.user.id = (token.id as string) ?? '';
+                session.user.role = normalizeRole(token.role as string | undefined);
+                session.user.roleSelected = Boolean(token.roleSelected);
             }
             return session;
         },
@@ -147,8 +151,8 @@ export const authOptions: NextAuthOptions = {
         signIn: '/auth/signin',
         error: '/auth/error',
     },
-    // Disable debug mode in production to avoid leaking secrets
-    debug: process.env.NODE_ENV === 'development',
+    // Keep quiet in terminal — debug dumps encrypted session blobs
+    debug: false,
     logger: {
         error(code, metadata) {
             logger.error(`[NEXTAUTH ERROR] ${code}`, metadata);
@@ -156,15 +160,11 @@ export const authOptions: NextAuthOptions = {
         warn(code) {
             logger.warn(`[NEXTAUTH WARN] ${code}`);
         },
-        debug(code, metadata) {
-            logger.debug(`[NEXTAUTH DEBUG] ${code}`, metadata);
-        }
+        debug() {
+            // no-op: avoid logging session tokens
+        },
     },
     events: {
-        /**
-         * Auto-create new users as VENDOR role by default
-         * OWNER role must be explicitly assigned (e.g., first user or admin)
-         */
         async createUser({ user }) {
             logger.info(`New user created: ${redactEmail(user.email)} (default: VENDOR)`);
         },

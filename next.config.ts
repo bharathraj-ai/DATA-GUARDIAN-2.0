@@ -1,45 +1,46 @@
 import type { NextConfig } from "next";
+import path from "path";
+
+const isProd = process.env.NODE_ENV === 'production';
 
 const nextConfig: NextConfig = {
-  output: 'standalone', // Uncomment this ONLY for Docker/Linux deployments. Turbopack on Windows throws EINVAL due to 'node:crypto' chunk renaming.
+  // Standalone only for Docker/prod builds — slows local tooling if always on
+  ...(isProd ? { output: 'standalone' as const } : {}),
 
-  // Enable GZIP/Brotli compression
   compress: true,
-
-  // No source maps in production (smaller bundle)
   productionBrowserSourceMaps: false,
-
-  // React strict mode for development
+  // Strict mode double-invokes effects in dev (feels slower) — keep for prod quality locally is optional
   reactStrictMode: true,
 
-  // Performance: Skip type checking during build (use CI for that)
   typescript: {
     ignoreBuildErrors: false,
   },
 
-  // Experimental features
-  // ONLYOFFICE JWT uses Node.js crypto — must be external
-  serverExternalPackages: [],
+  // Keep heavy native/CJS packages out of the bundler graph → faster compiles
+  serverExternalPackages: [
+    '@prisma/client',
+    'prisma',
+    'mongodb',
+    'exceljs',
+    'pdf-lib',
+    'xlsx',
+    'bcryptjs',
+    'nodemailer',
+    'qrcode',
+  ],
 
   experimental: {
     serverActions: {
       bodySizeLimit: '10mb',
     },
-    // Tree-shake these packages for faster cold starts
     optimizePackageImports: [
       'zod',
-      'bcryptjs',
       'uuid',
-      '@prisma/client',
-      'qrcode',
-      'next-auth',
-      'xlsx',
-      'pdf-lib',
-      'mongodb',
+      'lucide-react',
+      'framer-motion',
     ],
   },
 
-  // Optimized image handling
   images: {
     formats: ['image/avif', 'image/webp'],
     remotePatterns: [
@@ -54,17 +55,15 @@ const nextConfig: NextConfig = {
         pathname: '/**',
       }
     ],
-    minimumCacheTTL: 3600, // 1 hour (was 60s — too aggressive)
+    minimumCacheTTL: 3600,
     deviceSizes: [640, 750, 828, 1080, 1200],
     imageSizes: [16, 32, 48, 64, 96, 128, 256],
   },
 
-  // Security headers + aggressive caching for static assets
   async headers() {
     const isDev = process.env.NODE_ENV === 'development';
-    
+
     return [
-      // Global security headers
       {
         source: '/(.*)',
         headers: [
@@ -74,7 +73,9 @@ const nextConfig: NextConfig = {
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
           { key: 'X-DNS-Prefetch-Control', value: 'on' },
           { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
-          { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains; preload' },
+          ...(isProd
+            ? [{ key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains; preload' }]
+            : []),
           {
             key: 'Content-Security-Policy',
             value: [
@@ -92,7 +93,6 @@ const nextConfig: NextConfig = {
           },
         ],
       },
-      // ONLYOFFICE editor — CSP allowing ONLYOFFICE iframe
       {
         source: '/editor/:path*',
         headers: [
@@ -102,8 +102,7 @@ const nextConfig: NextConfig = {
           },
         ],
       },
-      // AGGRESSIVE CACHE for fonts (1 year, immutable) - ONLY IN PRODUCTION
-      ...(process.env.NODE_ENV === 'production'
+      ...(isProd
         ? [
             {
               source: '/fonts/(.*)',
@@ -113,51 +112,23 @@ const nextConfig: NextConfig = {
             },
           ]
         : []),
-      // Cache robots.txt and favicon
       {
         source: '/robots.txt',
         headers: [
           { key: 'Cache-Control', value: 'public, max-age=86400' },
         ],
       },
+      {
+        source: '/sw.js',
+        headers: [
+          { key: 'Cache-Control', value: 'public, max-age=0, must-revalidate' },
+        ],
+      },
     ];
   },
 
-  // Turbopack config (Next.js 16 default bundler)
   turbopack: {
-    root: __dirname,
-  },
-
-  // Webpack optimizations (fallback for non-Turbopack builds)
-  webpack: (config, { isServer }) => {
-    if (!isServer) {
-      config.optimization = {
-        ...config.optimization,
-        splitChunks: {
-          chunks: 'all',
-          minSize: 20000,
-          maxSize: 244000,
-          cacheGroups: {
-            default: false,
-            vendors: false,
-            // Shared code between pages
-            commons: {
-              name: 'commons',
-              chunks: 'all',
-              minChunks: 2,
-            },
-            // Separate vendor chunks for better caching
-            vendor: {
-              test: /[\\/]node_modules[\\/]/,
-              name: 'vendor',
-              chunks: 'all',
-              priority: 10,
-            },
-          },
-        },
-      };
-    }
-    return config;
+    root: path.join(__dirname),
   },
 };
 

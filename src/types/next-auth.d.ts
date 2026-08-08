@@ -13,11 +13,21 @@ declare module 'next-auth' {
 
   interface User extends DefaultUser {
     role?: string;
+    roleSelected?: boolean;
+  }
+}
+
+declare module 'next-auth/jwt' {
+  interface JWT {
+    id?: string;
+    role?: SessionAppRole | string;
+    roleSelected?: boolean;
   }
 }
 
 declare module 'next-auth/adapters' {
   interface AdapterUser {
     role?: string;
+    roleSelected?: boolean;
   }
 }

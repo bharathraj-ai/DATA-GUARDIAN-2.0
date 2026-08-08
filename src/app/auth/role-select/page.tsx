@@ -37,7 +37,8 @@ export default function RoleSelectPage() {
             const result = await setUserRole(role);
 
             if (result.success) {
-                await update();
+                // Push role into JWT without a full DB session round-trip
+                await update({ role, roleSelected: true });
                 router.push(role === 'OWNER' ? '/dashboard' : '/dashboard/vendor');
             } else {
                 setError(result.error || 'Failed to set role');
