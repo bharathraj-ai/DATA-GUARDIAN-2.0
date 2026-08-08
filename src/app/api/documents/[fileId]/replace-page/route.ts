@@ -27,7 +27,7 @@ export async function POST(
     }
 
     // Auth (Zero-Trust Session + API Security)
-    const authResult = await authorizeApiRequest(fileId, token, { httpMethod: req.method });
+    const authResult = await authorizeApiRequest(fileId, token, { httpMethod: req.method, action: 'edit' });
     if (authResult.errorResponse) {
       return authResult.errorResponse;
     }

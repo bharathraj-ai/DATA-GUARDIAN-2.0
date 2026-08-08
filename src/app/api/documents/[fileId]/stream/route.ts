@@ -27,7 +27,7 @@ export async function GET(
     if (!token) return NextResponse.json({ error: 'Missing token' }, { status: 401 });
 
     // Verify token → session → link → file ownership
-    const authResult = await authorizeApiRequest(fileId, token, { httpMethod: req.method });
+    const authResult = await authorizeApiRequest(fileId, token, { httpMethod: req.method, action: 'preview' });
     if (authResult.errorResponse) {
       return authResult.errorResponse;
     }

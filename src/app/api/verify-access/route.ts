@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { tryCheckRevoked, tryValidateSession } from '@/lib/redis-helpers';
+import { verifyShareSession } from '@/lib/share-session';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,25 +11,27 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ error: 'Missing token' }, { status: 400 });
     }
 
-    const sessionId = request.cookies.get('session_id')?.value;
-    if (!sessionId) {
+    const sessionCookie = request.cookies.get('session_id')?.value;
+    const verified = verifyShareSession(sessionCookie, token);
+    if (!verified.valid) {
         return NextResponse.json({ type: 'session_invalid' }, { status: 401 });
     }
+    const sessionId = verified.sessionId;
 
     try {
-        // 1. Check Redis for fast revocation flag
+        // Optional Redis revoke cache
         const revokedInRedis = await tryCheckRevoked(token);
         if (revokedInRedis === true) {
             return NextResponse.json({ type: 'revoked' }, { status: 403 });
         }
 
-        // 2. Validate Session in Redis
+        // Optional Redis session cache
         const sessionValid = await tryValidateSession(token, sessionId);
         if (sessionValid === false) {
             return NextResponse.json({ type: 'session_invalid' }, { status: 401 });
         }
 
-        // 3. Fallback: Check DB
+        // Authoritative DB checks
         const link = await prisma.secureLink.findUnique({
             where: { token },
             select: { id: true, isRevoked: true, expiresAt: true },
@@ -42,10 +45,8 @@ export async function GET(request: NextRequest) {
             return NextResponse.json({ type: 'expired' }, { status: 410 });
         }
 
-        // Access is valid
         return NextResponse.json({ type: 'active' }, { status: 200 });
-    } catch (error) {
-        // On error, let client retry
+    } catch {
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
     }
 }

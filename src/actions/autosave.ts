@@ -54,7 +54,8 @@ export async function autosaveSession(
       return { success: false, error: 'Vendor access not found' };
     }
 
-    const currentSessionId = cookieStore.get('session_id')?.value;
+    const { extractSessionId } = await import('@/lib/share-session');
+    const currentSessionId = extractSessionId(cookieStore.get('session_id')?.value);
     
     if (vendorAccess.activeSessionId && currentSessionId && vendorAccess.activeSessionId !== currentSessionId) {
       return { success: false, error: 'Another session is currently active' };

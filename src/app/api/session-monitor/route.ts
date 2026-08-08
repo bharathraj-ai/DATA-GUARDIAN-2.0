@@ -32,20 +32,11 @@ export async function GET(req: NextRequest) {
 
   const authResult = await authorizeSecureLink(token, 'view');
   if (!authResult.success) {
-    // Try to find the link ID for the audit log
-    const link = await prisma.secureLink.findUnique({ where: { token }, select: { id: true } });
-    if (link) {
-      await prisma.auditLog.create({
-        data: {
-          action: 'SESSION_MONITOR_DENIED',
-          linkId: link.id,
-          reason: 'Unauthorized session monitor access attempt',
-          metadata: JSON.stringify({ error: authResult.error })
-        }
-      }).catch(() => {});
-    }
-    return new Response('Unauthorized', { status: 403 });
+    // Uniform deny — avoid token existence oracle via distinct audit side-channels in response
+    return new Response('Forbidden', { status: 403 });
   }
+
+  const viewerEmail = authResult.context.effectiveEmail;
 
   await prisma.auditLog.create({
     data: {
@@ -53,7 +44,7 @@ export async function GET(req: NextRequest) {
       linkId: authResult.context.secureLink.id,
       reason: 'User connected to SSE session monitor',
       metadata: JSON.stringify({
-         email: authResult.context.effectiveEmail || 'owner'
+         email: viewerEmail || 'unknown'
       })
     }
   }).catch(() => {});
@@ -139,9 +130,18 @@ export async function GET(req: NextRequest) {
              if (session.level < highestActiveLevel) highestActiveLevel = session.level;
           });
 
-          // Fetch recent chat messages
+          // Fetch recent chat messages — private DMs only visible to participants
           const recentChats = await prisma.chatMessage.findMany({
-            where: { secureLinkId: link.id },
+            where: {
+              secureLinkId: link.id,
+              OR: viewerEmail
+                ? [
+                    { receiverEmail: null },
+                    { senderEmail: viewerEmail },
+                    { receiverEmail: viewerEmail },
+                  ]
+                : [{ receiverEmail: null }],
+            },
             orderBy: { timestamp: 'asc' },
             take: 100,
             select: { id: true, senderEmail: true, receiverEmail: true, content: true, timestamp: true }

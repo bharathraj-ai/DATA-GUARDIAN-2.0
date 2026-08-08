@@ -56,7 +56,12 @@ export async function GET(
     }
 
     // ── RBAC check (deny-by-default; owner, explicit grant, or break-glass staff) ─
-    const permission = await checkDocumentPermission(userId, fileId, 'view');
+    const isDownload = request.nextUrl.searchParams.get('download') === 'true';
+    const permission = await checkDocumentPermission(
+      userId,
+      fileId,
+      isDownload ? 'download' : 'view',
+    );
     if (!permission.allowed) {
       return NextResponse.json(
         { error: permission.reason || 'Access denied' },
@@ -68,8 +73,6 @@ export async function GET(
     const fileBuffer = await readDocument(document.storagePath);
     const mimeType = getMimeType(document.fileType);
 
-    // Determine if this is a download (query param) or inline view
-    const isDownload = request.nextUrl.searchParams.get('download') === 'true';
     const disposition = isDownload
       ? `attachment; filename="${encodeURIComponent(document.fileName)}"`
       : `inline; filename="${encodeURIComponent(document.fileName)}"`;

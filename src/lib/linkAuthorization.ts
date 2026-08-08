@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { tryCheckRevoked, tryValidateSession } from '@/lib/redis-helpers';
 import { decryptData } from '@/lib/crypto';
 import { Prisma } from '@prisma/client';
+import { verifyShareSession } from '@/lib/share-session';
 
 export type CapabilityFlags = {
   canEdit: boolean;
@@ -59,10 +60,11 @@ function resolveCapabilities(
   isAuthorized: boolean,
   isOwner: boolean,
 ) {
-  const canPreview = isAuthorized || isOwner;
-  const canEdit = (secureLink.allowEditing || false) && (isAuthorized || isOwner);
-  const canComment = isAuthorized || isOwner;
-  const canDownload = isOwner || ((secureLink.allowDownload ?? false) && isAuthorized);
+  const member = isAuthorized || isOwner;
+  const canPreview = member;
+  const canEdit = Boolean(secureLink.allowEditing) && member;
+  const canComment = (secureLink.allowComment ?? true) && member;
+  const canDownload = isOwner || (Boolean(secureLink.allowDownload) && isAuthorized);
 
   return {
     canEdit,
@@ -82,26 +84,25 @@ export async function authorizeSecureLink(
   }
 
   const cookieStore = await cookies();
-  const sessionId = cookieStore.get('session_id')?.value;
-  if (!sessionId) {
-    return { success: false, status: 401, error: 'Unauthorized: Missing session' };
+  const sessionCookie = cookieStore.get('session_id')?.value;
+  const verified = verifyShareSession(sessionCookie, token);
+  if (!verified.valid) {
+    return { success: false, status: 401, error: 'Unauthorized: Missing or invalid session' };
   }
+  const sessionId = verified.sessionId;
 
   try {
+    // Optional Redis kill-switch cache (null = use DB below)
     const revoked = await tryCheckRevoked(token);
-    // null = Redis unavailable → fall through to DB check (secureLink.isRevoked below)
-    // true = Redis confirms revoked → block immediately
     if (revoked === true) {
-      console.warn('[SECURITY] Access blocked: token confirmed revoked in Redis');
+      console.warn('[SECURITY] Access blocked: token confirmed revoked in Redis cache');
       return { success: false, status: 403, error: 'Forbidden: Access revoked' };
     }
 
+    // Optional Redis session cache (null = signed cookie is enough)
     const validSession = await tryValidateSession(token, sessionId);
-    // null = Redis unavailable → fall through to DB-level auth checks below
-    // false = Redis confirms session invalid → block immediately
-    // Only proceed if Redis confirms valid (true) OR Redis is unavailable (null)
     if (validSession === false) {
-      console.warn('[SECURITY] Access blocked: session explicitly invalid in Redis');
+      console.warn('[SECURITY] Access blocked: session explicitly invalid in Redis cache');
       return { success: false, status: 401, error: 'Unauthorized: Session invalid or expired' };
     }
   } catch (err) {
@@ -219,6 +220,14 @@ export async function authorizeSecureLink(
   }
 
   const capabilities = resolveCapabilities(secureLink, isAuthorized, isOwner);
+
+  // Per-file edit lock (in addition to link-level allowEditing)
+  if (action === 'edit' && fileId) {
+    const target = secureLink.UserFile.find((f) => f.id === fileId);
+    if (target?.editingLocked) {
+      return { success: false, status: 403, error: 'Forbidden: File editing is locked' };
+    }
+  }
 
   if (action === 'edit' && !capabilities.canEdit) {
     return { success: false, status: 403, error: 'Forbidden: Edit access denied' };

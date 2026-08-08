@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { decryptData } from '@/lib/crypto';
-import { cleanupSingleLink } from '@/actions/cleanup';
+import { executeSingleLinkCleanup } from '@/lib/cleanup-core';
 import { auth } from '@/lib/auth';
 import { logger } from '@/lib/logger';
 
@@ -17,15 +17,11 @@ interface DecryptedUserData {
 }
 
 import { tryCheckRevoked, tryValidateSession, tryGetSessionTTL } from '@/lib/redis-helpers';
+import { verifyShareSession } from '@/lib/share-session';
 
 /**
- * Server-Sent Events (SSE) endpoint for streaming decrypted data
- * 
- * Security features:
- * - Validates session on connection and with heartbeats
- * - Terminates stream immediately if session expires or is revoked
- * - Sends countdown updates from server (not frontend)
- * - Backend-enforced access control
+ * SSE endpoint for streaming decrypted data.
+ * Auth: signed session cookie + Postgres. Redis is optional cache.
  */
 export async function GET(
     request: NextRequest,
@@ -33,22 +29,20 @@ export async function GET(
 ) {
     const { token } = await params;
 
-    // Get session ID from cookie
-    const sessionId = request.cookies.get('session_id')?.value;
-
-    if (!sessionId) {
+    const sessionCookie = request.cookies.get('session_id')?.value;
+    const verified = verifyShareSession(sessionCookie, token);
+    if (!verified.valid) {
         return new Response('Unauthorized: No session', { status: 401 });
     }
+    const sessionId = verified.sessionId;
 
-    // Check revocation in Redis (if available)
-    // null = Redis unavailable → fall through to DB check below
+    // Optional Redis revoke cache
     const revokedInRedis = await tryCheckRevoked(token);
     if (revokedInRedis === true) {
         return new Response('Access revoked', { status: 403 });
     }
 
-    // Validate session in Redis (if available)
-    // null = Redis unavailable → fall through to DB-level auth
+    // Optional Redis session cache (null = rely on signed cookie)
     const sessionValid = await tryValidateSession(token, sessionId);
     if (sessionValid === false) {
         return new Response('Session invalid or expired', { status: 401 });
@@ -103,7 +97,7 @@ export async function GET(
     const now = new Date();
     if (secureLink.expiresAt < now) {
         // AUTO-CLEANUP: Delete all data immediately on expiry detection
-        cleanupSingleLink(token).catch(() => { });
+        executeSingleLinkCleanup(token).catch(() => { });
         return new Response('Expired', { status: 410 });
     }
 
@@ -226,7 +220,6 @@ export async function GET(
                 }
 
                 try {
-                    // KILL SWITCH: Check Redis first (faster ~10-50ms) before DB
                     const revokedInRedis = await tryCheckRevoked(token);
                     if (revokedInRedis === true) {
                         safeEnqueue(encoder.encode(`data: ${JSON.stringify({ type: 'revoked' })}\n\n`));
@@ -236,8 +229,6 @@ export async function GET(
                         return;
                     }
 
-                    // Validate session still exists in Redis
-                    // null = Redis unavailable → skip, DB fallback below handles it
                     const sessionValid = await tryValidateSession(token, sessionId);
                     if (sessionValid === false) {
                         safeEnqueue(encoder.encode(`data: ${JSON.stringify({ type: 'session_invalid' })}\n\n`));
@@ -246,7 +237,7 @@ export async function GET(
                         await logSessionEnd('session_invalidated');
                         return;
                     }
-                    // Check DB for revocation (fallback when Redis not configured)
+                    // Authoritative DB checks (signed cookie already verified at connect)
                     const link = await prisma.secureLink.findUnique({
                         where: { token },
                         select: { id: true, isRevoked: true, expiresAt: true },
@@ -257,8 +248,7 @@ export async function GET(
                         clearInterval(heartbeatInterval);
                         safeClose();
                         await logSessionEnd('revoked');
-                        // AUTO-CLEANUP: Purge all data when revoked
-                        cleanupSingleLink(token).catch(() => { });
+                        executeSingleLinkCleanup(token).catch(() => { });
                         return;
                     }
 
@@ -271,8 +261,7 @@ export async function GET(
                         clearInterval(heartbeatInterval);
                         safeClose();
                         await logSessionEnd('expired');
-                        // AUTO-CLEANUP: Purge all data when time expires
-                        cleanupSingleLink(token).catch(() => { });
+                        executeSingleLinkCleanup(token).catch(() => { });
                         return;
                     }
 

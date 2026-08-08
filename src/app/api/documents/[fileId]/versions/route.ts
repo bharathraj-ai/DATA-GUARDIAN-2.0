@@ -23,11 +23,10 @@ export async function GET(
     const token = req.nextUrl.searchParams.get('token');
     if (!token) return NextResponse.json({ error: 'Missing token' }, { status: 401 });
 
-    const authResult = await authorizeApiRequest(fileId, token, { httpMethod: req.method });
+    const authResult = await authorizeApiRequest(fileId, token, { httpMethod: req.method, action: 'view' });
     if (authResult.errorResponse) {
       return authResult.errorResponse;
     }
-    const { file } = authResult;
 
     const versions = await prisma.fileVersion.findMany({
       where: { fileId },
@@ -59,14 +58,21 @@ export async function POST(
 
     if (!token || !versionId) return NextResponse.json({ error: 'Missing fields' }, { status: 400 });
 
-    const authResult = await authorizeApiRequest(fileId, token, { httpMethod: req.method });
+    const authResult = await authorizeApiRequest(fileId, token, { httpMethod: req.method, action: 'edit' });
     if (authResult.errorResponse) {
       return authResult.errorResponse;
     }
     const { file } = authResult;
 
-    const version = await prisma.fileVersion.findUnique({ where: { id: versionId } });
-    if (!version || version.fileId !== fileId) {
+    // IDOR: version must belong to this file (already authorized)
+    const { findFileVersionForFile } = await import('@/lib/security/resource-ownership');
+    const ownedVersion = await findFileVersionForFile(versionId, fileId);
+    if (!ownedVersion) {
+      return NextResponse.json({ error: 'Version not found' }, { status: 404 });
+    }
+
+    const version = await prisma.fileVersion.findUnique({ where: { id: ownedVersion.id } });
+    if (!version) {
       return NextResponse.json({ error: 'Version not found' }, { status: 404 });
     }
 

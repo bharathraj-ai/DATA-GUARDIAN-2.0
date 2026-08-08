@@ -216,3 +216,130 @@ export async function executeCleanup(): Promise<CleanupResult> {
         };
     }
 }
+
+/**
+ * Purge a single expired/revoked link. Server-only — do NOT expose as an
+ * unauthenticated Server Action. Callers must already have verified the link
+ * is expired/revoked (or be an authorized owner/cron path).
+ */
+export async function executeSingleLinkCleanup(token: string): Promise<{ success: boolean; error?: string }> {
+    try {
+        const secureLink = await prisma.secureLink.findUnique({
+            where: { token },
+            select: {
+                id: true,
+                userId: true,
+                expiresAt: true,
+                isRevoked: true,
+                ownerId: true,
+                purpose: true,
+                LinkAccess: {
+                    select: { vendorEmail: true },
+                },
+                UserFile: {
+                    select: {
+                        id: true,
+                        mongoFileId: true,
+                        mongoFile: {
+                            select: { id: true, gridFSId: true },
+                        },
+                    },
+                },
+            },
+        });
+
+        if (!secureLink) {
+            return { success: true };
+        }
+
+        const now = new Date();
+        const isExpiredOrRevoked = secureLink.expiresAt < now || secureLink.isRevoked;
+
+        if (!isExpiredOrRevoked) {
+            return { success: false, error: 'Link is still active' };
+        }
+
+        const mongoGridFSIds: string[] = [];
+        for (const file of secureLink.UserFile) {
+            if (file.mongoFile?.gridFSId) {
+                mongoGridFSIds.push(file.mongoFile.gridFSId);
+            }
+        }
+
+        if (mongoGridFSIds.length > 0) {
+            try {
+                const { deleteFromMongo } = await import('@/lib/mongo/operations');
+                await Promise.allSettled(mongoGridFSIds.map((id) => deleteFromMongo(id)));
+            } catch (err) {
+                console.error('[CLEANUP] GridFS deletion error (non-blocking):', err);
+            }
+        }
+
+        await prisma.$transaction(async (tx) => {
+            if (secureLink.ownerId) {
+                const status = secureLink.isRevoked ? 'revoked' : 'expired';
+                const isGroupShare = secureLink.LinkAccess.length > 1;
+                const vendorEmailToMatch = isGroupShare
+                    ? `Group Share (${secureLink.LinkAccess.length} members)`
+                    : (secureLink.LinkAccess[0]?.vendorEmail || null);
+
+                await tx.sendRecord.updateMany({
+                    where: {
+                        ownerId: secureLink.ownerId,
+                        topic: secureLink.purpose || '',
+                        vendorEmail: vendorEmailToMatch,
+                        status: 'active',
+                    },
+                    data: {
+                        status,
+                        expiredAt: now,
+                    },
+                });
+            }
+
+            const mongoFileIds = secureLink.UserFile
+                .map((f) => f.mongoFileId)
+                .filter((id): id is string => !!id);
+
+            if (mongoFileIds.length > 0) {
+                await tx.mongoFile.deleteMany({
+                    where: { id: { in: mongoFileIds } },
+                });
+            }
+
+            await tx.chatMessage.deleteMany({
+                where: { secureLinkId: secureLink.id },
+            });
+
+            const fileIds = secureLink.UserFile.map((f) => f.id);
+            if (fileIds.length > 0) {
+                await tx.documentSession.deleteMany({
+                    where: { fileId: { in: fileIds } },
+                });
+                await tx.collabOperation.deleteMany({
+                    where: { fileId: { in: fileIds } },
+                });
+                await tx.documentChatMessage.deleteMany({
+                    where: { fileId: { in: fileIds } },
+                });
+            }
+
+            await tx.userFile.deleteMany({
+                where: { secureLinkId: secureLink.id },
+            });
+
+            await tx.secureLink.deleteMany({
+                where: { id: secureLink.id },
+            });
+
+            await tx.userData.deleteMany({
+                where: { id: secureLink.userId },
+            });
+        });
+
+        return { success: true };
+    } catch (error) {
+        console.error('Single link cleanup error:', error instanceof Error ? error.message : 'Unknown');
+        return { success: false, error: 'Cleanup failed' };
+    }
+}

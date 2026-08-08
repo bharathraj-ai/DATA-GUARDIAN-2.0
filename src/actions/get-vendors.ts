@@ -9,18 +9,21 @@ export interface VendorOption {
 }
 
 /**
- * Fetch all available vendors (users with VENDOR role) from the database.
- * Used in the Create Secure Link page to populate the vendor email dropdown.
- * 
- * SECURITY: Requires authentication — vendor emails are PII.
+ * Fetch vendors for the Create Secure Link dropdown.
+ * OWNER-only — prevents any logged-in vendor from enumerating all vendor emails.
  */
 export async function getAvailableVendors(): Promise<VendorOption[]> {
     try {
-        // SECURITY: Only authenticated users can see vendor list
         const session = await auth();
         if (!session?.user?.id) {
             return [];
         }
+
+        const { canCreateSecureLinks } = await import('@/lib/security/roles');
+        if (!canCreateSecureLinks(session.user.role)) {
+            return [];
+        }
+
         const vendors = await prisma.user.findMany({
             where: {
                 role: 'VENDOR',

@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { decryptData } from '@/lib/crypto';
 import { maskEmail, maskPhone } from '@/lib/masking';
 import { cookies } from 'next/headers';
-import { cleanupSingleLink } from '@/actions/cleanup';
+import { executeSingleLinkCleanup } from '@/lib/cleanup-core';
 import { authorizeSecureLink, CapabilityFlags } from '@/lib/linkAuthorization';
 import { tryCheckRevoked, tryValidateSession } from '@/lib/redis-helpers';
 
@@ -95,7 +95,7 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
 
         const now = new Date();
         if (secureLink.expiresAt < now) {
-            cleanupSingleLink(token).catch(() => { });
+            executeSingleLinkCleanup(token).catch(() => { });
             return {
                 success: false,
                 error: 'This link has expired. All data has been permanently deleted.',
@@ -161,10 +161,10 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
 }
 
 /**
- * Gets full (unmasked) user data - use with caution
- * This should only be used for SSE streaming with proper session validation
+ * Gets full (unmasked) user data — cookie-bound signed session + DB.
+ * Redis is an optional cache only.
  */
-export async function getFullUserData(token: string, sessionId: string): Promise<{
+export async function getFullUserData(token: string): Promise<{
     success: boolean;
     data?: DecryptedUserData;
     expiresAt?: Date;
@@ -172,21 +172,24 @@ export async function getFullUserData(token: string, sessionId: string): Promise
     error?: string;
 }> {
     try {
-        // Check revocation in Redis if available
-        // null = Redis unavailable → fall through to DB check below
+        const { cookies } = await import('next/headers');
+        const { verifyShareSession } = await import('@/lib/share-session');
+        const cookieStore = await cookies();
+        const verified = verifyShareSession(cookieStore.get('session_id')?.value, token);
+        if (!verified.valid) {
+            return { success: false, error: 'Unauthorized' };
+        }
+
         const revokedInRedis = await tryCheckRevoked(token);
         if (revokedInRedis === true) {
             return { success: false, error: 'Revoked' };
         }
 
-        // Validate session if Redis is available
-        // null = Redis unavailable → fall through to DB-level auth
-        const isValid = await tryValidateSession(token, sessionId);
+        const isValid = await tryValidateSession(token, verified.sessionId);
         if (isValid === false) {
             return { success: false, error: 'Invalid session' };
         }
 
-        // Get and decrypt data
         const secureLink = await prisma.secureLink.findUnique({
             where: { token },
             include: { UserData: true },

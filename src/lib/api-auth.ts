@@ -6,14 +6,16 @@ import { generateDeviceHash } from '@/lib/fingerprint';
 import { extractClientIP, checkGlobalRateLimit } from '@/lib/rate-limit';
 import crypto from 'crypto';
 import { validateCSRF } from '@/lib/security/csrf';
-import { logger, redactToken } from '@/lib/logger';
+import { logger, redactToken, redactEmail } from '@/lib/logger';
+import { isRedisConfigured } from '@/lib/redis-helpers';
+import { verifyShareSession } from '@/lib/share-session';
+import { decryptData } from '@/lib/crypto';
 
-// Try to load redis safely for hybrid environments
 async function getRedisClient() {
+    if (!isRedisConfigured()) {
+        return null;
+    }
     try {
-        if (!process.env.UPSTASH_REDIS_REST_URL || process.env.UPSTASH_REDIS_REST_URL.includes('your-redis')) {
-            return null;
-        }
         const { default: redisClient } = await import('@/lib/redis');
         return redisClient;
     } catch {
@@ -26,13 +28,8 @@ interface LogMetadata {
     [key: string]: unknown;
 }
 
-/**
- * Audit Logging Utility without sensitive data leakage
- * Strict sanitization to prevent PII exposure in logs.
- */
 async function logSecurityEvent(action: string, linkId: string | null, metadata: LogMetadata) {
     try {
-        // Redact IP slightly
         if (metadata.ip) {
             metadata.ip = metadata.ip.substring(0, 6) + '***';
         }
@@ -41,27 +38,73 @@ async function logSecurityEvent(action: string, linkId: string | null, metadata:
                 action: action,
                 linkId: linkId || undefined,
                 reason: 'Zero-Trust API Authorization Gate',
-                metadata: JSON.stringify(metadata)
-            }
+                metadata: JSON.stringify(metadata),
+            },
         });
     } catch (e) {
         logger.error('Audit log failed', e);
     }
 }
 
-export type AuthorizeApiOptions = {
-    /** Actual HTTP method from NextRequest.method — required for correct CSRF policy. */
-    httpMethod: string;
+export type ApiCapability = 'view' | 'preview' | 'edit' | 'download' | 'comment';
+
+export type CapabilityFlags = {
+    canEdit: boolean;
+    canPreview: boolean;
+    canComment: boolean;
+    canDownload: boolean;
 };
 
+export type AuthorizeApiOptions = {
+    httpMethod: string;
+    /** Required object-level capability. Defaults to view. */
+    action?: ApiCapability;
+};
+
+function normalizeEmail(value: string | null | undefined): string | null {
+    return value?.trim().toLowerCase() || null;
+}
+
+function resolveCapabilities(
+    secureLink: {
+        allowEditing: boolean;
+        allowDownload: boolean | null;
+        allowComment: boolean | null;
+    },
+    isAuthorized: boolean,
+    isOwner: boolean,
+    editingLocked: boolean,
+): CapabilityFlags {
+    const member = isAuthorized || isOwner;
+    return {
+        canPreview: member,
+        canEdit: Boolean(secureLink.allowEditing) && member && !editingLocked,
+        canComment: (secureLink.allowComment ?? true) && member,
+        canDownload: isOwner || (Boolean(secureLink.allowDownload) && isAuthorized),
+    };
+}
+
+function denyCapability(action: ApiCapability, capabilities: CapabilityFlags): string | null {
+    if (action === 'edit' && !capabilities.canEdit) return 'Forbidden: Edit access denied';
+    if (action === 'preview' && !capabilities.canPreview) return 'Forbidden: Preview access denied';
+    if (action === 'download' && !capabilities.canDownload) return 'Forbidden: Download access denied';
+    if (action === 'comment' && !capabilities.canComment) return 'Forbidden: Comment access denied';
+    if (action === 'view' && !capabilities.canPreview) return 'Forbidden: View access denied';
+    return null;
+}
+
 /**
- * Zero-trust gate for UserFile-scoped APIs (share-token + ephemeral session).
+ * Zero-trust gate for UserFile APIs.
+ * Auth: signed session cookie + Postgres ownership/capability checks.
+ * Redis is optional cache (revoke/nonce).
  */
 export async function authorizeApiRequest(
     fileId: string,
     token: string,
     options: AuthorizeApiOptions,
 ) {
+    const action: ApiCapability = options.action ?? 'view';
+
     if (!token || !fileId) {
         return { errorResponse: NextResponse.json({ error: 'Zero-Trust Violation: Missing parameters' }, { status: 400 }) };
     }
@@ -71,52 +114,64 @@ export async function authorizeApiRequest(
     const ip = extractClientIP(_headers);
     const redis = await getRedisClient();
 
-    // 1. Rate Limiting (DDoS & Brute Force Prevention)
     const rateLimit = await checkGlobalRateLimit(ip);
     if (!rateLimit.allowed) {
         await logSecurityEvent('DENIED', null, { ip, reason: 'Rate limit exceeded' });
         return { errorResponse: NextResponse.json({ error: 'Too Many Requests' }, { status: 429 }) };
     }
 
-    // 2. Anti-CSRF: only state-changing methods require Origin alignment with Host
     const csrfResult = validateCSRF({ method: options.httpMethod || 'GET', headers: _headers });
-
     if (!csrfResult.allowed) {
         await logSecurityEvent('DENIED', null, { ip, reason: csrfResult.reason });
         return { errorResponse: NextResponse.json({ error: csrfResult.reason }, { status: csrfResult.status }) };
     }
 
-    // 3. Prevent Replay Attacks (Nonce validation)
     const nonce = _headers.get('x-security-nonce');
     const timestamp = _headers.get('x-timestamp');
 
-    if (redis && nonce && timestamp) {
-        // Enforce timestamp recency (within 60 seconds)
-        const timeDiff = Math.abs(Date.now() - parseInt(timestamp, 10));
-        if (timeDiff > 60000) {
-            await logSecurityEvent('DENIED', null, { ip, reason: 'Stale request timestamp' });
-            return { errorResponse: NextResponse.json({ error: 'Replay Attack Prevented: Timestamp stale' }, { status: 403 }) };
+    if (redis) {
+        if (!nonce || !timestamp) {
+            await logSecurityEvent('DENIED', null, { ip, reason: 'Missing replay protection headers' });
+            return {
+                errorResponse: NextResponse.json(
+                    { error: 'Forbidden: Missing x-security-nonce / x-timestamp' },
+                    { status: 403 },
+                ),
+            };
         }
 
-        // Verify nonce hasn't been used
-        const nonceKey = `nonce:${nonce}`;
-        const isReplay = await redis.setnx(nonceKey, "1");
-        if (isReplay === 0) {
+        const parsedTs = parseInt(timestamp, 10);
+        if (!Number.isFinite(parsedTs) || Math.abs(Date.now() - parsedTs) > 60000) {
+            await logSecurityEvent('DENIED', null, { ip, reason: 'Stale request timestamp' });
+            return {
+                errorResponse: NextResponse.json(
+                    { error: 'Replay Attack Prevented: Timestamp stale' },
+                    { status: 403 },
+                ),
+            };
+        }
+
+        const setResult = await redis.set(`nonce:${nonce}`, '1', { nx: true, ex: 65 });
+        if (setResult === null) {
             logger.security(`Replay attack detected for token: ${redactToken(token)}`);
             await logSecurityEvent('DENIED', null, { ip, reason: 'Reused nonce' });
-            return { errorResponse: NextResponse.json({ error: 'Replay Attack Prevented: Nonce reused' }, { status: 403 }) };
+            return {
+                errorResponse: NextResponse.json(
+                    { error: 'Replay Attack Prevented: Nonce reused' },
+                    { status: 403 },
+                ),
+            };
         }
-        await redis.expire(nonceKey, 65); // Expire slightly after timestamp skew bound
     }
 
-    // 4. Validate HttpOnly session cookie (Strict Mode)
-    const sessionId = cookieStore.get('session_id')?.value;
-    if (!sessionId) {
-        await logSecurityEvent('DENIED', null, { ip, reason: 'Missing Session Cookie' });
+    const sessionCookie = cookieStore.get('session_id')?.value;
+    const verified = verifyShareSession(sessionCookie, token);
+    if (!verified.valid) {
+        await logSecurityEvent('DENIED', null, { ip, reason: 'Missing or invalid signed session' });
         return { errorResponse: NextResponse.json({ error: 'Unauthorized: Missing Hardened Session' }, { status: 401 }) };
     }
+    const sessionId = verified.sessionId;
 
-    // 5. Cross-Check Session in Redis (Zero Trust Ephemeral Cache)
     if (redis) {
         const isRevoked = await redis.exists(`revoked:${token}`);
         if (isRevoked) {
@@ -125,31 +180,35 @@ export async function authorizeApiRequest(
         }
 
         const activeSessionId = await redis.get(`active:${token}`);
-        if (activeSessionId !== sessionId) {
+        if (activeSessionId && activeSessionId !== sessionId) {
             await logSecurityEvent('DENIED', null, { ip, reason: 'Invalid or expired Redis Session match' });
             return { errorResponse: NextResponse.json({ error: 'Unauthorized: Invalid or Hijacked Session' }, { status: 401 }) };
         }
     }
 
-    // 6. DB Verification: Resource Bound Enforcement
     const file = await prisma.userFile.findUnique({
         where: { id: fileId },
-        include: { 
+        include: {
             mongoFile: true,
             SecureLink: {
-                include: { VendorAccess: true, LinkAccess: true }
-            } 
-        }
+                include: { VendorAccess: true, LinkAccess: true },
+            },
+        },
     });
 
+    // Ownership: file must belong to this share token (blocks cross-user fileId swap)
     if (!file || file.SecureLink.token !== token) {
-        await logSecurityEvent('DENIED', null, { fileId, token, ip, reason: 'Cross-resource attempt blocked' });
+        await logSecurityEvent('DENIED', null, {
+            fileId,
+            token: redactToken(token),
+            ip,
+            reason: 'Cross-resource attempt blocked',
+        });
         return { errorResponse: NextResponse.json({ error: 'Forbidden: Resource mismatch' }, { status: 403 }) };
     }
 
     const secureLink = file.SecureLink;
 
-    // 7. Lifecycle Binding
     if (secureLink.isRevoked || secureLink.expiresAt < new Date()) {
         await logSecurityEvent('DENIED', secureLink.id, { ip, reason: 'Link expired or revoked in DB' });
         return { errorResponse: NextResponse.json({ error: 'Forbidden: Link has expired or been revoked' }, { status: 403 }) };
@@ -159,14 +218,23 @@ export async function authorizeApiRequest(
         return { errorResponse: NextResponse.json({ error: 'Forbidden: Link is permanently locked' }, { status: 403 }) };
     }
 
-    // 8. Device Context Binding (Session Hijacking Prevention)
+    const vendorWithSession = secureLink.VendorAccess.find((v) => v.activeSessionId);
+    if (vendorWithSession?.activeSessionId && vendorWithSession.activeSessionId !== sessionId) {
+        const matched = secureLink.VendorAccess.some((v) => v.activeSessionId === sessionId);
+        if (!matched) {
+            await logSecurityEvent('DENIED', secureLink.id, { ip, reason: 'DB session mismatch' });
+            return { errorResponse: NextResponse.json({ error: 'Unauthorized: Session superseded' }, { status: 401 }) };
+        }
+    }
+
     const currentDeviceHash = generateDeviceHash(_headers);
     if (secureLink.deviceHash && secureLink.deviceHash !== currentDeviceHash) {
         await logSecurityEvent('SESSION_HIJACK', secureLink.id, {
-            ip, expectedHash: secureLink.deviceHash.substring(0, 8), actualHash: currentDeviceHash.substring(0, 8) 
+            ip,
+            expectedHash: secureLink.deviceHash.substring(0, 8),
+            actualHash: currentDeviceHash.substring(0, 8),
         });
-        
-        // ANOMALY RESPONSE: Force Logout on Anomaly Detection by wiping session entirely
+
         if (redis) {
             const pipeline = redis.pipeline();
             pipeline.del(`active:${token}`);
@@ -174,76 +242,117 @@ export async function authorizeApiRequest(
             await pipeline.exec();
         }
 
-        // Lock Link entirely dynamically to prevent further abuse
         await prisma.secureLink.update({
-             where: { id: secureLink.id },
-             data: { 
-                 lockedAt: new Date(),
-                 isRevoked: true
-             }
+            where: { id: secureLink.id },
+            data: {
+                lockedAt: new Date(),
+                isRevoked: true,
+            },
         });
 
-        return { errorResponse: NextResponse.json({ error: 'Forbidden: Environmental Context Changed (Session Hijacked)' }, { status: 403 }) };
+        return {
+            errorResponse: NextResponse.json(
+                { error: 'Forbidden: Environmental Context Changed (Session Hijacked)' },
+                { status: 403 },
+            ),
+        };
     }
+
+    const authSession = await auth();
+    const sessionEmail = normalizeEmail(authSession?.user?.email);
+
+    const rawCookieEmail = cookieStore.get('vendor_email')?.value;
+    let cookieEmail: string | null = null;
+    if (rawCookieEmail) {
+        try {
+            const decoded = decryptData<{ email: string }>(rawCookieEmail);
+            cookieEmail = normalizeEmail(decoded.email);
+        } catch {
+            cookieEmail = normalizeEmail(rawCookieEmail.includes(':') ? null : rawCookieEmail);
+        }
+    }
+    const effectiveEmail = cookieEmail || sessionEmail;
+    const isOwner = Boolean(authSession?.user?.id && authSession.user.id === secureLink.ownerId);
 
     const hasEmailGate =
         Boolean(secureLink.allowedVendorEmail) ||
         secureLink.VendorAccess.length > 0 ||
         (secureLink.LinkAccess?.length ?? 0) > 0;
 
-    // 9. Vendor Email Binding (Zero Trust Cloud Identity)
-    if (hasEmailGate) {
-        const session = await auth();
-        const userEmail = session?.user?.email;
+    let isAuthorized = false;
+    let detectedLevel = 2;
+    let otpUsed = secureLink.isUsed;
 
-        const effectiveEmail = userEmail;
-
-        if (!effectiveEmail) {
-            await logSecurityEvent('DENIED', secureLink.id, { ip, reason: 'Missing Identity' });
-            return { errorResponse: NextResponse.json({ error: 'Unauthorized: Required cloud identity missing' }, { status: 401 }) };
-        }
-
-        const effectiveEmailLower = effectiveEmail.toLowerCase();
-        let isAuthorized = false;
-        let detectedLevel = 2; // default
-
-        if (secureLink.allowedVendorEmail && secureLink.allowedVendorEmail.toLowerCase() === effectiveEmailLower) {
+    if (isOwner) {
+        isAuthorized = true;
+        otpUsed = true;
+        detectedLevel = 1;
+    } else if (!hasEmailGate) {
+        isAuthorized = true;
+    } else if (effectiveEmail) {
+        if (secureLink.allowedVendorEmail && normalizeEmail(secureLink.allowedVendorEmail) === effectiveEmail) {
             isAuthorized = true;
-        } else {
-            const vendor = secureLink.VendorAccess.find(v => v.email.toLowerCase() === effectiveEmailLower);
-            if (vendor && !vendor.isRevoked) {
-                isAuthorized = true;
-                detectedLevel = vendor.level;
-            }
-            if (!isAuthorized && secureLink.LinkAccess?.length) {
-                const access = secureLink.LinkAccess.find(
-                    (l) => l.vendorEmail.toLowerCase() === effectiveEmailLower,
-                );
-                if (access && !access.lockedAt) {
-                    isAuthorized = true;
-                    detectedLevel = access.level;
-                }
-            }
         }
 
-        if (!isAuthorized) {
-            await logSecurityEvent('EMAIL_MISMATCH', secureLink.id, {
-                attemptedEmail: effectiveEmail
-            });
-            return { errorResponse: NextResponse.json({ error: 'Forbidden: Identity Mismatch or Revoked' }, { status: 403 }) };
+        const vendor = secureLink.VendorAccess.find(
+            (v) => normalizeEmail(v.email) === effectiveEmail && !v.isRevoked,
+        );
+        if (vendor) {
+            isAuthorized = true;
+            detectedLevel = vendor.level;
         }
-        
-        return { file, secureLink, sessionId, effectiveEmail, level: detectedLevel };
+
+        const access = secureLink.LinkAccess.find(
+            (l) => normalizeEmail(l.vendorEmail) === effectiveEmail && !l.lockedAt,
+        );
+        if (access) {
+            isAuthorized = true;
+            detectedLevel = access.level;
+            otpUsed = access.isUsed;
+        }
     }
 
-    // Return the safe artifacts
-    return { file, secureLink, sessionId, effectiveEmail: null, level: 2 };
+    if (!isAuthorized) {
+        await logSecurityEvent('EMAIL_MISMATCH', secureLink.id, {
+            attemptedEmail: redactEmail(effectiveEmail),
+        });
+        return { errorResponse: NextResponse.json({ error: 'Forbidden: Identity Mismatch or Revoked' }, { status: 403 }) };
+    }
+
+    if (!otpUsed) {
+        await logSecurityEvent('DENIED', secureLink.id, { ip, reason: 'OTP not verified' });
+        return { errorResponse: NextResponse.json({ error: 'Unauthorized: OTP verification required' }, { status: 401 }) };
+    }
+
+    const capabilities = resolveCapabilities(
+        secureLink,
+        isAuthorized,
+        isOwner,
+        file.editingLocked,
+    );
+    const capabilityError = denyCapability(action, capabilities);
+    if (capabilityError) {
+        await logSecurityEvent('DENIED', secureLink.id, {
+            ip,
+            reason: capabilityError,
+            action,
+            allowEditing: secureLink.allowEditing,
+            editingLocked: file.editingLocked,
+        });
+        return { errorResponse: NextResponse.json({ error: capabilityError }, { status: 403 }) };
+    }
+
+    return {
+        file,
+        secureLink,
+        sessionId,
+        effectiveEmail,
+        level: detectedLevel,
+        isOwner,
+        capabilities,
+    };
 }
 
-/**
- * Utility to forcefully rotate a user's session ID after critical actions
- * Prevent static session identifiers from being lifted post-validation
- */
 export async function rotateSessionId(token: string, oldSessionId: string): Promise<string | null> {
     const redis = await getRedisClient();
     if (!redis) return null;
@@ -259,14 +368,13 @@ export async function rotateSessionId(token: string, oldSessionId: string): Prom
     if (ttl > 0) {
         const sessionData = await redis.get(oldSessionKey);
         const pipeline = redis.pipeline();
-        
-        // Swap session
+
         if (typeof sessionData === 'string') {
             const parsed = JSON.parse(sessionData);
             parsed.sessionId = newSessionId;
             pipeline.set(newSessionKey, JSON.stringify(parsed), { ex: ttl });
         }
-        
+
         pipeline.del(oldSessionKey);
         pipeline.set(`active:${token}`, newSessionId, { ex: ttl });
         await pipeline.exec();

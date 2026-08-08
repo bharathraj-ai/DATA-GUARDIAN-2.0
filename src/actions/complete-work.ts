@@ -347,8 +347,8 @@ export async function completeWork(token: string): Promise<CompleteWorkResult> {
         }
 
         // 8. AUTO-CLEANUP: Purge ALL data for this link (async, non-blocking)
-        import('@/actions/cleanup').then(({ cleanupSingleLink }) => {
-            cleanupSingleLink(token).catch(err => {
+        import('@/lib/cleanup-core').then(({ executeSingleLinkCleanup }) => {
+            executeSingleLinkCleanup(token).catch(err => {
                 logger.error('Failed to cleanup link data:', err);
             });
         });

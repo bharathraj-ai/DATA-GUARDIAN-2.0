@@ -9,6 +9,7 @@ import { useEditorState } from "../hooks/useEditorState";
 import { Page } from "../layout/Page";
 import { TableActions } from "../elements/TableElement";
 import { SpreadsheetApp } from "../elements/SpreadsheetApp";
+import { secureFetch } from "@/lib/security/secure-fetch";
 
 interface UniversalEditorProps {
   token?: string;
@@ -73,7 +74,7 @@ export default function UniversalEditor({
     if (!chatOpen || !token || !fileId) return;
     const fetchChat = async () => {
       try {
-        const res = await fetch(`/api/documents/${fileId}/chat?token=${token}`);
+        const res = await secureFetch(`/api/documents/${fileId}/chat?token=${token}`);
         if (res.ok) {
           const data = await res.json();
           if (data.success) {
@@ -96,7 +97,7 @@ export default function UniversalEditor({
     const msg = newMessage;
     setNewMessage("");
     try {
-      await fetch(`/api/documents/${fileId}/chat`, {
+      await secureFetch(`/api/documents/${fileId}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

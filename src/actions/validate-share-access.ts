@@ -2,7 +2,7 @@
 
 import { prisma } from '@/lib/prisma';
 import { auth } from '@/lib/auth';
-import { cleanupSingleLink } from '@/actions/cleanup';
+import { executeSingleLinkCleanup } from '@/lib/cleanup-core';
 
 export type ValidateShareAccessResult = {
     allowed: boolean;
@@ -72,7 +72,7 @@ export async function validateShareAccess(token: string): Promise<ValidateShareA
         const now = new Date();
         if (secureLink.expiresAt < now) {
             // AUTO-CLEANUP: Delete all data when expired
-            cleanupSingleLink(token).catch(() => { });
+            executeSingleLinkCleanup(token).catch(() => { });
             return {
                 allowed: false,
                 requiresAuth: false,

@@ -1,7 +1,7 @@
 'use server';
 
 import { prisma } from '@/lib/prisma';
-import { cleanupSingleLink } from '@/actions/cleanup';
+import { executeSingleLinkCleanup } from '@/lib/cleanup-core';
 import { auth } from '@/lib/auth';
 import { logger } from '@/lib/logger';
 
@@ -138,7 +138,7 @@ export async function revokeAccess(
         logger.info(`[KILL SWITCH] Link ${secureLink.id} revoked by ${session.user.id} | Redis: ${redisResult.success ? `${redisResult.latencyMs}ms` : 'N/A'} | Target: <100ms`);
 
         // AUTO-CLEANUP: Purge ALL data after revocation (fire-and-forget)
-        cleanupSingleLink(secureLink.token).catch(() => { });
+        executeSingleLinkCleanup(secureLink.token).catch(() => { });
 
         return {
             success: true,

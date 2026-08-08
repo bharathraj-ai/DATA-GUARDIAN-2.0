@@ -1,26 +1,22 @@
 /**
- * Shared Redis validation helpers used across server actions.
- * Extracted to avoid duplicating the same ~20 lines in 6+ files.
+ * Redis helpers — OPTIONAL CACHE only.
  *
- * SECURITY MODEL (Two-Tier):
+ * Postgres + signed share-session cookies are authoritative for:
+ *   create-link, OTP, revoke, expiry, session binding.
  *
- * ┌─────────────────────────────────────────────────────────┐
- * │ Redis NOT configured (no env vars)                      │
- * │ → Returns null (unknown)                                │
- * │ → Callers fall through to authoritative DB checks       │
- * │   (secureLink.isRevoked, expiresAt, isUsed)             │
- * │ → App works without Redis, DB is source of truth        │
- * ├─────────────────────────────────────────────────────────┤
- * │ Redis IS configured but ERRORS (timeout, crash, etc.)   │
- * │ → FAIL CLOSED: treat as revoked / session invalid       │
- * │ → Attacker cannot bypass auth by killing Redis          │
- * ├─────────────────────────────────────────────────────────┤
- * │ Redis IS configured and responds                        │
- * │ → Authoritative answer: true/false                      │
- * └─────────────────────────────────────────────────────────┘
+ * Redis accelerates:
+ *   kill-switch (revoked:{token}), ephemeral session TTL, rate limits.
+ *
+ * Return semantics:
+ *   true/false → Redis answered
+ *   null       → Redis not configured or unavailable → caller uses DB / signed cookie
+ *
+ * When Redis IS configured but errors on revoke/session reads → fail closed
+ * (true revoked / false invalid) so a killed Redis cannot open access.
  */
 
-// Cache the imported redis module to avoid dynamic import overhead on every call
+import { logger } from '@/lib/logger';
+
 let _redisModule: typeof import('@/lib/redis') | null = null;
 async function getRedisModule() {
     if (!_redisModule) {
@@ -30,7 +26,7 @@ async function getRedisModule() {
 }
 
 /** Returns true if Redis env vars are present and look real */
-function isRedisConfigured(): boolean {
+export function isRedisConfigured(): boolean {
     return !!(
         process.env.UPSTASH_REDIS_REST_URL &&
         process.env.UPSTASH_REDIS_REST_TOKEN &&
@@ -39,62 +35,51 @@ function isRedisConfigured(): boolean {
 }
 
 /**
- * Check if a token has been revoked via Redis.
- *
- * Returns:
- *  - true  → Redis confirms revoked, OR Redis is configured but errored (FAIL CLOSED)
- *  - false → Redis confirms NOT revoked
- *  - null  → Redis is NOT CONFIGURED (caller falls through to DB)
+ * Fast revoke cache lookup.
+ * null = no Redis → check SecureLink.isRevoked in DB
+ * true  = revoked (or Redis configured but errored — fail closed)
+ * false = Redis says not revoked (still verify DB)
  */
 export async function tryCheckRevoked(token: string): Promise<boolean | null> {
     if (!isRedisConfigured()) {
-        // Redis genuinely not set up — return null so callers can fall through to DB
         return null;
     }
 
-    // Redis IS configured — errors must FAIL CLOSED
     try {
         const { isTokenRevoked } = await getRedisModule();
-        const revoked = await isTokenRevoked(token);
-        return revoked === true;
+        return (await isTokenRevoked(token)) === true;
     } catch (err) {
-        console.error('[SECURITY] Redis tryCheckRevoked FAIL CLOSED — treating as revoked:', err instanceof Error ? err.message : 'Unknown');
-        return true; // FAIL CLOSED: configured Redis errored → assume revoked
+        logger.error('Redis tryCheckRevoked FAIL CLOSED — treating as revoked', err);
+        return true;
     }
 }
 
 /**
- * Validate a session via Redis.
- *
- * Returns:
- *  - true  → Redis confirms session IS valid
- *  - false → Redis confirms session is NOT valid, OR Redis errored (FAIL CLOSED)
- *  - null  → Redis is NOT CONFIGURED (caller falls through to DB)
+ * Fast session cache lookup.
+ * null  = no Redis → verify signed cookie (+ optional VendorAccess.activeSessionId)
+ * true  = Redis confirms active session
+ * false = Redis says invalid (or Redis errored — fail closed)
  */
 export async function tryValidateSession(token: string, sessionId: string): Promise<boolean | null> {
     if (!isRedisConfigured()) {
-        // Redis genuinely not set up — return null so callers can fall through to DB
         return null;
     }
 
-    // Redis IS configured — errors must FAIL CLOSED
     try {
         const { validateSession } = await getRedisModule();
-        const isValid = await validateSession(token, sessionId);
-        return isValid === true; // Strict boolean coercion
+        return (await validateSession(token, sessionId)) === true;
     } catch (err) {
-        console.error('[SECURITY] Redis tryValidateSession FAIL CLOSED — treating as invalid:', err instanceof Error ? err.message : 'Unknown');
-        return false; // FAIL CLOSED: configured Redis errored → session invalid
+        logger.error('Redis tryValidateSession FAIL CLOSED — treating as invalid', err);
+        return false;
     }
 }
 
 /**
- * Get session TTL.
- * Falls back to DB-based expiry time when Redis is unavailable.
+ * Session TTL from Redis cache, or fallback when Redis is absent/errors.
  */
 export async function tryGetSessionTTL(token: string, sessionId: string, fallback: number): Promise<number> {
     if (!isRedisConfigured()) {
-        return fallback; // Use DB-based expiry when Redis is unavailable
+        return fallback;
     }
 
     try {
@@ -102,19 +87,17 @@ export async function tryGetSessionTTL(token: string, sessionId: string, fallbac
         const ttl = await getSessionTTL(token, sessionId);
         return ttl > 0 ? ttl : fallback;
     } catch (err) {
-        console.error('[SECURITY] Redis tryGetSessionTTL error, falling back to DB expiry:', err instanceof Error ? err.message : 'Unknown');
+        logger.error('Redis tryGetSessionTTL error, using DB fallback', err);
         return fallback;
     }
 }
 
 /**
- * Create a session.
- * Returns false if Redis is unavailable — caller should still set the cookie
- * since the DB-level checks (isUsed, expiresAt, isRevoked) remain authoritative.
+ * Best-effort cache write. App does not depend on this succeeding.
+ * Returns true if cached, false if Redis skipped/unavailable.
  */
 export async function tryCreateSession(token: string, sessionId: string, ttlSeconds: number): Promise<boolean> {
     if (!isRedisConfigured()) {
-        console.warn('[SECURITY] Redis not configured — session created in cookie only (DB-gated)');
         return false;
     }
 
@@ -123,7 +106,7 @@ export async function tryCreateSession(token: string, sessionId: string, ttlSeco
         await createSession(token, sessionId, ttlSeconds);
         return true;
     } catch (err) {
-        console.error('[SECURITY] Redis tryCreateSession error:', err instanceof Error ? err.message : 'Unknown');
+        logger.error('Redis tryCreateSession cache write failed (non-fatal)', err);
         return false;
     }
 }

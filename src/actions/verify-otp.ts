@@ -1,7 +1,7 @@
 'use server';
 
 import { prisma } from '@/lib/prisma';
-import { verifyOTPHash, generateSessionId, encryptData } from '@/lib/crypto';
+import { verifyOTPHash, encryptData } from '@/lib/crypto';
 import crypto from 'crypto';
 import { otpVerifySchema, OTPVerifyInput } from '@/lib/validations';
 import { cookies, headers } from 'next/headers';
@@ -508,8 +508,10 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
             };
         }
 
-        // Generate session ID and try to create Redis session
-        const sessionId = generateSessionId();
+        // Signed session cookie is authoritative; Redis cache is best-effort
+        const { mintShareSession } = await import('@/lib/share-session');
+        const minted = mintShareSession(token, ttlSeconds);
+        const sessionId = minted.sessionId;
         await tryCreateSession(token, sessionId, ttlSeconds);
 
         // Success: Mark link as used, bind device, mark OTP verified, and create audit log
@@ -600,13 +602,13 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
             ).catch((err) => console.error('Failed to send access notification:', err));
         }
 
-        // Set session cookie (httpOnly for security)
+        // Set signed session cookie (httpOnly). Redis cache is optional.
         const cookieStore = await cookies();
-        cookieStore.set('session_id', sessionId, {
+        cookieStore.set('session_id', minted.cookieValue, {
             httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
             sameSite: 'strict',
-            maxAge: ttlSeconds,
+            maxAge: minted.maxAge,
             path: '/',
         });
 
