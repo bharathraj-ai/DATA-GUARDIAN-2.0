@@ -5,61 +5,87 @@ const globalForPrisma = globalThis as unknown as {
   _prismaShutdownRegistered?: boolean;
 };
 
-// Create client with optimized connection pooling
-function createPrismaClient(): PrismaClient {
-  // Ensure DATABASE_URL has connection_limit=20
+function buildDatasourceUrl(): string {
   let url = process.env.DATABASE_URL || '';
-  if (url) {
-      try {
-          const parsed = new URL(url);
-          parsed.searchParams.set('connection_limit', '20');
-          url = parsed.toString();
-      } catch {
-          // If URL parsing fails (e.g. non-standard format), fall back to string approach
-          if (!url.includes('connection_limit=')) {
-              url = url.includes('?') ? `${url}&connection_limit=20` : `${url}?connection_limit=20`;
-          }
-      }
+  if (!url) return url;
+
+  try {
+    const parsed = new URL(url);
+    // Neon PgBouncer: keep the pool small. Large pools leave idle sockets
+    // that Neon closes → "Error { kind: Closed, cause: None }".
+    parsed.searchParams.set('connection_limit', '5');
+    if (!parsed.searchParams.has('pool_timeout')) {
+      parsed.searchParams.set('pool_timeout', '20');
+    }
+    if (!parsed.searchParams.has('connect_timeout')) {
+      parsed.searchParams.set('connect_timeout', '15');
+    }
+    // Required when using the Neon *-pooler* host
+    if (!parsed.searchParams.has('pgbouncer')) {
+      parsed.searchParams.set('pgbouncer', 'true');
+    }
+    return parsed.toString();
+  } catch {
+    return url;
   }
-
-  const client = new PrismaClient({
-    log: ['error', 'warn'],
-    datasourceUrl: url,
-  });
-
-  // Safe connection lifecycle & retry strategy
-  const connectWithRetry = async (retries = 3) => {
-      for (let i = 0; i < retries; i++) {
-          try {
-              await client.$connect();
-              break;
-          } catch (error) {
-              console.error(`[Prisma] Connection failed (Attempt ${i + 1}/${retries}):`, error);
-              if (i === retries - 1) throw error;
-              await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1))); // Exponential backoff
-          }
-      }
-  };
-
-  // Warm the connection pool on creation (prevents cold-start latency)
-  connectWithRetry().catch((e) => console.error('[Prisma] Final connection failure:', e));
-
-  return client;
 }
 
-// Use existing client or create new one (singleton pattern)
+function isClosedConnectionError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  const code = (error as { code?: string })?.code;
+  return (
+    code === 'P1017' ||
+    code === 'P1001' ||
+    /kind:\s*Closed/i.test(msg) ||
+    /Connection.*closed/i.test(msg) ||
+    /Server has closed the connection/i.test(msg) ||
+    /Can't reach database server/i.test(msg)
+  );
+}
+
+function createPrismaClient(): PrismaClient {
+  const client = new PrismaClient({
+    log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
+    datasourceUrl: buildDatasourceUrl(),
+  });
+
+  // Retry once when Neon/PgBouncer drops an idle connection.
+  // Do NOT call $connect() at module load — that opens a socket which Neon
+  // later closes while the process is idle (cleanup scheduler, etc.).
+  const extended = client.$extends({
+    query: {
+      async $allOperations({ args, query }) {
+        try {
+          return await query(args);
+        } catch (error) {
+          if (!isClosedConnectionError(error)) throw error;
+
+          console.warn('[Prisma] Idle connection closed by Neon — reconnecting…');
+          try {
+            await client.$disconnect();
+          } catch {
+            // ignore disconnect failures on already-closed sockets
+          }
+          await client.$connect();
+          return query(args);
+        }
+      },
+    },
+  });
+
+  return extended as unknown as PrismaClient;
+}
+
 export const prisma = globalForPrisma.prisma ?? createPrismaClient();
 
-// Cache client in development to prevent hot-reload connection leaks
 if (process.env.NODE_ENV !== 'production') {
   globalForPrisma.prisma = prisma;
 }
 
-// Register SIGTERM handler ONCE (outside the factory to prevent listener leaks on hot reload)
-if (!globalForPrisma._prismaShutdownRegistered) {
+// Only disconnect on real process shutdown in production (avoids HMR Closed errors in dev)
+if (process.env.NODE_ENV === 'production' && !globalForPrisma._prismaShutdownRegistered) {
   globalForPrisma._prismaShutdownRegistered = true;
   process.on('SIGTERM', async () => {
-      console.log('[Prisma] SIGTERM received, disconnecting pool...');
-      await prisma.$disconnect();
+    await prisma.$disconnect().catch(() => {});
   });
 }

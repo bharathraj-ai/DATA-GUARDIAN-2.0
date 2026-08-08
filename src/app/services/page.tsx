@@ -2,6 +2,8 @@ import Link from 'next/link';
 import type { Metadata } from 'next';
 import ScrollReveal from '@/components/ScrollReveal';
 
+export const dynamic = 'force-static';
+
 export const metadata: Metadata = {
     title: 'Services',
     description: 'Explore Secure Protocol services: AES-256 encrypted sharing, self-destructing links, OTP protection, instant revocation, QR code delivery, and zero-knowledge architecture.',

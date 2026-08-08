@@ -2,6 +2,8 @@ import Link from 'next/link';
 import type { Metadata } from 'next';
 import ScrollReveal from '@/components/ScrollReveal';
 
+export const dynamic = 'force-static';
+
 export const metadata: Metadata = {
     title: 'How It Works | Secure Protocol',
     description: 'Learn how Secure Protocol secures your data in three simple steps — military-grade encryption, OTP authentication and instant revocation.',

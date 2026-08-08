@@ -10,10 +10,9 @@ interface ProvidersProps {
 export default function Providers({ children }: ProvidersProps) {
     return (
         <SessionProvider
-            // Reduce session polling: check every 5 minutes instead of default 0 (every request)
-            refetchInterval={5 * 60}
-            // Only refetch when window is focused (saves API calls when tab is inactive)
-            refetchOnWindowFocus={true}
+            // JWT sessions are cheap, but avoid hammering /api/auth/session on every focus/nav
+            refetchInterval={10 * 60}
+            refetchOnWindowFocus={false}
         >
             {children}
         </SessionProvider>
