@@ -24,6 +24,7 @@ export function middleware(request: NextRequest) {
     response.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
 
     // Content-Security-Policy — strongest XSS mitigation
+    // frame-src allows same-origin + blob:/data: for vendor PDF preview iframes
     response.headers.set('Content-Security-Policy', [
         "default-src 'self'",
         "script-src 'self' 'unsafe-inline' 'unsafe-eval'",  // Next.js requires inline + eval in dev
@@ -31,6 +32,8 @@ export function middleware(request: NextRequest) {
         "font-src 'self' https://fonts.gstatic.com",
         "img-src 'self' data: blob: https:",
         "connect-src 'self'",
+        "frame-src 'self' blob: data:",
+        "object-src 'none'",
         "frame-ancestors 'none'",
         "base-uri 'self'",
         "form-action 'self'",

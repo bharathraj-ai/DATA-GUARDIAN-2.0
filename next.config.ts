@@ -36,6 +36,7 @@ const nextConfig: NextConfig = {
       'xlsx',
       'pdf-lib',
       'mongodb',
+      'lucide-react',
     ],
   },
 
@@ -84,6 +85,8 @@ const nextConfig: NextConfig = {
               "font-src 'self' https://fonts.gstatic.com",
               "img-src 'self' data: blob: https://lh3.googleusercontent.com https://avatars.githubusercontent.com",
               "connect-src 'self' https://*.upstash.io https://*.neon.tech",
+              // Vendor PDF preview uses blob:/data: iframes (FileList + SecurePDFViewer)
+              "frame-src 'self' blob: data:",
               "frame-ancestors 'none'",
               "base-uri 'self'",
               "form-action 'self'",
@@ -92,13 +95,16 @@ const nextConfig: NextConfig = {
           },
         ],
       },
-      // ONLYOFFICE editor — CSP allowing ONLYOFFICE iframe
+      // ONLYOFFICE editor — CSP allowing ONLYOFFICE iframe + local PDF blob preview
       {
         source: '/editor/:path*',
         headers: [
           {
             key: 'Content-Security-Policy',
-            value: `frame-src 'self' ${process.env.ONLYOFFICE_SERVER_URL || 'http://localhost:8080'}; script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""} ${process.env.ONLYOFFICE_SERVER_URL || 'http://localhost:8080'}`,
+            value: [
+              `frame-src 'self' blob: data: ${process.env.ONLYOFFICE_SERVER_URL || 'http://localhost:8080'}`,
+              `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""} ${process.env.ONLYOFFICE_SERVER_URL || 'http://localhost:8080'}`,
+            ].join('; '),
           },
         ],
       },

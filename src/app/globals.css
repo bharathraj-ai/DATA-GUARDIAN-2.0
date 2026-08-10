@@ -5,17 +5,19 @@
   --primary-blue-dark: #2563eb;
   --accent-cyan: #06b6d4;
   --accent-purple: #8b5cf6;
-  --dark-bg: #0a0a0c;
-  --darker-bg: #030303;
-  --card-bg: rgba(255, 255, 255, 0.03);
-  --border-color: rgba(255, 255, 255, 0.1);
-  --text-primary: #f8fafc;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
+  /* App shell is light (anthropic theme) — text tokens must contrast on white cards */
+  --dark-bg: #F1F5F9;
+  --darker-bg: #F8FAFC;
+  --card-bg: #FFFFFF;
+  --border-color: #E2E8F0;
+  --text-primary: #0F172A;
+  --text-secondary: #475569;
+  --text-muted: #64748B;
   --success: #10b981;
   --warning: #f59e0b;
   --danger: #ef4444;
-  --bg-tertiary: rgba(255, 255, 255, 0.05);
+  --bg-tertiary: #F8FAFC;
+  --color-text: #0F172A;
 }
 
 * {
@@ -28,7 +30,7 @@ html,
 body {
   min-height: 100vh;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  background-color: var(--darker-bg);
+  background-color: #FFFFFF;
   color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -873,22 +875,9 @@ body {
   min-height: 100vh;
   padding-top: 100px;
   padding-bottom: 80px;
-  background: transparent;
+  background: #FFFFFF;
   display: flex;
   align-items: center;
-  animation: pageEnter 0.5s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-@keyframes pageEnter {
-  from {
-    opacity: 0;
-    transform: translateY(12px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
 }
 
 .app-section {
@@ -2975,7 +2964,7 @@ body {
   background: #F8FAFC;
   border: 2px solid rgba(148, 163, 184, 0.4);
   border-radius: 12px;
-  color: var(--text-primary);
+  color: #0F172A;
   transition: all 0.2s ease;
   outline: none;
 }
@@ -3260,12 +3249,11 @@ body {
   z-index: 10;
   width: 100%;
   max-width: 560px;
-  background: var(--card-bg);
-  backdrop-filter: blur(20px);
-  border: 1px solid var(--border-color);
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
   border-radius: 28px;
   padding: 40px;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.08);
   animation: fadeInUp 0.8s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -3308,8 +3296,8 @@ body {
 
 /* Status Section */
 .status-section {
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid var(--border-color);
+  background: #F8FAFC;
+  border: 1px solid #E2E8F0;
   border-radius: 18px;
   padding: 24px;
   margin-bottom: 24px;
@@ -3409,7 +3397,7 @@ body {
   justify-content: space-between;
   align-items: center;
   padding: 10px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid #E2E8F0;
 }
 
 .status-details .detail-row:last-child {
@@ -3703,7 +3691,7 @@ body {
 
 /* Footer */
 .revoke-footer {
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid #E2E8F0;
   padding-top: 24px;
 }
 
@@ -3756,19 +3744,19 @@ body {
   gap: 8px;
   padding: 12px 24px;
   border-radius: 12px;
-  background: #F4F4F5;
-  color: var(--text-primary);
+  background: #F1F5F9;
+  color: #0F172A;
   text-decoration: none;
   font-weight: 600;
   font-size: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid #E2E8F0;
   transition: all 0.2s;
   margin-top: 16px;
 }
 
 .return-button:hover {
-  background: #F4F4F5;
-  border-color: rgba(255, 255, 255, 0.2);
+  background: #E2E8F0;
+  border-color: #CBD5E1;
 }
 
 .return-button svg {
@@ -4042,7 +4030,7 @@ body {
 .skeleton {
   position: relative;
   overflow: hidden;
-  background: rgba(148, 163, 184, 0.08);
+  background: #E2E8F0;
   border-radius: 12px;
 }
 
@@ -4050,7 +4038,7 @@ body {
   content: '';
   position: absolute;
   inset: 0;
-  background: transparent;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.7), transparent);
   animation: shimmer 1.8s ease-in-out infinite;
 }
 

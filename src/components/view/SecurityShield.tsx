@@ -578,6 +578,7 @@ export const SecurityShield = memo(function SecurityShield({
             <div 
                 id="security-content-wrapper" 
                 className={isBlurred || sessionTerminated ? 'security-content-blur' : 'security-content-normal'}
+                style={{ width: '100%', height: '100%', minHeight: '100%', position: 'relative', display: 'flex', flexDirection: 'column' }}
             >
                 {children}
             </div>

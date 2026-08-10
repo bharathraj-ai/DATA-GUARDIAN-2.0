@@ -185,6 +185,7 @@ export async function getFilePreview(token: string, fileId: string): Promise<Fil
 
     } catch (error) {
         console.error('Preview Error:', error);
-        return { success: false, error: 'Failed' };
+        const message = error instanceof Error ? error.message : 'Failed to open preview';
+        return { success: false, error: message };
     }
 }

@@ -1333,3 +1333,54 @@ body, html {
   transition: color 0.25s ease !important;
 }
 
+/* ============================================
+   LIGHT THEME TEXT CONTRAST SAFETY
+   Ensures dark text on white cards after theme migration
+   ============================================ */
+.revoke-title,
+.detail-value,
+.error-title,
+.warning-title,
+.finished-title,
+.otp-box,
+.file-name,
+.killswitch-header .section-title,
+.status-section .section-title {
+  color: #0F172A !important;
+}
+
+.revoke-subtitle,
+.detail-label,
+.otp-label,
+.killswitch-description,
+.loading-text,
+.footer-badge,
+.warning-text,
+.back-link,
+.file-meta {
+  color: #475569 !important;
+}
+
+.revoke-card {
+  background: #FFFFFF !important;
+  border: 1px solid #E2E8F0 !important;
+  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.08) !important;
+}
+
+.revoke-wrapper {
+  background: linear-gradient(145deg, #F8FAFC 0%, #EFF6FF 50%, #F1F5F9 100%) !important;
+}
+
+.status-section {
+  background: #F8FAFC !important;
+  border: 1px solid #E2E8F0 !important;
+}
+
+.status-details .detail-value.highlight {
+  color: #2563eb !important;
+}
+
+.status-details .detail-value.verified {
+  color: #16a34a !important;
+}
+

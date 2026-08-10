@@ -80,14 +80,12 @@ export default function SignupPage() {
     // Drag and Drop state
     const [isDragging, setIsDragging] = useState(false);
 
-    // Fetch available vendors on mount
-    useEffect(() => {
-        async function fetchVendors() {
-            const vendorList = await getAvailableVendors();
-            setVendors(vendorList);
-        }
-        fetchVendors();
-    }, []);
+    // Fetch vendors lazily when the dropdown is first opened (not on every page load)
+    const ensureVendorsLoaded = async () => {
+        if (vendors.length > 0) return;
+        const vendorList = await getAvailableVendors();
+        setVendors(vendorList);
+    };
 
     // Redirect to sign-in if not authenticated
     useEffect(() => {
@@ -412,7 +410,10 @@ export default function SignupPage() {
                             <div className={styles.modeSelection}>
                                 <div 
                                     className={`${styles.modeCard} ${sharingMode === 'individual' ? styles.modeCardActive : ''}`}
-                                    onClick={() => setSharingMode('individual')}
+                                    onClick={() => {
+                                        setSharingMode('individual');
+                                        void ensureVendorsLoaded();
+                                    }}
                                 >
                                     <div className={styles.radioCircle}>
                                         <div className={styles.radioInner}></div>
@@ -425,7 +426,10 @@ export default function SignupPage() {
                                 </div>
                                 <div 
                                     className={`${styles.modeCard} ${sharingMode === 'group' ? styles.modeCardActive : ''}`}
-                                    onClick={() => setSharingMode('group')}
+                                    onClick={() => {
+                                        setSharingMode('group');
+                                        void ensureVendorsLoaded();
+                                    }}
                                 >
                                     <div className={styles.radioCircle}>
                                         <div className={styles.radioInner}></div>
@@ -445,7 +449,11 @@ export default function SignupPage() {
                             </label>
 
                             <div 
-                                onClick={() => setIsVendorDropdownOpen(!isVendorDropdownOpen)}
+                                onClick={() => {
+                                    const next = !isVendorDropdownOpen;
+                                    setIsVendorDropdownOpen(next);
+                                    if (next) void ensureVendorsLoaded();
+                                }}
                                 style={{ 
                                     padding: '12px 16px', 
                                     border: '1px solid #d1d5db', 
