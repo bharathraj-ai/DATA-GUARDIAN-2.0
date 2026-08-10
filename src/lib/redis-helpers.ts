@@ -95,18 +95,45 @@ export async function tryGetSessionTTL(token: string, sessionId: string, fallbac
 /**
  * Best-effort cache write. App does not depend on this succeeding.
  * Returns true if cached, false if Redis skipped/unavailable.
+ * deviceFingerprint binds the active access session to the verifying device.
  */
-export async function tryCreateSession(token: string, sessionId: string, ttlSeconds: number): Promise<boolean> {
+export async function tryCreateSession(
+    token: string,
+    sessionId: string,
+    ttlSeconds: number,
+    deviceFingerprint?: string,
+): Promise<boolean> {
     if (!isRedisConfigured()) {
         return false;
     }
 
     try {
         const { createSession } = await getRedisModule();
-        await createSession(token, sessionId, ttlSeconds);
+        await createSession(token, sessionId, ttlSeconds, deviceFingerprint);
         return true;
     } catch (err) {
         logger.error('Redis tryCreateSession cache write failed (non-fatal)', err);
         return false;
+    }
+}
+
+/**
+ * Read device fingerprint bound to the active Redis session (if any).
+ * null = Redis unavailable / no session fingerprint stored.
+ */
+export async function tryGetSessionDeviceFingerprint(
+    token: string,
+): Promise<string | null> {
+    if (!isRedisConfigured()) {
+        return null;
+    }
+
+    try {
+        const { getActiveSession } = await getRedisModule();
+        const session = await getActiveSession(token);
+        return session?.deviceFingerprint ?? null;
+    } catch (err) {
+        logger.error('Redis tryGetSessionDeviceFingerprint failed', err);
+        return null;
     }
 }

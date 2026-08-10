@@ -29,6 +29,9 @@ export default function SharePage({ params }: SharePageProps) {
     const [accessError, setAccessError] = useState<string>('');
     const [remainingAttempts, setRemainingAttempts] = useState(1);
     const [countdown, setCountdown] = useState(300); // 5 minutes
+    const [resendCooldown, setResendCooldown] = useState(0);
+    const [resendMessage, setResendMessage] = useState('');
+    const [isResending, setIsResending] = useState(false);
     const [shake, setShake] = useState(false);
     const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -89,7 +92,7 @@ export default function SharePage({ params }: SharePageProps) {
         checkAccess();
     }, [token]);
 
-    // Countdown timer
+    // Countdown timer (OTP expiry UI)
     useEffect(() => {
         if (countdown <= 0 || accessState !== 'allowed') return;
         const timer = setInterval(() => {
@@ -97,6 +100,15 @@ export default function SharePage({ params }: SharePageProps) {
         }, 1000);
         return () => clearInterval(timer);
     }, [countdown, accessState]);
+
+    // Resend cooldown timer
+    useEffect(() => {
+        if (resendCooldown <= 0) return;
+        const timer = setInterval(() => {
+            setResendCooldown((prev) => Math.max(0, prev - 1));
+        }, 1000);
+        return () => clearInterval(timer);
+    }, [resendCooldown]);
 
     // Auto-focus first input
     useEffect(() => {
@@ -169,10 +181,16 @@ export default function SharePage({ params }: SharePageProps) {
             if (result.success) {
                 setState('idle');
                 setStep('otp');
-                setCountdown(300); // 5 minutes fresh timer
+                setCountdown(300);
+                setResendCooldown(60);
+                setResendMessage('OTP sent to your email.');
+                setOtp(['', '', '', '', '', '']);
             } else {
                 setState('error');
                 setError(result.error || 'Failed to request OTP');
+                if (result.retryAfterSeconds) {
+                    setResendCooldown(result.retryAfterSeconds);
+                }
                 triggerShake();
                 setTimeout(() => setState('idle'), 2000);
             }
@@ -181,6 +199,45 @@ export default function SharePage({ params }: SharePageProps) {
             setError('Connection error. Please try again.');
             triggerShake();
             setTimeout(() => setState('idle'), 2000);
+        }
+    };
+
+    const handleResendOTP = async () => {
+        const targetEmail = (email || sessionData?.user?.email || '').trim();
+        if (!targetEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(targetEmail)) {
+            setError('Sign in or enter your authorized email to resend the OTP.');
+            triggerShake();
+            return;
+        }
+
+        if (resendCooldown > 0 || isResending || state === 'loading') return;
+
+        setIsResending(true);
+        setError('');
+        setResendMessage('');
+
+        try {
+            if (!email) setEmail(targetEmail);
+            const result = await sendVendorOTP({ token, email: targetEmail });
+
+            if (result.success) {
+                setCountdown(300);
+                setResendCooldown(60);
+                setResendMessage('A new OTP has been sent to your email.');
+                setOtp(['', '', '', '', '', '']);
+                inputRefs.current[0]?.focus();
+            } else {
+                setError(result.error || 'Failed to resend OTP');
+                if (result.retryAfterSeconds) {
+                    setResendCooldown(result.retryAfterSeconds);
+                }
+                triggerShake();
+            }
+        } catch {
+            setError('Connection error. Please try again.');
+            triggerShake();
+        } finally {
+            setIsResending(false);
         }
     };
 
@@ -205,11 +262,9 @@ export default function SharePage({ params }: SharePageProps) {
             const result = await verifyOTP({ token, otp: otpString, email: email || undefined });
 
             if (result.success) {
-                setState('success');
-                // Force full page navigation to bypass all caches
-                setTimeout(() => {
-                    window.location.href = `/view/${token}?t=${Date.now()}`;
-                }, 1200);
+                // Hard navigate immediately — avoid AnimatePresence exit + location change racing React DOM
+                window.location.assign(`/view/${token}?t=${Date.now()}`);
+                return;
             } else {
                 setState('error');
                 setError(result.error || 'Verification failed');
@@ -544,6 +599,47 @@ export default function SharePage({ params }: SharePageProps) {
                                     </>
                                 )}
                             </button>
+
+                            <div style={{ marginTop: '16px', textAlign: 'center' }}>
+                                {resendMessage && (
+                                    <p style={{ color: '#10b981', fontSize: '0.875rem', marginBottom: '8px' }}>
+                                        {resendMessage}
+                                    </p>
+                                )}
+                                <button
+                                    type="button"
+                                    onClick={handleResendOTP}
+                                    disabled={
+                                        isResending ||
+                                        resendCooldown > 0 ||
+                                        state === 'loading'
+                                    }
+                                    style={{
+                                        background: 'transparent',
+                                        border: 'none',
+                                        color:
+                                            resendCooldown > 0 || isResending
+                                                ? '#6B7280'
+                                                : '#40c4ff',
+                                        cursor:
+                                            resendCooldown > 0 || isResending
+                                                ? 'not-allowed'
+                                                : 'pointer',
+                                        fontSize: '0.875rem',
+                                        fontWeight: 600,
+                                        textDecoration: resendCooldown > 0 ? 'none' : 'underline',
+                                        padding: '4px 8px',
+                                    }}
+                                >
+                                    {isResending
+                                        ? 'Sending new OTP...'
+                                        : resendCooldown > 0
+                                            ? `Resend OTP in ${resendCooldown}s`
+                                            : countdown <= 0
+                                                ? 'OTP expired — Resend OTP'
+                                                : "Didn't get the code? Resend OTP"}
+                                </button>
+                            </div>
                         </motion.div>
                     )}
 

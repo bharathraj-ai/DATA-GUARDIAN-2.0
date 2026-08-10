@@ -106,6 +106,10 @@ model VendorAccess {
   totalBreakDuration Int        @default(0)
   draftVersion       Int        @default(1)
   activeSessionId    String?
+  /// Device fingerprint bound to the CURRENT active access session only.
+  /// Cleared when the session ends (break / revoke / complete / expiry).
+  /// Must NOT permanently bind the share link to the creator or first opener.
+  activeDeviceHash   String?
   lastLoginAt        DateTime?
   lastSeenAt         DateTime?
 

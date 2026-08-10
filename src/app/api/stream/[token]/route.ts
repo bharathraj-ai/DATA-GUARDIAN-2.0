@@ -176,32 +176,47 @@ export async function GET(
 
                     const duration = Math.floor((Date.now() - startTime) / 1000);
 
-                    // Check if the link still exists
-                    const linkExists = await prisma.secureLink.findUnique({
-                        where: { id: secureLink.id },
-                        select: { id: true }
-                    });
+                    // Kill-switch / cleanup often deletes SecureLink before this runs.
+                    // For those reasons, never attach linkId (avoids noisy FK races).
+                    // Forensic trail is preserved via metadata.originalLinkId.
+                    const linkMayBeGone =
+                        reason === 'revoked' ||
+                        reason === 'session_invalidated';
 
-                    // We always want to log the session end. If the link was deleted, we log it with linkId: null
+                    let linkId: string | null = null;
+                    if (!linkMayBeGone) {
+                        const linkExists = await prisma.secureLink.findUnique({
+                            where: { id: secureLink.id },
+                            select: { id: true },
+                        });
+                        linkId = linkExists ? secureLink.id : null;
+                    }
+
                     const logData = {
                         action: 'SESSION_ENDED',
-                        linkId: linkExists ? secureLink.id : null,
+                        linkId,
                         reason: `Session ended: ${reason}`,
-                        metadata: JSON.stringify({ 
-                            durationSeconds: duration, 
+                        metadata: JSON.stringify({
+                            durationSeconds: duration,
                             endReason: reason,
-                            originalLinkId: secureLink.id 
+                            originalLinkId: secureLink.id,
                         }),
                     };
 
                     try {
                         await prisma.auditLog.create({ data: logData });
                     } catch (e) {
-                        // Fallback: If it STILL fails due to foreign key (meaning the link was deleted between findUnique and create)
-                        if (e instanceof Error && (e.message.includes('Foreign key constraint') || e.message.includes('Foreign key constraint failed'))) {
-                            logger.warn(`Link was deleted concurrently before session end could be logged. Retrying with linkId=null.`);
-                            logData.linkId = null; // Unlink it
-                            await prisma.auditLog.create({ data: logData });
+                        const { Prisma } = await import('@prisma/client');
+                        const isFk =
+                            e instanceof Prisma.PrismaClientKnownRequestError &&
+                            e.code === 'P2003';
+                        if (isFk && logData.linkId) {
+                            logger.warn(
+                                'SESSION_ENDED: link deleted concurrently; logging with linkId=null',
+                            );
+                            await prisma.auditLog.create({
+                                data: { ...logData, linkId: null },
+                            });
                         } else {
                             logger.error('Failed to log session end:', e);
                         }

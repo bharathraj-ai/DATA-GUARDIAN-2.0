@@ -1,4 +1,11 @@
 import { auth } from '@/lib/auth';
+import { prisma } from '@/lib/prisma';
+import { logger, redactEmail } from '@/lib/logger';
+import {
+    dashboardPathForRole,
+    getOnboardingStep,
+    safeCallbackPath,
+} from '@/lib/onboarding';
 import { redirect } from 'next/navigation';
 import { Suspense } from 'react';
 import RoleSelectClient from './RoleSelectClient';
@@ -7,30 +14,46 @@ interface Props {
     searchParams: Promise<{ callbackUrl?: string }> | { callbackUrl?: string };
 }
 
-function safeCallbackPath(raw: string | null | undefined): string | null {
-    if (!raw || !raw.startsWith('/') || raw.startsWith('//')) return null;
-    return raw;
-}
-
+/**
+ * Role selection is only for authenticated users with onboardingStep=ROLE_SELECTION.
+ * Completed users are redirected to the dashboard immediately (DB is source of truth).
+ */
 export default async function RoleSelectPage({ searchParams }: Props) {
     const resolvedSearchParams = await searchParams;
     const callbackUrl = safeCallbackPath(resolvedSearchParams.callbackUrl);
 
     const session = await auth();
 
-    // If user is not authenticated, redirect them to signin page
-    if (!session?.user) {
+    if (!session?.user?.id) {
         const signInUrl = callbackUrl
             ? `/auth/signin?callbackUrl=${encodeURIComponent(callbackUrl)}`
             : '/auth/signin';
         redirect(signInUrl);
     }
 
-    // If user already selected a role, redirect them immediately on the server!
-    if (session.user.roleSelected) {
-        const role = session.user.role;
-        const target = role === 'OWNER' ? (callbackUrl || '/dashboard/owner') : '/dashboard/vendor';
-        redirect(target);
+    const dbUser = await prisma.user.findUnique({
+        where: { id: session.user.id },
+        select: { email: true, role: true, roleSelected: true },
+    });
+
+    if (!dbUser) {
+        redirect('/auth/signin');
+    }
+
+    const onboardingStep = getOnboardingStep(dbUser.roleSelected);
+
+    // Completed users must never see role-select
+    if (onboardingStep === 'COMPLETE') {
+        // Prefer callback for OWNER only (preserves prior behavior for deep links)
+        const destination =
+            dbUser.role === 'OWNER' && callbackUrl
+                ? callbackUrl
+                : dashboardPathForRole(dbUser.role);
+
+        logger.info(
+            `[Google OAuth] /auth/role-select blocked for completed user email=${redactEmail(dbUser.email)} Redirect: ${destination}`
+        );
+        redirect(destination);
     }
 
     return (

@@ -6,6 +6,7 @@ import "./globals.css";
 import "./anthropic.css";
 import Providers from "@/components/Providers";
 import ClientAppShell from "@/components/ClientAppShell";
+import BootSplash from "@/components/BootSplash";
 
 // next/font: Self-hosts Inter, preloads it, eliminates render-blocking requests
 const inter = Inter({
@@ -64,6 +65,68 @@ export default function RootLayout({
         <link rel="preconnect" href="https://accounts.google.com" crossOrigin="anonymous" />
       </head>
       <body className={inter.className}>
+        <BootSplash />
+        <style dangerouslySetInnerHTML={{ __html: `
+          #dg-boot-loader {
+            position: fixed;
+            inset: 0;
+            z-index: 2147483000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #FFFFFF;
+            transition: opacity 0.2s ease;
+          }
+          #dg-boot-loader.dg-boot-loader-hide {
+            opacity: 0;
+            pointer-events: none;
+            visibility: hidden;
+          }
+          .dg-boot-inner {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 24px;
+          }
+          .dg-boot-logo {
+            animation: dgBootPulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+            border-radius: 16px;
+          }
+          .dg-boot-title {
+            font-size: 16px;
+            font-weight: 700;
+            letter-spacing: -0.01em;
+            color: #111111;
+            font-family: system-ui, -apple-system, sans-serif;
+          }
+          .dg-boot-bar {
+            width: 120px;
+            height: 4px;
+            background: #F1F5F9;
+            border-radius: 4px;
+            overflow: hidden;
+            position: relative;
+          }
+          .dg-boot-bar-fill {
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: 100%;
+            width: 40%;
+            background: #38BDF8;
+            border-radius: 4px;
+            animation: dgBootBar 1.5s ease-in-out infinite;
+          }
+          @keyframes dgBootPulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+          }
+          @keyframes dgBootBar {
+            0% { left: -40%; width: 40%; }
+            50% { left: 20%; width: 60%; }
+            100% { left: 100%; width: 40%; }
+          }
+        `}} />
         <a href="#main-content" className="skip-to-content">Skip to main content</a>
         <Providers>
           <ClientAppShell

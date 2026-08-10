@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { auth } from '@/lib/auth';
 import { NextResponse } from 'next/server';
 import { generateDeviceHash } from '@/lib/fingerprint';
+import { DEVICE_MISMATCH_ERROR } from '@/lib/session-device';
 import { extractClientIP, checkGlobalRateLimit } from '@/lib/rate-limit';
 import crypto from 'crypto';
 import { validateCSRF } from '@/lib/security/csrf';
@@ -227,38 +228,51 @@ export async function authorizeApiRequest(
         }
     }
 
-    const currentDeviceHash = generateDeviceHash(_headers);
-    if (secureLink.deviceHash && secureLink.deviceHash !== currentDeviceHash) {
-        await logSecurityEvent('SESSION_HIJACK', secureLink.id, {
-            ip,
-            expectedHash: secureLink.deviceHash.substring(0, 8),
-            actualHash: currentDeviceHash.substring(0, 8),
-        });
+    // Active-session device binding (NOT link-creator binding).
+    // Owners are exempt. Mismatch denies this request only — never revokes the share link.
+    const authSessionEarly = await auth();
+    const isOwnerEarly = Boolean(
+        authSessionEarly?.user?.id && authSessionEarly.user.id === secureLink.ownerId,
+    );
 
-        if (redis) {
-            const pipeline = redis.pipeline();
-            pipeline.del(`active:${token}`);
-            pipeline.del(`session:${token}:${sessionId}`);
-            await pipeline.exec();
+    if (!isOwnerEarly) {
+        const currentDeviceHash = generateDeviceHash(_headers);
+        const sessionVendor = secureLink.VendorAccess.find((v) => v.activeSessionId === sessionId);
+        let boundDeviceHash: string | null | undefined = sessionVendor?.activeDeviceHash;
+
+        if (!boundDeviceHash && redis) {
+            try {
+                const raw = await redis.get(`session:${token}:${sessionId}`);
+                if (typeof raw === 'string') {
+                    const parsed = JSON.parse(raw) as { deviceFingerprint?: string };
+                    boundDeviceHash = parsed.deviceFingerprint;
+                } else if (raw && typeof raw === 'object' && 'deviceFingerprint' in (raw as object)) {
+                    boundDeviceHash = (raw as { deviceFingerprint?: string }).deviceFingerprint;
+                }
+            } catch {
+                // ignore parse errors — fall through without Redis fingerprint
+            }
         }
 
-        await prisma.secureLink.update({
-            where: { id: secureLink.id },
-            data: {
-                lockedAt: new Date(),
-                isRevoked: true,
-            },
-        });
+        if (boundDeviceHash && boundDeviceHash !== currentDeviceHash) {
+            await logSecurityEvent('DENIED', secureLink.id, {
+                ip,
+                reason: 'Active session device mismatch',
+                type: 'device_mismatch',
+                expectedHash: boundDeviceHash.substring(0, 8),
+                actualHash: currentDeviceHash.substring(0, 8),
+            });
 
-        return {
-            errorResponse: NextResponse.json(
-                { error: 'Forbidden: Environmental Context Changed (Session Hijacked)' },
-                { status: 403 },
-            ),
-        };
+            return {
+                errorResponse: NextResponse.json(
+                    { error: DEVICE_MISMATCH_ERROR },
+                    { status: 403 },
+                ),
+            };
+        }
     }
 
-    const authSession = await auth();
+    const authSession = authSessionEarly;
     const sessionEmail = normalizeEmail(authSession?.user?.email);
 
     const rawCookieEmail = cookieStore.get('vendor_email')?.value;

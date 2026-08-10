@@ -147,6 +147,7 @@ export async function takeBreak(
                     status: 'break',
                     breakStartedAt: now,
                     activeSessionId: null,
+                    activeDeviceHash: null,
                     lastSeenAt: now,
                     // Save work state (only if draftVersion is current or newer)
                     ...(payload.draftVersion >= vendorAccess.draftVersion ? {

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { getLinkStatus, revokeAccess, RevokeAccessResult } from '@/actions/revoke-access';
 
 interface RevokePageProps {
@@ -17,6 +18,7 @@ interface LinkStatus {
 }
 
 export default function RevokePage({ params }: RevokePageProps) {
+    const router = useRouter();
     const [ownerToken, setOwnerToken] = useState<string>('');
     const [status, setStatus] = useState<LinkStatus | null>(null);
     const [error, setError] = useState<string | null>(null);
@@ -82,14 +84,10 @@ export default function RevokePage({ params }: RevokePageProps) {
         setIsRevoking(false);
 
         if (result.success) {
-            const statusResult = await getLinkStatus(ownerToken);
-            if (statusResult.success && statusResult.status) {
-                setStatus({
-                    ...statusResult.status,
-                    expiresAt: new Date(statusResult.status.expiresAt),
-                    createdAt: new Date(statusResult.status.createdAt),
-                });
-            }
+            // Brief success flash, then leave the revoke page (link may already be purged)
+            setTimeout(() => {
+                router.replace('/dashboard/owner');
+            }, 1200);
         }
     }
 

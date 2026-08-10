@@ -10,33 +10,38 @@ function SignInContent() {
     const router = useRouter();
     const { data: session, status: sessionStatus } = useSession();
     const searchParams = useSearchParams();
-    // Ensure callbackUrl is a valid relative path to prevent OAuth errors
+    // Ensure callbackUrl is a valid relative path to prevent OAuth errors.
+    // Default to /auth/continue so the server decides role-select vs dashboard.
     const rawCallbackUrl = searchParams.get('callbackUrl');
-    const callbackUrl = rawCallbackUrl && rawCallbackUrl.startsWith('/')
+    const callbackUrl = rawCallbackUrl && rawCallbackUrl.startsWith('/') && !rawCallbackUrl.startsWith('//')
         ? rawCallbackUrl
-        : '/auth/role-select';
+        : '/auth/continue';
     const error = searchParams.get('error');
 
-    // If user is already signed in, redirect them away (replace avoids history loops)
+    // Only redirect once session is explicitly authenticated — never assume
+    // incomplete onboarding while status === 'loading'.
     useEffect(() => {
-        if (sessionStatus !== 'authenticated') return;
+        if (sessionStatus === 'loading') return;
+        if (sessionStatus !== 'authenticated' || !session?.user) return;
 
-        const userRole = (session?.user as any)?.role;
-        const roleSelected = (session?.user as any)?.roleSelected;
+        const onboardingStep = session.user.onboardingStep
+            ?? (session.user.roleSelected ? 'COMPLETE' : 'ROLE_SELECTION');
+        const userRole = session.user.role;
 
-        if (!roleSelected) {
-            const roleSelectUrl = rawCallbackUrl && rawCallbackUrl.startsWith('/')
+        if (onboardingStep === 'ROLE_SELECTION') {
+            const roleSelectUrl = rawCallbackUrl && rawCallbackUrl.startsWith('/') && !rawCallbackUrl.startsWith('//')
                 ? `/auth/role-select?callbackUrl=${encodeURIComponent(rawCallbackUrl)}`
                 : '/auth/role-select';
             router.replace(roleSelectUrl);
-        } else if (rawCallbackUrl && rawCallbackUrl.startsWith('/')) {
+        } else if (rawCallbackUrl && rawCallbackUrl.startsWith('/') && !rawCallbackUrl.startsWith('//')) {
             router.replace(rawCallbackUrl);
         } else {
             router.replace(userRole === 'VENDOR' ? '/dashboard/vendor' : '/dashboard');
         }
     }, [sessionStatus, session, router, rawCallbackUrl]);
 
-    if (sessionStatus === 'authenticated') {
+    // Explicit loading / authenticated states — do not show sign-in CTA while resolving
+    if (sessionStatus === 'loading' || sessionStatus === 'authenticated') {
         return (
             <main className="app-page">
                 <section className="app-section">
@@ -44,7 +49,9 @@ function SignInContent() {
                         <div className="app-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
                             <div style={{ textAlign: 'center' }}>
                                 <div className="button-spinner" style={{ width: '48px', height: '48px', margin: '0 auto 16px' }}></div>
-                                <p style={{ color: 'var(--color-text-secondary)' }}>Completing sign in...</p>
+                                <p style={{ color: 'var(--color-text-secondary)' }}>
+                                    {sessionStatus === 'loading' ? 'Loading...' : 'Completing sign in...'}
+                                </p>
                             </div>
                         </div>
                     </div>

@@ -7,10 +7,12 @@ import {
   normalizeRole,
   type AppRole,
 } from '@/lib/security/roles';
+import { logger, redactEmail } from '@/lib/logger';
 
 /**
  * First-time onboarding only.
  * Any new user can pick OWNER or VENDOR — this choice is permanent.
+ * Uses an atomic updateMany guard so concurrent requests cannot double-set.
  */
 export async function setUserRole(role: AppRole) {
   const session = await auth();
@@ -26,23 +28,21 @@ export async function setUserRole(role: AppRole) {
     return { success: false, error: 'Invalid role selection' };
   }
 
-  // Check if role was already selected (one-time only)
-  const user = await prisma.user.findUnique({
-    where: { id: session.user.id },
-    select: { roleSelected: true },
-  });
-
-  if (user?.roleSelected) {
-    return { success: false, error: 'Role has already been selected' };
-  }
-
-  await prisma.user.update({
-    where: { id: session.user.id },
+  // Atomic: only update if onboarding is still incomplete
+  const updated = await prisma.user.updateMany({
+    where: {
+      id: session.user.id,
+      roleSelected: false,
+    },
     data: {
       role: normalized,
       roleSelected: true,
     },
   });
+
+  if (updated.count === 0) {
+    return { success: false, error: 'Role has already been selected' };
+  }
 
   await prisma.auditLog.create({
     data: {
@@ -54,6 +54,10 @@ export async function setUserRole(role: AppRole) {
       }),
     },
   });
+
+  logger.info(
+    `[Google OAuth] Role selected email=${redactEmail(session.user.email)} role=${normalized} onboardingStep=COMPLETE`
+  );
 
   return { success: true, role: normalized };
 }

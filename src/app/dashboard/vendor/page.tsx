@@ -13,7 +13,10 @@ export default async function VendorDashboardPage() {
         redirect('/auth/signin?callbackUrl=/dashboard/vendor');
     }
 
-    if (!session.user.roleSelected) {
+    const onboardingComplete =
+        session.user.onboardingStep === 'COMPLETE' ||
+        (session.user.onboardingStep == null && session.user.roleSelected);
+    if (!onboardingComplete) {
         redirect('/auth/role-select?callbackUrl=/dashboard/vendor');
     }
 

@@ -212,6 +212,20 @@ export async function authorizeSecureLink(
     return { success: false, status: 401, error: 'Unauthorized: OTP verification required' };
   }
 
+  // Active-session device binding (skip for owners). Denies reuse of this
+  // session from another browser — does NOT permanently bind the share link.
+  if (!isOwner) {
+    const { headers } = await import('next/headers');
+    const { generateDeviceHash } = await import('@/lib/fingerprint');
+    const { DEVICE_MISMATCH_ERROR, isSessionDeviceMismatch } = await import('@/lib/session-device');
+    const _headers = await headers();
+    const currentDeviceHash = generateDeviceHash(_headers);
+    const sessionVendor = secureLink.VendorAccess.find((v) => v.activeSessionId === sessionId);
+    if (isSessionDeviceMismatch(sessionVendor?.activeDeviceHash, currentDeviceHash)) {
+      return { success: false, status: 403, error: DEVICE_MISMATCH_ERROR };
+    }
+  }
+
   if (fileId) {
     const fileBelongsToLink = secureLink.UserFile.some((file) => file.id === fileId);
     if (!fileBelongsToLink) {

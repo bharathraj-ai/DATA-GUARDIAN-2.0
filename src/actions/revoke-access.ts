@@ -106,6 +106,15 @@ export async function revokeAccess(
                     data: { isRevoked: true },
                 });
 
+                // Clear active session device bindings (binding must not outlive kill switch)
+                await tx.vendorAccess.updateMany({
+                    where: { secureLinkId: secureLink.id },
+                    data: {
+                        activeSessionId: null,
+                        activeDeviceHash: null,
+                    },
+                });
+
                 // Create audit log for revocation
                 await tx.auditLog.create({
                     data: {

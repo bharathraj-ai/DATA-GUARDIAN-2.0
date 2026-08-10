@@ -296,7 +296,12 @@ export async function completeWork(token: string): Promise<CompleteWorkResult> {
                     secureLinkId: secureLink.id,
                     email: { mode: 'insensitive', equals: lowerEmail }
                 },
-                data: { isRevoked: true }
+                data: {
+                    isRevoked: true,
+                    activeSessionId: null,
+                    activeDeviceHash: null,
+                    status: 'completed',
+                }
             });
 
             // Revoke LinkAccess

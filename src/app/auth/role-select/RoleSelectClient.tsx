@@ -34,9 +34,17 @@ export default function RoleSelectClient({ callbackUrl, session }: RoleSelectCli
             const result = await setUserRole(role);
 
             if (result.success) {
-                // Push role into JWT without a full DB session round-trip
-                await update({ role, roleSelected: true });
+                // Push role + completed onboarding into JWT, then leave role-select
+                await update({
+                    role,
+                    roleSelected: true,
+                    onboardingStep: 'COMPLETE',
+                });
                 router.replace(destinationForRole(role));
+            } else if (result.error === 'Role has already been selected') {
+                // Concurrent / repeat selection — go to dashboard, do not stay here
+                await update({ roleSelected: true, onboardingStep: 'COMPLETE' });
+                router.replace(destinationForRole(session?.user?.role ?? role));
             } else {
                 setError(result.error || 'Failed to set role');
                 setSelected(null);

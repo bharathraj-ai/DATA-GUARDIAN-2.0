@@ -15,7 +15,11 @@ export default async function OwnerDashboardPage() {
         redirect('/auth/signin?callbackUrl=/dashboard/owner');
     }
 
-    if (!session.user.roleSelected) {
+    // Prefer onboardingStep; fall back to roleSelected for older JWTs
+    const onboardingComplete =
+        session.user.onboardingStep === 'COMPLETE' ||
+        (session.user.onboardingStep == null && session.user.roleSelected);
+    if (!onboardingComplete) {
         redirect('/auth/role-select?callbackUrl=/dashboard/owner');
     }
 

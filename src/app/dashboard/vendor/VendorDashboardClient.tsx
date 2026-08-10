@@ -3,7 +3,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { getReceivedLinks, DashboardLink } from '@/actions/dashboard';
-import { Mail, Inbox, Clock, Eye, Ban, Coffee, Play, User, Calendar, Paperclip, FileText } from 'lucide-react';
+import { sendVendorOTP } from '@/actions/send-vendor-otp';
+import { Mail, Inbox, Clock, Eye, Ban, Coffee, Play, User, Calendar, Paperclip, FileText, RefreshCw } from 'lucide-react';
 
 interface VendorDashboardClientProps {
     initialLinks: DashboardLink[];
@@ -17,6 +18,9 @@ export default function VendorDashboardClient({
     const [links, setLinks] = useState<DashboardLink[]>(initialLinks);
     const [isLoading] = useState(false);
     const [filter, setFilter] = useState<'all' | 'active' | 'expired' | 'revoked' | 'used' | 'break'>('all');
+    const [resendingToken, setResendingToken] = useState<string | null>(null);
+    const [resendFeedback, setResendFeedback] = useState<Record<string, { type: 'ok' | 'err'; text: string }>>({});
+    const [resendCooldown, setResendCooldown] = useState<Record<string, number>>({});
 
     const fetchLinks = useCallback(async () => {
         try {
@@ -48,6 +52,57 @@ export default function VendorDashboardClient({
             document.removeEventListener('visibilitychange', onVisibility);
         };
     }, [fetchLinks]);
+
+    useEffect(() => {
+        const hasActive = Object.values(resendCooldown).some((s) => s > 0);
+        if (!hasActive) return;
+        const timer = setInterval(() => {
+            setResendCooldown((prev) => {
+                const next: Record<string, number> = {};
+                for (const [token, sec] of Object.entries(prev)) {
+                    if (sec > 1) next[token] = sec - 1;
+                }
+                return next;
+            });
+        }, 1000);
+        return () => clearInterval(timer);
+    }, [resendCooldown]);
+
+    const handleResendOTP = async (token: string) => {
+        if (resendingToken || (resendCooldown[token] ?? 0) > 0) return;
+        setResendingToken(token);
+        setResendFeedback((prev) => {
+            const next = { ...prev };
+            delete next[token];
+            return next;
+        });
+
+        try {
+            const result = await sendVendorOTP({ token, email: userEmail });
+            if (result.success) {
+                setResendFeedback((prev) => ({
+                    ...prev,
+                    [token]: { type: 'ok', text: 'New OTP sent to your email.' },
+                }));
+                setResendCooldown((prev) => ({ ...prev, [token]: 60 }));
+            } else {
+                setResendFeedback((prev) => ({
+                    ...prev,
+                    [token]: { type: 'err', text: result.error || 'Failed to resend OTP' },
+                }));
+                if (result.retryAfterSeconds) {
+                    setResendCooldown((prev) => ({ ...prev, [token]: result.retryAfterSeconds! }));
+                }
+            }
+        } catch {
+            setResendFeedback((prev) => ({
+                ...prev,
+                [token]: { type: 'err', text: 'Connection error. Please try again.' },
+            }));
+        } finally {
+            setResendingToken(null);
+        }
+    };
 
     const formatDate = (date: Date) => {
         return new Date(date).toLocaleDateString('en-US', {
@@ -276,7 +331,7 @@ export default function VendorDashboardClient({
 
                                                 {/* Actions Footer */}
                                                 <div className="premium-card-footer" style={{ borderTop: 'none', paddingTop: 0 }}>
-                                                    <div className="premium-actions-left">
+                                                    <div className="premium-actions-left" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
                                                         {link.status === 'active' ? (
                                                             <Link
                                                                 href={`/share/${link.token}`}
@@ -312,7 +367,48 @@ export default function VendorDashboardClient({
                                                                 This link is no longer accessible
                                                             </span>
                                                         )}
+
+                                                        {(link.status === 'active' || link.status === 'break') && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleResendOTP(link.token)}
+                                                                disabled={
+                                                                    resendingToken === link.token ||
+                                                                    (resendCooldown[link.token] ?? 0) > 0
+                                                                }
+                                                                className="premium-btn-action"
+                                                                style={{
+                                                                    cursor:
+                                                                        resendingToken === link.token ||
+                                                                        (resendCooldown[link.token] ?? 0) > 0
+                                                                            ? 'not-allowed'
+                                                                            : 'pointer',
+                                                                    opacity:
+                                                                        resendingToken === link.token ||
+                                                                        (resendCooldown[link.token] ?? 0) > 0
+                                                                            ? 0.7
+                                                                            : 1,
+                                                                }}
+                                                            >
+                                                                <RefreshCw size={14} />
+                                                                {resendingToken === link.token
+                                                                    ? 'Sending...'
+                                                                    : (resendCooldown[link.token] ?? 0) > 0
+                                                                        ? `Resend in ${resendCooldown[link.token]}s`
+                                                                        : 'Resend OTP'}
+                                                            </button>
+                                                        )}
                                                     </div>
+                                                    {resendFeedback[link.token] && (
+                                                        <p style={{
+                                                            margin: '8px 0 0',
+                                                            fontSize: '0.8rem',
+                                                            color: resendFeedback[link.token].type === 'ok' ? '#059669' : '#DC2626',
+                                                            width: '100%',
+                                                        }}>
+                                                            {resendFeedback[link.token].text}
+                                                        </p>
+                                                    )}
                                                 </div>
                                             </div>
                                         ))}

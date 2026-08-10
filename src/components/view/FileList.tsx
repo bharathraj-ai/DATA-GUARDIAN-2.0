@@ -1,15 +1,49 @@
 'use client';
 
-import React, { useState, useCallback, memo } from 'react';
-import dynamic from 'next/dynamic';
+import React, { useState, useCallback, memo, useEffect, useMemo } from 'react';
 import { useCollaborationStore } from '@/store/useCollaborationStore';
 import { PermissionGuard } from '@/components/view/PermissionGuard';
 import { getFilePreview, FilePreviewResult } from '@/actions/get-file-preview';
-import { getRawFileForEdit } from '@/actions/get-raw-file-for-edit';
 import type { FileMetadata } from '@/actions/get-user';
 
 import { useRouter } from 'next/navigation';
 import { Lock, Edit3, Check, FileText, Loader2, Download, AlertTriangle } from 'lucide-react';
+
+/** Chromium often blanks data:application/pdf iframes — prefer a blob: URL. */
+function PdfPreviewFrame({ dataUri }: { dataUri: string }) {
+    const blobUrl = useMemo(() => {
+        try {
+            const match = /^data:([^;,]+)?(;base64)?,([\s\S]*)$/.exec(dataUri);
+            if (!match) return dataUri;
+            const mime = match[1] || 'application/pdf';
+            const isBase64 = Boolean(match[2]);
+            const payload = match[3] || '';
+            if (isBase64) {
+                const binary = atob(payload);
+                const bytes = new Uint8Array(binary.length);
+                for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+                return URL.createObjectURL(new Blob([bytes], { type: mime }));
+            }
+            return URL.createObjectURL(new Blob([decodeURIComponent(payload)], { type: mime }));
+        } catch {
+            return dataUri;
+        }
+    }, [dataUri]);
+
+    useEffect(() => {
+        if (!blobUrl.startsWith('blob:')) return;
+        return () => URL.revokeObjectURL(blobUrl);
+    }, [blobUrl]);
+
+    return (
+        <iframe
+            src={`${blobUrl}#toolbar=0`}
+            style={{ width: '100%', height: '600px', border: 'none', background: '#111' }}
+            title="PDF Preview"
+        />
+    );
+}
+
 interface FileListProps {
     token: string;
     files: FileMetadata[];
@@ -233,8 +267,14 @@ export const FileList = memo(function FileList({ token, files, isOwner }: FileLi
                             {previewData.type === 'image' && (
                                 <img src={previewData.content as string} alt="Preview" style={{ maxWidth: '100%', objectFit: 'contain' }} />
                             )}
-                            {previewData.type === 'pdf' && (
-                                <iframe src={`${previewData.content}#toolbar=0`} style={{ width: '100%', height: '600px', border: 'none' }} title="PDF Preview" />
+                            {previewData.type === 'pdf' && typeof previewData.content === 'string' && (
+                                <PdfPreviewFrame dataUri={previewData.content} />
+                            )}
+                            {previewData.type !== 'image' &&
+                             previewData.type !== 'pdf' &&
+                             previewData.type !== 'text' &&
+                             previewData.type !== 'spreadsheet' && (
+                                <p style={{ color: '#9CA3AF' }}>No preview available for this file type.</p>
                             )}
                             {previewData.type === 'text' && (
                                 <pre style={{ color: '#ddd', fontSize: '14px', whiteSpace: 'pre-wrap', width: '100%' }}>{previewData.content as string}</pre>

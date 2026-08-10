@@ -5,7 +5,8 @@ import { verifyOTPHash, encryptData } from '@/lib/crypto';
 import crypto from 'crypto';
 import { otpVerifySchema, OTPVerifyInput } from '@/lib/validations';
 import { cookies, headers } from 'next/headers';
-import { generateDeviceHash } from '@/lib/fingerprint';
+import { generateDeviceHash, isActiveSessionFresh } from '@/lib/fingerprint';
+import { DEVICE_MISMATCH_ERROR, isSessionDeviceMismatch } from '@/lib/session-device';
 import { notifyLinkAccessed } from '@/lib/notifications';
 import { checkOTPRateLimit, extractClientIP, formatRateLimitError } from '@/lib/rate-limit';
 import { auth } from '@/lib/auth';
@@ -30,7 +31,7 @@ export type VerifyOTPResult = {
  * ZERO TRUST Security Features:
  * - Email Binding (allowedVendorEmail must match authenticated user)
  * - 3-ATTEMPTS OTP (wrong OTP 3 times = permanent link revocation)
- * - Device Binding (User-Agent/Platform hash)
+ * - Device Binding (bound to ACTIVE access session after OTP — not link creator)
  * - Server-side OTP validation (Zero Trust)
  * - Redis session with TTL (auto-expire)
  * - Kill switch check (Revocation)
@@ -107,6 +108,7 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
                             isRevoked: true,
                             status: true,
                             activeSessionId: true,
+                            activeDeviceHash: true,
                             lastSeenAt: true,
                             loginCount: true,
                             failedAttempts: true,
@@ -174,9 +176,6 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
 
         const isLocked = vendorAccess ? vendorAccess.lockedAt : secureLink.lockedAt;
         const failedAttempts = vendorAccess ? vendorAccess.failedAttempts : secureLink.failedAttempts;
-        const isUsed = vendorAccess ? vendorAccess.isUsed : secureLink.isUsed;
-        const deviceHash = vendorAccess ? vendorAccess.deviceHash : secureLink.deviceHash;
-        const otpVerifiedAt = vendorAccess ? vendorAccess.otpVerifiedAt : secureLink.otpVerifiedAt;
         const otpFirstAttemptAt = vendorAccess ? vendorAccess.otpFirstAttemptAt : secureLink.otpFirstAttemptAt;
 
         // 1. SECURITY: Check if link is permanently locked
@@ -254,13 +253,34 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
             }
 
             if (vendor.status === 'active' && vendor.activeSessionId) {
-                const fiveMinsAgo = new Date(Date.now() - 5 * 60000);
-                if (vendor.lastSeenAt && vendor.lastSeenAt > fiveMinsAgo) {
-                    return {
-                        success: false,
-                        error: 'Another active session is currently running in a different tab or device.',
-                        errorType: 'DENIED',
-                    };
+                if (isActiveSessionFresh(vendor.lastSeenAt)) {
+                    // Live session on a DIFFERENT device/browser → deny
+                    if (isSessionDeviceMismatch(vendor.activeDeviceHash, currentDeviceHash)) {
+                        await prisma.auditLog.create({
+                            data: {
+                                action: 'DENIED',
+                                linkId: secureLink.id,
+                                reason: 'Active session device mismatch',
+                                metadata: JSON.stringify({ type: 'device_mismatch', scope: 'active_session' }),
+                            },
+                        });
+
+                        if (secureLink.notificationEmail) {
+                            import('@/lib/notifications').then(({ notifyDeviceMismatch }) => {
+                                notifyDeviceMismatch(secureLink.notificationEmail!, secureLink.id)
+                                    .catch(() => { });
+                            });
+                        }
+
+                        return {
+                            success: false,
+                            error: DEVICE_MISMATCH_ERROR,
+                            errorType: 'DENIED',
+                        };
+                    }
+
+                    // Same device (or unbound session): allow OTP to replace/refresh the
+                    // active session so a closed tab / lost cookie does not soft-lock the vendor.
                 }
             }
 
@@ -333,35 +353,11 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
         // OTP verification window removed to allow infinite reuse as requested by user
         const now = new Date();
 
-        // 5. SECURITY: Check device binding
-        // If deviceHash is set (link was previously used), ensuring it's the same device
-        if (isUsed && deviceHash && deviceHash !== currentDeviceHash) {
-            // Log security event
-            await prisma.auditLog.create({
-                data: {
-                    action: 'DENIED',
-                    linkId: secureLink.id,
-                    reason: 'Device mismatch (Session hijacking prevention)',
-                    metadata: JSON.stringify({ type: 'device_mismatch' }),
-                }
-            });
+        // NOTE: Permanent link-level device binding removed.
+        // Device binding is enforced against the ACTIVE access session only
+        // (see VendorAccess.activeDeviceHash / Redis session fingerprint above).
 
-            // ANTI-PHISHING: Alert owner of suspicious access (fire-and-forget)
-            if (secureLink.notificationEmail) {
-                import('@/lib/notifications').then(({ notifyDeviceMismatch }) => {
-                    notifyDeviceMismatch(secureLink.notificationEmail!, secureLink.id)
-                        .catch(() => { }); // Silent fail
-                });
-            }
-
-            return {
-                success: false,
-                error: 'Access denied: Link is bound to a different device/browser.',
-                errorType: 'DENIED',
-            };
-        }
-
-        // 6. Check link expiry
+        // 5. Check link expiry
         if (secureLink.expiresAt < now) {
             return {
                 success: false,
@@ -512,26 +508,27 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
         const { mintShareSession } = await import('@/lib/share-session');
         const minted = mintShareSession(token, ttlSeconds);
         const sessionId = minted.sessionId;
-        await tryCreateSession(token, sessionId, ttlSeconds);
+        // Bind CURRENT recipient device to this active access session (not the link creator)
+        await tryCreateSession(token, sessionId, ttlSeconds, currentDeviceHash);
 
-        // Success: Mark link as used, bind device, mark OTP verified, and create audit log
+        // Success: Mark link as used, bind device to ACTIVE session, create audit log
         // PERFORMANCE: otpFirstAttemptAt tracking merged into this transaction
         await prisma.$transaction(async (tx) => {
-            // Only update deviceHash if not already set (Bind on first use)
-            const updateData: any = {
+            // Do NOT permanently bind SecureLink/LinkAccess.deviceHash to a device.
+            // Share links stay portable; only the active session is device-bound.
+            const updateData: {
+                isUsed: boolean;
+                otpVerifiedAt: Date;
+            } = {
                 isUsed: true,
-                otpVerifiedAt: now  // ANTI-PHISHING: Mark OTP as single-use
+                otpVerifiedAt: now,
             };
-            if (!deviceHash) {
-                updateData.deviceHash = currentDeviceHash;
-            }
 
             if (vendorAccess) {
                 await tx.linkAccess.update({
                     where: { id: vendorAccess.id },
                     data: {
                         ...updateData,
-                        // PERFORMANCE: merged otpFirstAttemptAt into this write
                         ...(needsFirstAttemptTracking ? { otpFirstAttemptAt: now } : {}),
                     },
                 });
@@ -540,7 +537,6 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
                     where: { id: secureLink.id },
                     data: {
                         ...updateData,
-                        // PERFORMANCE: merged otpFirstAttemptAt into this write
                         ...(needsFirstAttemptTracking ? { otpFirstAttemptAt: now } : {}),
                     },
                 });
@@ -560,9 +556,10 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
                         breakStartedAt: null,
                         totalBreakDuration,
                         activeSessionId: sessionId,
+                        activeDeviceHash: currentDeviceHash,
                         lastLoginAt: now,
-                        lastSeenAt: now
-                    }
+                        lastSeenAt: now,
+                    },
                 });
             }
 
@@ -572,7 +569,8 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
                     linkId: secureLink.id,
                     metadata: JSON.stringify({
                         ttlSeconds,
-                        purpose: secureLink.purpose || undefined  // V2.1: Log purpose
+                        purpose: secureLink.purpose || undefined,
+                        deviceBoundToSession: true,
                     }),
                 },
             });
@@ -587,6 +585,7 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
                         isBreakResume: vendor?.status === 'break',
                         breaksUsed: vendor?.breaksUsed ?? 0,
                         allowedBreaks: vendor?.allowedBreaks ?? 0,
+                        sessionDeviceBound: true,
                     }),
                 },
             });

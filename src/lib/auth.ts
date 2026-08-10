@@ -1,9 +1,10 @@
 import { cache } from 'react';
 import { NextAuthOptions, getServerSession } from 'next-auth';
 import GoogleProvider from 'next-auth/providers/google';
-import { PrismaAdapter } from '@next-auth/prisma-adapter';
 import { prisma } from '@/lib/prisma';
+import { createRaceSafePrismaAdapter } from '@/lib/auth-adapter';
 import { normalizeRole } from '@/lib/security/roles';
+import { getOnboardingStep } from '@/lib/onboarding';
 import { logger, redactEmail } from '@/lib/logger';
 
 /**
@@ -12,12 +13,23 @@ import { logger, redactEmail } from '@/lib/logger';
  * Session strategy is JWT so /api/auth/session does not hit Postgres on every
  * page navigation (database sessions were adding 2–4s latency via Neon).
  * User/Account records still live in Prisma via the adapter.
+ *
+ * Post-login routing: OAuth always lands on /auth/continue, which reads DB
+ * onboarding state and redirects to /dashboard (COMPLETE) or /auth/role-select
+ * (ROLE_SELECTION). Completed users never visit role-select.
  */
 const useSecureCookies = process.env.NEXTAUTH_URL?.startsWith('https://') ?? false;
 const cookiePrefix = useSecureCookies ? '__Secure-' : '';
 
+function postLoginContinueUrl(canonicalBase: string, callbackPath?: string | null): string {
+    if (callbackPath && callbackPath.startsWith('/') && !callbackPath.startsWith('//')) {
+        return `${canonicalBase}/auth/continue?callbackUrl=${encodeURIComponent(callbackPath)}`;
+    }
+    return `${canonicalBase}/auth/continue`;
+}
+
 export const authOptions: NextAuthOptions = {
-    adapter: PrismaAdapter(prisma),
+    adapter: createRaceSafePrismaAdapter(prisma),
     providers: [
         GoogleProvider({
             clientId: process.env.GOOGLE_CLIENT_ID!,
@@ -96,57 +108,91 @@ export const authOptions: NextAuthOptions = {
     },
     callbacks: {
         async signIn({ user, account }) {
-            logger.info(`Sign-in: ${redactEmail(user.email)} via ${account?.provider}`);
+            const roleSelected = Boolean(
+                (user as { roleSelected?: boolean }).roleSelected
+            );
+            const onboardingStep = getOnboardingStep(roleSelected);
+            logger.info(
+                `[Google OAuth] Sign-in email=${redactEmail(user.email)} provider=${account?.provider} onboardingStep=${onboardingStep}`
+            );
             return true;
         },
 
         async redirect({ url, baseUrl }) {
             const canonicalBase = process.env.NEXTAUTH_URL || baseUrl;
 
-            // Normalize to an absolute URL on our origin when possible
             let absolute = url;
             if (url.startsWith('/')) {
                 absolute = `${canonicalBase}${url}`;
             }
 
-            // Keep users on auth flows they already requested
-            if (absolute.includes('/auth/role-select') || absolute.includes('/auth/signin')) {
-                return absolute.startsWith('http') ? absolute : `${canonicalBase}${absolute}`;
-            }
-
-            // Same-origin destinations (e.g. /create-link) go through role-select first
             try {
                 const target = new URL(absolute, canonicalBase);
                 const base = new URL(canonicalBase);
-                if (target.origin === base.origin) {
-                    const path = `${target.pathname}${target.search}` || '/';
-                    if (path !== '/' && !path.startsWith('/auth/')) {
-                        return `${canonicalBase}/auth/role-select?callbackUrl=${encodeURIComponent(path)}`;
-                    }
-                    if (path.startsWith('/auth/')) {
-                        return `${canonicalBase}${path}`;
-                    }
+
+                // Reject cross-origin redirects (open-redirect protection)
+                if (target.origin !== base.origin) {
+                    return postLoginContinueUrl(canonicalBase);
+                }
+
+                const path = `${target.pathname}${target.search}` || '/';
+
+                // Already on the post-login router or explicit auth pages — keep
+                if (
+                    target.pathname === '/auth/continue' ||
+                    target.pathname === '/auth/signin' ||
+                    target.pathname === '/auth/error'
+                ) {
+                    return `${canonicalBase}${path}`;
+                }
+
+                // Never send OAuth straight to role-select; continue decides
+                if (target.pathname === '/auth/role-select') {
+                    const nested = target.searchParams.get('callbackUrl');
+                    return postLoginContinueUrl(canonicalBase, nested);
+                }
+
+                // Same-origin app destinations → continue (then dashboard or role-select)
+                if (path !== '/' && !path.startsWith('/auth/')) {
+                    return postLoginContinueUrl(canonicalBase, path);
+                }
+
+                if (path.startsWith('/auth/')) {
+                    return `${canonicalBase}${path}`;
                 }
             } catch {
                 // fall through
             }
 
-            return `${canonicalBase}/auth/role-select`;
+            return postLoginContinueUrl(canonicalBase);
         },
 
         async jwt({ token, user, trigger, session }) {
-            // Initial sign-in: copy identity from adapter user
+            // Initial sign-in: copy identity from adapter user (DB defaults included)
             if (user) {
+                const roleSelected =
+                    (user as { roleSelected?: boolean }).roleSelected ?? false;
                 token.id = user.id;
                 token.role = normalizeRole((user as { role?: string }).role);
-                token.roleSelected = (user as { roleSelected?: boolean }).roleSelected ?? false;
+                token.roleSelected = roleSelected;
+                token.onboardingStep = getOnboardingStep(roleSelected);
+                logger.info(
+                    `[Google OAuth] JWT issued userId=${user.id} onboardingStep=${token.onboardingStep}`
+                );
             }
 
             // Client called update() after role selection — prefer payload, else DB
             if (trigger === 'update') {
-                if (session?.role !== undefined) {
-                    token.role = normalizeRole(session.role as string);
-                    token.roleSelected = Boolean(session.roleSelected ?? true);
+                if (session?.role !== undefined || session?.roleSelected !== undefined) {
+                    if (session.role !== undefined) {
+                        token.role = normalizeRole(session.role as string);
+                    }
+                    if (session.roleSelected !== undefined) {
+                        token.roleSelected = Boolean(session.roleSelected);
+                    } else if (session.role !== undefined) {
+                        token.roleSelected = true;
+                    }
+                    token.onboardingStep = getOnboardingStep(Boolean(token.roleSelected));
                 } else if (token.id) {
                     const dbUser = await prisma.user.findUnique({
                         where: { id: token.id as string },
@@ -155,8 +201,13 @@ export const authOptions: NextAuthOptions = {
                     if (dbUser) {
                         token.role = normalizeRole(dbUser.role);
                         token.roleSelected = dbUser.roleSelected ?? false;
+                        token.onboardingStep = getOnboardingStep(dbUser.roleSelected);
                     }
                 }
+            }
+
+            if (!token.onboardingStep) {
+                token.onboardingStep = getOnboardingStep(Boolean(token.roleSelected));
             }
 
             return token;
@@ -167,6 +218,9 @@ export const authOptions: NextAuthOptions = {
                 session.user.id = (token.id as string) ?? '';
                 session.user.role = normalizeRole(token.role as string | undefined);
                 session.user.roleSelected = Boolean(token.roleSelected);
+                session.user.onboardingStep = getOnboardingStep(
+                    Boolean(token.roleSelected)
+                );
             }
             return session;
         },
@@ -190,7 +244,9 @@ export const authOptions: NextAuthOptions = {
     },
     events: {
         async createUser({ user }) {
-            logger.info(`New user created: ${redactEmail(user.email)} (default: VENDOR)`);
+            logger.info(
+                `[Google OAuth] New user created email=${redactEmail(user.email)} Existing user: false onboardingStep=ROLE_SELECTION`
+            );
         },
     },
 };

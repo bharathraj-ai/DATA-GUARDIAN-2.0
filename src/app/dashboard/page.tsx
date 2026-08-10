@@ -1,23 +1,31 @@
 import { redirect } from 'next/navigation';
 import { auth } from '@/lib/auth';
+import { prisma } from '@/lib/prisma';
+import { dashboardPathForRole, getOnboardingStep } from '@/lib/onboarding';
 
 /**
  * Server-side role redirect — avoids client session waterfall before navigating.
+ * Onboarding incomplete → role-select; complete → owner/vendor dashboard.
  */
 export default async function DashboardPage() {
     const session = await auth();
 
-    if (!session?.user) {
+    if (!session?.user?.id) {
         redirect('/auth/signin?callbackUrl=/dashboard');
     }
 
-    if (!session.user.roleSelected) {
+    const dbUser = await prisma.user.findUnique({
+        where: { id: session.user.id },
+        select: { role: true, roleSelected: true },
+    });
+
+    if (!dbUser) {
+        redirect('/auth/signin?callbackUrl=/dashboard');
+    }
+
+    if (getOnboardingStep(dbUser.roleSelected) === 'ROLE_SELECTION') {
         redirect('/auth/role-select?callbackUrl=/dashboard');
     }
 
-    if (session.user.role === 'VENDOR') {
-        redirect('/dashboard/vendor');
-    }
-
-    redirect('/dashboard/owner');
+    redirect(dashboardPathForRole(dbUser.role));
 }
