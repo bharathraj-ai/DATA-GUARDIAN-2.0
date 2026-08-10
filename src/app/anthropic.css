@@ -982,16 +982,18 @@ body, html {
   padding: 80px 0 100px !important;
 }
 .hiw-cta-box {
-  display: grid !important;
-  grid-template-columns: 1fr 400px !important;
-  gap: 60px !important;
+  display: flex !important;
+  flex-direction: column !important;
   align-items: center !important;
+  text-align: center !important;
   background: linear-gradient(135deg, #EFF6FF 0%, #F5F3FF 50%, #ECFEFF 100%) !important;
   border: 1px solid rgba(56,189,248,0.2) !important;
   border-radius: 28px !important;
   padding: 64px 56px !important;
   position: relative !important;
   overflow: hidden !important;
+  max-width: 800px !important;
+  margin: 0 auto !important;
 }
 .hiw-cta-h2 {
   font-size: clamp(26px, 3vw, 38px) !important;
@@ -1011,6 +1013,7 @@ body, html {
   gap: 14px !important;
   flex-wrap: wrap !important;
   margin-bottom: 28px !important;
+  justify-content: center !important;
 }
 .hiw-cta-trust {
   display: flex !important;
@@ -1019,6 +1022,12 @@ body, html {
   font-size: 13px !important;
   color: #6B7280 !important;
   font-weight: 500 !important;
+  justify-content: center !important;
+}
+.hiw-cta-left {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
 }
 /* Orb visual */
 .hiw-cta-right {

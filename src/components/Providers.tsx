@@ -10,9 +10,10 @@ interface ProvidersProps {
 export default function Providers({ children }: ProvidersProps) {
     return (
         <SessionProvider
-            // JWT sessions are cheap, but avoid hammering /api/auth/session on every focus/nav
-            refetchInterval={10 * 60}
+            // JWT sessions are cheap — avoid refetch storms on focus/nav
+            refetchInterval={15 * 60}
             refetchOnWindowFocus={false}
+            refetchWhenOffline={false}
         >
             {children}
         </SessionProvider>

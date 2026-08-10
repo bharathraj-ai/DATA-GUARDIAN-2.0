@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { completeWork } from '@/actions/complete-work';
+import { CheckCircle2, Check, Loader2 } from 'lucide-react';
 
 export function CompleteWorkButton({ token }: { token: string }) {
     const [isLoading, setIsLoading] = useState(false);
@@ -39,7 +40,9 @@ export function CompleteWorkButton({ token }: { token: string }) {
                 border: '1px solid rgba(16,185,129,0.3)',
                 textAlign: 'center',
             }}>
-                <div style={{ fontSize: '24px', marginBottom: '8px' }}>✅</div>
+                <div style={{ color: '#10b981', marginBottom: '8px', display: 'flex', justifyContent: 'center' }}>
+                    <CheckCircle2 size={32} />
+                </div>
                 <div style={{ color: '#10b981', fontWeight: 600, fontSize: '15px' }}>
                     Work Completed Successfully!
                 </div>
@@ -70,16 +73,12 @@ export function CompleteWorkButton({ token }: { token: string }) {
         >
             {isLoading ? (
                 <>
-                    <span style={{
-                        width: '16px', height: '16px', border: '2px solid rgba(255,255,255,0.3)',
-                        borderTopColor: '#fff', borderRadius: '50%',
-                        animation: 'spin 0.8s linear infinite',
-                    }} />
+                    <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
                     Delivering files to owner...
                 </>
             ) : (
                 <>
-                    ✅ Complete Work & Deliver Files
+                    <Check size={16} /> Complete Work & Deliver Files
                 </>
             )}
         </button>

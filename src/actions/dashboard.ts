@@ -40,10 +40,10 @@ function mapLinkToBase(link: any, effectiveIsUsed: boolean): DashboardLink {
         allowedVendorEmail: primaryVendor,
         vendorAccess: link.VendorAccess || [],
         vendors: link.LinkAccess || [],
-        files: link.UserFile,
-        auditLogs: link.AuditLog,
+        files: link.UserFile || [],
+        auditLogs: link.AuditLog || [],
         status: getStatus({ ...link, isUsed: effectiveIsUsed }),
-        fileCount: link.UserFile.length,
+        fileCount: (link.UserFile || []).length,
         otp: null,
     } as DashboardLink;
 }
@@ -106,6 +106,7 @@ export async function getOwnedLinks(userId: string): Promise<DashboardLink[]> {
                         status: true,
                     } as any,
                 },
+                // Only a few recent events for the expand panel — full audit tab loads separately
                 AuditLog: {
                     select: {
                         action: true,
@@ -115,9 +116,10 @@ export async function getOwnedLinks(userId: string): Promise<DashboardLink[]> {
                     orderBy: {
                         timestamp: 'desc',
                     },
-                    take: 10,
+                    take: 3,
                 },
             },
+            take: 100,
         });
 
         const mappedLinks = (links as any[]).map((link: any) => {
@@ -125,15 +127,17 @@ export async function getOwnedLinks(userId: string): Promise<DashboardLink[]> {
             return mapLinkToBase(link, link.isUsed || anyVendorUsed);
         });
 
-        // AUTO-CLEANUP: If any expired/revoked links exist, trigger background purge
+        // AUTO-CLEANUP: defer so it never competes with the dashboard pool slots
         const hasExpiredData = mappedLinks.some(l => l.status === 'expired' || l.status === 'revoked');
         if (hasExpiredData) {
-            cleanupExpiredData().catch(() => { /* non-blocking */ });
+            setTimeout(() => {
+                cleanupExpiredData().catch(() => { /* non-blocking */ });
+            }, 0);
         }
 
         return mappedLinks;
     } catch (error) {
-        console.error('Error fetching owned links:', error);
+        console.error('Error fetching owned links:', error instanceof Error ? error.message : error);
         return [];
     }
 }
@@ -199,24 +203,15 @@ export async function getReceivedLinks(email: string): Promise<DashboardLink[]> 
                         status: true,
                     } as any,
                 },
-                AuditLog: {
-                    select: {
-                        action: true,
-                        timestamp: true,
-                        reason: true,
-                    },
-                    orderBy: {
-                        timestamp: 'desc',
-                    },
-                    take: 10,
-                },
             },
+            take: 100,
         });
 
         const mappedLinks = (links as any[]).map((link: any) => {
             // For the vendor, the link is "Used" ONLY if THEIR specific LinkAccess record is marked as used.
             const vendorIsUsed = link.LinkAccess?.[0]?.isUsed ?? link.isUsed;
-            const mapped = mapLinkToBase(link, vendorIsUsed);
+            // Vendor list UI does not show per-link audit rows
+            const mapped = mapLinkToBase({ ...link, AuditLog: [] }, vendorIsUsed);
 
             const vendorAccessRecord = link.VendorAccess?.find((v: any) => v.email.toLowerCase() === email.toLowerCase());
             
@@ -228,15 +223,17 @@ export async function getReceivedLinks(email: string): Promise<DashboardLink[]> 
             return mapped;
         });
 
-        // AUTO-CLEANUP: If any expired/revoked links exist, trigger background purge
+        // AUTO-CLEANUP: defer so it never competes with the dashboard pool slots
         const hasExpiredData = mappedLinks.some(l => l.status === 'expired' || l.status === 'revoked');
         if (hasExpiredData) {
-            cleanupExpiredData().catch(() => { /* non-blocking */ });
+            setTimeout(() => {
+                cleanupExpiredData().catch(() => { /* non-blocking */ });
+            }, 0);
         }
 
         return mappedLinks;
     } catch (error) {
-        console.error('Error fetching received links:', error);
+        console.error('Error fetching received links:', error instanceof Error ? error.message : error);
         return [];
     }
 }
@@ -278,6 +275,7 @@ export async function getSendHistory(userId: string): Promise<SendHistoryRecord[
         const records = await prisma.sendRecord.findMany({
             where: { ownerId: userId },
             orderBy: { createdAt: 'desc' },
+            take: 100,
             select: {
                 id: true,
                 topic: true,
@@ -291,7 +289,27 @@ export async function getSendHistory(userId: string): Promise<SendHistoryRecord[
 
         return records;
     } catch (error) {
-        console.error('Error fetching send history:', error);
+        console.error('Error fetching send history:', error instanceof Error ? error.message : error);
         return [];
     }
+}
+
+/**
+ * Single auth + sequential queries for owner dashboard.
+ * Avoids Promise.all pool contention on Neon PgBouncer.
+ */
+export async function getOwnerDashboardData(userId: string): Promise<{
+    links: DashboardLink[];
+    history: SendHistoryRecord[];
+}> {
+    const session = await auth();
+    if (!session?.user?.id || session.user.id !== userId) {
+        console.error('[SECURITY] getOwnerDashboardData called with mismatched userId');
+        return { links: [], history: [] };
+    }
+
+    // Sequential on purpose — one connection at a time under a tight Neon pool
+    const links = await getOwnedLinks(userId);
+    const history = await getSendHistory(userId);
+    return { links, history };
 }

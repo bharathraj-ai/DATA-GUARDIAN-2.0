@@ -1,13 +1,14 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import { useSession, signOut } from 'next-auth/react';
 import Image from 'next/image';
 
 export default function Navbar() {
     const pathname = usePathname();
+    const router = useRouter();
     const { data: session, status } = useSession();
     const [isScrolled, setIsScrolled] = useState(false);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -19,9 +20,23 @@ export default function Navbar() {
         const handleScroll = () => {
             setIsScrolled(window.scrollY > 20);
         };
-        window.addEventListener('scroll', handleScroll);
+        window.addEventListener('scroll', handleScroll, { passive: true });
         return () => window.removeEventListener('scroll', handleScroll);
     }, []);
+
+    // Prefetch authenticated destinations so nav feels instant
+    useEffect(() => {
+        if (status !== 'authenticated') return;
+        const role = (session?.user as { role?: string })?.role;
+        router.prefetch('/how-it-works');
+        router.prefetch('/services');
+        if (role === 'OWNER') {
+            router.prefetch('/dashboard/owner');
+            router.prefetch('/create-link');
+        } else if (role === 'VENDOR') {
+            router.prefetch('/dashboard/vendor');
+        }
+    }, [status, session, router]);
 
     const navLinks = [
         { name: 'Home', href: '/' },
@@ -75,7 +90,7 @@ export default function Navbar() {
                                 )}
                                 {isOwnerSide && (
                                     <Link href="/create-link" className="btn btn-primary btn-sm">
-                                        Create Link
+                                        Get Secure Link
                                     </Link>
                                 )}
 
@@ -113,9 +128,6 @@ export default function Navbar() {
                         <>
                             <Link href="/auth/signin" className="btn btn-secondary btn-sm">
                                 Sign In
-                            </Link>
-                            <Link href="/create-link" className="btn btn-primary btn-sm">
-                                Get Secure Link
                             </Link>
                         </>
                     )}
@@ -234,7 +246,7 @@ export default function Navbar() {
                                             className="btn btn-primary btn-full"
                                             onClick={() => setIsMobileMenuOpen(false)}
                                         >
-                                            Create Link
+                                            Get Secure Link
                                         </Link>
                                     )}
                                     <button
@@ -255,13 +267,6 @@ export default function Navbar() {
                                     onClick={() => setIsMobileMenuOpen(false)}
                                 >
                                     Sign In
-                                </Link>
-                                <Link
-                                    href="/create-link"
-                                    className="btn btn-primary btn-full"
-                                    onClick={() => setIsMobileMenuOpen(false)}
-                                >
-                                    Get Secure Link
                                 </Link>
                             </>
                         )}

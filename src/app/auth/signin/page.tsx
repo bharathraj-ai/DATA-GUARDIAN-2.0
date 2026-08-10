@@ -17,22 +17,22 @@ function SignInContent() {
         : '/auth/role-select';
     const error = searchParams.get('error');
 
-    // If user is already signed in, redirect them away
+    // If user is already signed in, redirect them away (replace avoids history loops)
     useEffect(() => {
-        if (sessionStatus === 'authenticated') {
-            const userRole = (session?.user as any)?.role;
-            const roleSelected = (session?.user as any)?.roleSelected;
+        if (sessionStatus !== 'authenticated') return;
 
-            if (!roleSelected) {
-                // User hasn't selected a role yet
-                router.push('/auth/role-select');
-            } else if (rawCallbackUrl && rawCallbackUrl.startsWith('/')) {
-                // Redirect to intended destination
-                router.push(rawCallbackUrl);
-            } else {
-                // Redirect to dashboard (auto-routes by role)
-                router.push('/dashboard');
-            }
+        const userRole = (session?.user as any)?.role;
+        const roleSelected = (session?.user as any)?.roleSelected;
+
+        if (!roleSelected) {
+            const roleSelectUrl = rawCallbackUrl && rawCallbackUrl.startsWith('/')
+                ? `/auth/role-select?callbackUrl=${encodeURIComponent(rawCallbackUrl)}`
+                : '/auth/role-select';
+            router.replace(roleSelectUrl);
+        } else if (rawCallbackUrl && rawCallbackUrl.startsWith('/')) {
+            router.replace(rawCallbackUrl);
+        } else {
+            router.replace(userRole === 'VENDOR' ? '/dashboard/vendor' : '/dashboard');
         }
     }, [sessionStatus, session, router, rawCallbackUrl]);
 

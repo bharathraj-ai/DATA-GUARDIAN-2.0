@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, useEffect, memo } from 'react';
 import { useCollaborationStore } from '@/store/useCollaborationStore';
+import { MessageSquare, X } from 'lucide-react';
 
 export const ChatPanel = memo(function ChatPanel() {
     const isChatOpen = useCollaborationStore((s) => s.isChatOpen);
@@ -153,7 +154,7 @@ export const ChatPanel = memo(function ChatPanel() {
                 }}
                 title={isChatOpen ? 'Close chat' : 'Open team chat'}
             >
-                {isChatOpen ? '✕' : '💬'}
+                {isChatOpen ? <X size={24} /> : <MessageSquare size={24} />}
                 {!isChatOpen && unreadCount > 0 && (
                     <span style={{
                         position: 'absolute', top: '-4px', right: '-4px',

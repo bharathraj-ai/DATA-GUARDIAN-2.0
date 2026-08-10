@@ -1,7 +1,7 @@
 .container {
   max-width: 900px;
   margin: 0 auto;
-  padding: 3rem 1rem;
+  padding: 100px 1rem 3rem; /* Clears fixed navbar */
   font-family: 'Inter', sans-serif;
   color: #1f2937;
 }

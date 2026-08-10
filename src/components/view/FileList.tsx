@@ -9,6 +9,7 @@ import { getRawFileForEdit } from '@/actions/get-raw-file-for-edit';
 import type { FileMetadata } from '@/actions/get-user';
 
 import { useRouter } from 'next/navigation';
+import { Lock, Edit3, Check, FileText, Loader2, Download, AlertTriangle } from 'lucide-react';
 interface FileListProps {
     token: string;
     files: FileMetadata[];
@@ -91,7 +92,7 @@ export const FileList = memo(function FileList({ token, files, isOwner }: FileLi
                         <span>Attached Files ({files.length})</span>
                         {!capabilities.canDownload && (
                             <span style={{ fontSize: '12px', color: '#fbbf24', background: 'rgba(251, 191, 36, 0.1)', padding: '4px 8px', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                                🔒 File download has been disabled by the owner.
+                                <Lock size={12} /> File download has been disabled by the owner.
                             </span>
                         )}
                     </div>
@@ -109,11 +110,11 @@ export const FileList = memo(function FileList({ token, files, isOwner }: FileLi
                                     <div style={{ marginTop: '6px' }}>
                                         {file.fileType === 'application/pdf' ? (
                                             <span style={{ fontSize: '10px', background: 'rgba(239,68,68,0.1)', color: '#ef4444', padding: '3px 8px', borderRadius: '12px', border: '1px solid rgba(239,68,68,0.2)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                                                🔒 View Only PDF
+                                                <Lock size={10} /> View Only PDF
                                             </span>
                                         ) : (
                                             <span style={{ fontSize: '10px', background: 'rgba(34,197,94,0.1)', color: '#22c55e', padding: '3px 8px', borderRadius: '12px', border: '1px solid rgba(34,197,94,0.2)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                                                ✍️ Editing Enabled
+                                                <Edit3 size={10} /> Editing Enabled
                                             </span>
                                         )}
                                         <span style={{ 
@@ -124,7 +125,15 @@ export const FileList = memo(function FileList({ token, files, isOwner }: FileLi
                                             border: `1px solid ${file.status === 'submitted' ? 'rgba(59,130,246,0.2)' : 'rgba(100,116,139,0.2)'}`, 
                                             display: 'inline-flex', alignItems: 'center', gap: '4px', marginLeft: '6px' 
                                         }}>
-                                            {file.status === 'submitted' ? '✅ Submitted' : '📄 Draft'}
+                                            {file.status === 'submitted' ? (
+                                                <>
+                                                    <Check size={10} /> Submitted
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <FileText size={10} /> Draft
+                                                </>
+                                            )}
                                         </span>
                                     </div>
                                 </div>
@@ -142,7 +151,17 @@ export const FileList = memo(function FileList({ token, files, isOwner }: FileLi
                                                 display: 'flex', alignItems: 'center', gap: '4px'
                                             }}
                                         >
-                                            {isEditLoading === file.id ? '⏳' : file.fileType === 'application/pdf' ? '🔒 Secure Preview' : '✍️ Edit'}
+                                            {isEditLoading === file.id ? (
+                                                <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} />
+                                            ) : file.fileType === 'application/pdf' ? (
+                                                <>
+                                                    <Lock size={12} /> Secure Preview
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Edit3 size={12} /> Edit
+                                                </>
+                                            )}
                                         </button>
                                     </PermissionGuard>
                                     <PermissionGuard requiredCapability="canDownload">
@@ -156,7 +175,15 @@ export const FileList = memo(function FileList({ token, files, isOwner }: FileLi
                                                 display: 'flex', alignItems: 'center', gap: '4px'
                                             }}
                                         >
-                                            {isDownloadLoading === file.id ? '⏳ Downloading...' : '⬇️ Download'}
+                                            {isDownloadLoading === file.id ? (
+                                                <>
+                                                    <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> Downloading...
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Download size={12} /> Download
+                                                </>
+                                            )}
                                         </button>
                                     </PermissionGuard>
                                     <button
@@ -199,7 +226,7 @@ export const FileList = memo(function FileList({ token, files, isOwner }: FileLi
                         </div>
                         {previewData.restricted && previewData.restrictionType && (
                             <div style={{ background: 'rgba(234, 179, 8, 0.1)', borderBottom: '1px solid rgba(234, 179, 8, 0.3)', padding: '10px 16px', color: '#eab308', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                ⚠️ {previewData.restrictionType}
+                                <AlertTriangle size={14} /> {previewData.restrictionType}
                             </div>
                         )}
                         <div style={{ padding: '20px', overflowY: 'auto', flex: 1, display: 'flex', justifyContent: 'center' }}>

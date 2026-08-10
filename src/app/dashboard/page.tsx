@@ -1,52 +1,23 @@
-'use client';
+import { redirect } from 'next/navigation';
+import { auth } from '@/lib/auth';
 
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useSession } from 'next-auth/react';
-import { useEffect } from 'react';
+/**
+ * Server-side role redirect — avoids client session waterfall before navigating.
+ */
+export default async function DashboardPage() {
+    const session = await auth();
 
-export default function DashboardPage() {
-    const router = useRouter();
-    const { data: session, status: sessionStatus } = useSession();
+    if (!session?.user) {
+        redirect('/auth/signin?callbackUrl=/dashboard');
+    }
 
-    // Redirect to sign-in if not authenticated
-    useEffect(() => {
-        if (sessionStatus === 'unauthenticated') {
-            router.push('/auth/signin?callbackUrl=/dashboard');
-        }
-    }, [sessionStatus, router]);
+    if (!session.user.roleSelected) {
+        redirect('/auth/role-select?callbackUrl=/dashboard');
+    }
 
-    const userRole = (session?.user as { role?: string })?.role as string | undefined;
-    const roleSelected = (session?.user as any)?.roleSelected;
+    if (session.user.role === 'VENDOR') {
+        redirect('/dashboard/vendor');
+    }
 
-    // Auto-redirect based on role
-    useEffect(() => {
-        if (sessionStatus === 'authenticated') {
-            // If role hasn't been selected yet, send to role-select
-            if (!roleSelected) {
-                router.push('/auth/role-select');
-                return;
-            }
-            if (userRole === 'VENDOR') {
-                router.push('/dashboard/vendor');
-            } else {
-                router.push('/dashboard/owner');
-            }
-        }
-    }, [sessionStatus, userRole, roleSelected, router]);
-
-    return (
-        <main className="app-page">
-            <section className="app-section">
-                <div className="container">
-                    <div className="app-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
-                        <div style={{ textAlign: 'center' }}>
-                            <div className="button-spinner" style={{ width: '48px', height: '48px', margin: '0 auto 16px' }}></div>
-                            <p style={{ color: 'var(--text-secondary)' }}>Redirecting to your dashboard...</p>
-                        </div>
-                    </div>
-                </div>
-            </section>
-        </main>
-    );
+    redirect('/dashboard/owner');
 }

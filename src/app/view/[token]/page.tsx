@@ -1,6 +1,7 @@
 import React from 'react';
 import { redirect } from 'next/navigation';
 import { getUserData } from '@/actions/get-user';
+import { AlertTriangle } from 'lucide-react';
 import { CollaborationProvider } from '@/components/view/CollaborationProvider';
 import { SessionTimer } from '@/components/view/SessionTimer';
 import { ChatPanel } from '@/components/view/ChatPanel';
@@ -48,9 +49,9 @@ export default async function ViewPage({ params }: { params: Promise<{ token: st
                     <div style={{
                         width: '64px', height: '64px', borderRadius: '50%', background: '#FEE2E2',
                         color: '#EF4444', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: '32px', margin: '0 auto 24px'
+                        margin: '0 auto 24px'
                     }}>
-                        ⚠️
+                        <AlertTriangle size={32} />
                     </div>
                     <h2 style={{ fontSize: '28px', fontWeight: 800, color: '#0F172A', marginBottom: '12px' }}>
                         {title}
