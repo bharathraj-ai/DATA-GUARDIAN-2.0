@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { takeBreak } from '@/actions/break-session';
 import { useRouter } from 'next/navigation';
+import { Ban, CheckCircle2, Info, Coffee, Loader2 } from 'lucide-react';
 
 type ToastType = 'error' | 'success' | 'info';
 
@@ -58,10 +59,10 @@ export function BreakButton({ token }: { token: string }) {
     };
 
     // Toast icon based on type
-    const toastConfig: Record<ToastType, { icon: string; bg: string; border: string; accent: string }> = {
-        error: { icon: '🚫', bg: 'rgba(239, 68, 68, 0.08)', border: 'rgba(239, 68, 68, 0.3)', accent: '#ef4444' },
-        success: { icon: '✅', bg: 'rgba(34, 197, 94, 0.08)', border: 'rgba(34, 197, 94, 0.3)', accent: '#22c55e' },
-        info: { icon: 'ℹ️', bg: 'rgba(59, 130, 246, 0.08)', border: 'rgba(59, 130, 246, 0.3)', accent: '#3b82f6' },
+    const toastConfig: Record<ToastType, { icon: React.ReactNode; bg: string; border: string; accent: string }> = {
+        error: { icon: <Ban size={20} color="#ef4444" />, bg: 'rgba(239, 68, 68, 0.08)', border: 'rgba(239, 68, 68, 0.3)', accent: '#ef4444' },
+        success: { icon: <CheckCircle2 size={20} color="#22c55e" />, bg: 'rgba(34, 197, 94, 0.08)', border: 'rgba(34, 197, 94, 0.3)', accent: '#22c55e' },
+        info: { icon: <Info size={20} color="#3b82f6" />, bg: 'rgba(59, 130, 246, 0.08)', border: 'rgba(59, 130, 246, 0.3)', accent: '#3b82f6' },
     };
 
     const cfg = toastConfig[toast.type];
@@ -87,16 +88,12 @@ export function BreakButton({ token }: { token: string }) {
             >
                 {isLoading ? (
                     <>
-                        <span style={{
-                            width: '16px', height: '16px', border: '2px solid rgba(17, 24, 39, 0.3)',
-                            borderTopColor: '#111827', borderRadius: '50%',
-                            animation: 'spin 0.8s linear infinite',
-                        }} />
+                        <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
                         Saving Session...
                     </>
                 ) : (
                     <>
-                        ⏸️ Take a Break (Save & Logout)
+                        <Coffee size={16} /> Take a Break (Save & Logout)
                     </>
                 )}
             </button>

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { AlertTriangle } from 'lucide-react';
 
 interface ActiveParticipant {
     email: string;
@@ -153,8 +154,8 @@ export default function LiveActivityModal({ token, topic, onClose }: LiveActivit
                 </div>
 
                 {errorMsg && (
-                    <div style={{ background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', padding: '12px 24px', fontSize: '0.85rem', fontWeight: 500, borderBottom: '1px solid rgba(239, 68, 68, 0.2)' }}>
-                        ⚠️ {errorMsg}
+                    <div style={{ background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', padding: '12px 24px', fontSize: '0.85rem', fontWeight: 500, borderBottom: '1px solid rgba(239, 68, 68, 0.2)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <AlertTriangle size={14} /> {errorMsg}
                     </div>
                 )}
 

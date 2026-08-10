@@ -33,6 +33,11 @@ const nextConfig: NextConfig = {
     serverActions: {
       bodySizeLimit: '10mb',
     },
+    // Keep soft-nav RSC payloads briefly → faster page-to-page transitions
+    staleTimes: {
+      dynamic: 30,
+      static: 180,
+    },
     optimizePackageImports: [
       'zod',
       'uuid',

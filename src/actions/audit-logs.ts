@@ -36,12 +36,14 @@ export async function getUnifiedAuditLogs(): Promise<UnifiedAuditLog[]> {
                 }
             },
             include: {
-                SecureLink: true
+                SecureLink: {
+                    select: { purpose: true },
+                },
             },
             orderBy: {
                 timestamp: 'desc'
             },
-            take: 500 // Limit for performance
+            take: 100,
         });
 
         // Fetch DocumentAuditLogs
@@ -52,12 +54,13 @@ export async function getUnifiedAuditLogs(): Promise<UnifiedAuditLog[]> {
                 }
             },
             include: {
-                document: true
-            },
-            orderBy: {
+                document: {
+                    select: { id: true, fileName: true },
+                },
+            },            orderBy: {
                 createdAt: 'desc'
             },
-            take: 500
+            take: 100,
         });
 
         // Map SecureLink AuditLogs

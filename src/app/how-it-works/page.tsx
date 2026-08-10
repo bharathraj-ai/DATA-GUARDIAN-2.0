@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
 import ScrollReveal from '@/components/ScrollReveal';
+import { Lock, Zap, Shield } from 'lucide-react';
 
 export const dynamic = 'force-static';
 
@@ -290,35 +291,15 @@ export default function HowItWorksPage() {
                                 </div>
                                 {/* Mini trust row */}
                                 <div className="hiw-cta-trust">
-                                    <span>🔒 End-to-end encrypted</span>
-                                    <span>⚡ Instant setup</span>
-                                    <span>🛡️ ISO 27001 standards</span>
-                                </div>
-                            </div>
-                            <div className="hiw-cta-right">
-                                {/* Decorative orb stack */}
-                                <div className="hiw-cta-orb-wrap">
-                                    <div className="hiw-cta-orb hiw-cta-orb-outer" />
-                                    <div className="hiw-cta-orb hiw-cta-orb-mid" />
-                                    <div className="hiw-cta-orb-center">
-                                        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#0284c7" strokeWidth="1.8">
-                                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                                            <polyline points="9 12 11 14 15 10" />
-                                        </svg>
-                                    </div>
-                                    {/* Orbit icons */}
-                                    <div className="hiw-orbit-item hiw-oi-1">
-                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
-                                    </div>
-                                    <div className="hiw-orbit-item hiw-oi-2">
-                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
-                                    </div>
-                                    <div className="hiw-orbit-item hiw-oi-3">
-                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg>
-                                    </div>
-                                    <div className="hiw-orbit-item hiw-oi-4">
-                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /></svg>
-                                    </div>
+                                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                                         <Lock size={14} /> End-to-end encrypted
+                                     </span>
+                                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                                         <Zap size={14} /> Instant setup
+                                     </span>
+                                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                                         <Shield size={14} /> ISO 27001 standards
+                                     </span>
                                 </div>
                             </div>
                         </div>

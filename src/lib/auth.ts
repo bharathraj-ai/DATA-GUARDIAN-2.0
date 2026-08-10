@@ -1,3 +1,4 @@
+import { cache } from 'react';
 import { NextAuthOptions, getServerSession } from 'next-auth';
 import GoogleProvider from 'next-auth/providers/google';
 import { PrismaAdapter } from '@next-auth/prisma-adapter';
@@ -102,9 +103,32 @@ export const authOptions: NextAuthOptions = {
         async redirect({ url, baseUrl }) {
             const canonicalBase = process.env.NEXTAUTH_URL || baseUrl;
 
-            if (url.includes('/auth/role-select') || url.includes('/auth/signin')) {
-                if (url.startsWith('/')) return `${canonicalBase}${url}`;
-                return url;
+            // Normalize to an absolute URL on our origin when possible
+            let absolute = url;
+            if (url.startsWith('/')) {
+                absolute = `${canonicalBase}${url}`;
+            }
+
+            // Keep users on auth flows they already requested
+            if (absolute.includes('/auth/role-select') || absolute.includes('/auth/signin')) {
+                return absolute.startsWith('http') ? absolute : `${canonicalBase}${absolute}`;
+            }
+
+            // Same-origin destinations (e.g. /create-link) go through role-select first
+            try {
+                const target = new URL(absolute, canonicalBase);
+                const base = new URL(canonicalBase);
+                if (target.origin === base.origin) {
+                    const path = `${target.pathname}${target.search}` || '/';
+                    if (path !== '/' && !path.startsWith('/auth/')) {
+                        return `${canonicalBase}/auth/role-select?callbackUrl=${encodeURIComponent(path)}`;
+                    }
+                    if (path.startsWith('/auth/')) {
+                        return `${canonicalBase}${path}`;
+                    }
+                }
+            } catch {
+                // fall through
             }
 
             return `${canonicalBase}/auth/role-select`;
@@ -172,8 +196,9 @@ export const authOptions: NextAuthOptions = {
 };
 
 /**
- * Get server session - use this in server components and server actions
+ * Get server session - use this in server components and server actions.
+ * React cache() dedupes within a single request (layout + page + actions).
  */
-export async function auth() {
+export const auth = cache(async () => {
     return await getServerSession(authOptions);
-}
+});

@@ -8,6 +8,7 @@ import { validateShareAccess } from '@/actions/validate-share-access';
 import { sendVendorOTP } from '@/actions/send-vendor-otp';
 import { useSession, signIn } from 'next-auth/react';
 import { logger, redactToken } from '@/lib/logger';
+import { Lock, AlertTriangle } from 'lucide-react';
 
 interface SharePageProps {
     params: any;
@@ -340,7 +341,9 @@ export default function SharePage({ params }: SharePageProps) {
                                 <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
                             </svg>
                             <div style={{ fontSize: '12px', color: '#f87171', lineHeight: '1.4' }}>
-                                <strong style={{ display: 'block', marginBottom: '4px' }}>🔒 Security Notice</strong>
+                                <strong style={{ marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <Lock size={14} /> Security Notice
+                                </strong>
                                 This link was created for a specific vendor. If you believe this is an error,
                                 contact the person who shared it with you and ask them to create a new link for your email.
                             </div>
@@ -614,7 +617,9 @@ export default function SharePage({ params }: SharePageProps) {
                         <line x1="12" y1="17" x2="12.01" y2="17" />
                     </svg>
                     <div style={{ fontSize: '12px', color: '#fbbf24', lineHeight: '1.4' }}>
-                        <strong style={{ display: 'block', marginBottom: '4px' }}>⚠️ Anti-Phishing Notice</strong>
+                        <strong style={{ marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <AlertTriangle size={14} /> Anti-Phishing Notice
+                        </strong>
                         We will <strong>never</strong> ask for your OTP via email, phone, or any website other than this page.
                         <br />
                         <span style={{ opacity: 0.8 }}>Verify you are on: <code style={{ background: 'rgba(0,0,0,0.3)', padding: '1px 4px', borderRadius: '3px' }}>{typeof window !== 'undefined' ? window.location.hostname : 'localhost'}</code></span>
