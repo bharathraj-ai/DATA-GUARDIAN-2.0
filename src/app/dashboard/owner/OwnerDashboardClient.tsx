@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { DashboardLink, SendHistoryRecord } from '@/actions/dashboard';
+import { DashboardLink, SendHistoryRecord, getLinkDetails } from '@/actions/dashboard';
 import { getUnifiedAuditLogs, UnifiedAuditLog } from '@/actions/audit-logs';
 import { revokeAccess } from '@/actions/revoke-access';
 import dynamic from 'next/dynamic';
@@ -34,7 +34,8 @@ import {
     LogOut, 
     Coffee,
     User,
-    Globe
+    Globe,
+    Loader2
 } from 'lucide-react';
 
 const LiveActivityModal = dynamic(() => import('@/components/LiveActivityModal'), {
@@ -61,6 +62,7 @@ export default function OwnerDashboardClient({
     const [revokingId, setRevokingId] = useState<string | null>(null);
     const [confirmRevokeId, setConfirmRevokeId] = useState<string | null>(null);
     const [expandedId, setExpandedId] = useState<string | null>(null);
+    const [detailsLoadingId, setDetailsLoadingId] = useState<string | null>(null);
     const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
     const [activeTab, setActiveTab] = useState<'links' | 'history' | 'audit'>('links');
     const [liveActivityLink, setLiveActivityLink] = useState<{token: string, topic: string} | null>(null);
@@ -95,6 +97,38 @@ export default function OwnerDashboardClient({
             return () => clearTimeout(timer);
         }
     }, [notification]);
+
+    /** Expand card and lazy-load files/audits (slim list payload from server). */
+    const handleExpand = async (linkId: string) => {
+        if (expandedId === linkId) {
+            setExpandedId(null);
+            return;
+        }
+        setExpandedId(linkId);
+        const link = links.find((l) => l.id === linkId);
+        if (link?.detailsLoaded) return;
+        setDetailsLoadingId(linkId);
+        try {
+            const res = await getLinkDetails(linkId);
+            if (res.success) {
+                setLinks((prev) =>
+                    prev.map((l) =>
+                        l.id === linkId
+                            ? {
+                                  ...l,
+                                  files: res.files || [],
+                                  auditLogs: res.auditLogs || [],
+                                  fileCount: res.files?.length ?? l.fileCount,
+                                  detailsLoaded: true,
+                              }
+                            : l
+                    )
+                );
+            }
+        } finally {
+            setDetailsLoadingId(null);
+        }
+    };
 
     const formatDate = (date: Date) => {
         return new Date(date).toLocaleDateString('en-US', {
@@ -921,7 +955,7 @@ export default function OwnerDashboardClient({
                                                     {/* Expand/Collapse for details */}
                                                     <button
                                                         className="premium-expand-btn"
-                                                        onClick={() => setExpandedId(expandedId === link.id ? null : link.id)}
+                                                        onClick={() => void handleExpand(link.id)}
                                                     >
                                                         <span>Details</span>
                                                         {expandedId === link.id ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
@@ -962,6 +996,13 @@ export default function OwnerDashboardClient({
                                                                 </span>
                                                             </div>
                                                         </div>
+
+                                                        {detailsLoadingId === link.id && (
+                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#6B7280', fontSize: '0.85rem', marginBottom: '12px' }}>
+                                                                <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} />
+                                                                Loading files &amp; activity…
+                                                            </div>
+                                                        )}
 
                                                         {/* Files Section */}
                                                         {link.files.length > 0 && (

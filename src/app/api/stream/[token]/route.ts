@@ -324,7 +324,12 @@ export async function GET(
                     const heartbeat = {
                         type: 'heartbeat',
                         remainingSeconds: Math.min(ttl, dbRemainingSeconds),
-                        activeParticipants: activeSessions,
+                        activeParticipants: activeSessions.map((s) => ({
+                            email: s.userId,
+                            name: s.displayName,
+                            level: s.level,
+                            color: s.color,
+                        })),
                         highestActiveLevel: highestActiveLevel === 99 ? undefined : highestActiveLevel,
                         highestAuthorityLevel,
                         chats: recentChats,

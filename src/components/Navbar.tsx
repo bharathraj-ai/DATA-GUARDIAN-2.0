@@ -223,7 +223,7 @@ export default function Navbar() {
                                             </div>
                                         )}
                                         <div style={{ flex: 1 }}>
-                                            <p style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-primary)' }}>
+                                            <p style={{ fontSize: '0.85rem', fontWeight: '600', color: '#0F172A' }}>
                                                 {session?.user?.name || 'User'}
                                             </p>
                                             <span style={{

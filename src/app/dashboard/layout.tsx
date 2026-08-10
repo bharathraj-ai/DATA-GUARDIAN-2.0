@@ -1,11 +1,10 @@
 import { ReactNode } from 'react';
 
 /**
- * Create-link shell — lock light theme on first paint
+ * Owner/vendor dashboard shell — lock light theme on first paint
  * so navigation never flashes a dark loading screen.
- * (Auth/prefetch happen in the server page; no force-dynamic needed.)
  */
-export default function CreateLinkLayout({ children }: { children: ReactNode }) {
+export default function DashboardLayout({ children }: { children: ReactNode }) {
     return (
         <>
             <style

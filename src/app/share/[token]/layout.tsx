@@ -17,13 +17,37 @@ export const metadata: Metadata = {
         noimageindex: true,
         nocache: true,
     },
-    // No Open Graph or Twitter card metadata — prevents link previews in chat apps
 };
 
+/** Match vendor light theme on first paint (share → view journey). */
 export default function ShareLayout({
     children,
 }: {
     children: ReactNode;
 }) {
-    return <>{children}</>;
+    return (
+        <>
+            <style
+                dangerouslySetInnerHTML={{
+                    __html: `
+html, body {
+  background: #F8FAFC !important;
+  background-color: #F8FAFC !important;
+  color: #0F172A !important;
+}
+#main-content {
+  background: transparent !important;
+  min-height: 100vh;
+}
+.app-page {
+  animation: none !important;
+  opacity: 1 !important;
+  transform: none !important;
+}
+`,
+                }}
+            />
+            {children}
+        </>
+    );
 }

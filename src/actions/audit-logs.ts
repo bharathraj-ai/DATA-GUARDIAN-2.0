@@ -28,16 +28,24 @@ export async function getUnifiedAuditLogs(): Promise<UnifiedAuditLog[]> {
     }
 
     try {
-        // Fetch SecureLink AuditLogs
+        // Fetch SecureLink AuditLogs — select only needed fields (avoid full SecureLink include)
         const secureLinkLogs = await prisma.auditLog.findMany({
             where: {
                 SecureLink: {
                     ownerId: userId
                 }
             },
-            include: {
+            select: {
+                id: true,
+                action: true,
+                reason: true,
+                metadata: true,
+                timestamp: true,
+                linkId: true,
                 SecureLink: {
-                    select: { purpose: true },
+                    select: {
+                        purpose: true,
+                    },
                 },
             },
             orderBy: {
@@ -46,18 +54,29 @@ export async function getUnifiedAuditLogs(): Promise<UnifiedAuditLog[]> {
             take: 100,
         });
 
-        // Fetch DocumentAuditLogs
+        // Fetch DocumentAuditLogs — select only needed fields
         const documentLogs = await prisma.documentAuditLog.findMany({
             where: {
                 document: {
                     ownerId: userId
                 }
             },
-            include: {
+            select: {
+                id: true,
+                action: true,
+                metadata: true,
+                createdAt: true,
+                documentId: true,
+                userId: true,
+                ipAddress: true,
+                userAgent: true,
                 document: {
-                    select: { id: true, fileName: true },
+                    select: {
+                        fileName: true,
+                    },
                 },
-            },            orderBy: {
+            },
+            orderBy: {
                 createdAt: 'desc'
             },
             take: 100,

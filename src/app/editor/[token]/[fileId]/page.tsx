@@ -9,13 +9,13 @@ import { submitFinal } from '@/actions/submit-final';
 
 const UniversalEditor = dynamic(() => import('@/components/editors/core/UniversalEditor'), {
     ssr: false,
-    loading: () => <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', color: '#fff' }}>Loading Editor...</div>,
+    loading: () => <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', color: '#0F172A', background: '#FFFFFF' }}>Loading Editor...</div>,
 });
 
 
 const SecurePDFViewer = dynamic(() => import('@/components/editors/SecurePDFViewer'), {
     ssr: false,
-    loading: () => <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', color: '#fff' }}>Loading Secure Viewer...</div>,
+    loading: () => <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', color: '#0F172A', background: '#FFFFFF' }}>Loading Secure Viewer...</div>,
 });
 
 const SecureViewWrapper = dynamic<{ token: string; children: React.ReactNode }>(
@@ -143,15 +143,15 @@ export default function EditorPage({ params }: EditorPageProps) {
 
     return (
         <SecureViewWrapper token={token}>
-            <div style={{ width: '100vw', height: '100vh', background: '#ffffff', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-                <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
-                    {isPdf ? (
-                        <SecurePDFViewer
-                            token={token}
-                            file={file}
-                            onClose={handleClose}
-                        />
-                    ) : (
+            <div style={{ width: '100vw', height: '100vh', background: '#09090b', overflow: 'hidden', position: 'relative' }}>
+                {isPdf ? (
+                    <SecurePDFViewer
+                        token={token}
+                        file={file}
+                        onClose={handleClose}
+                    />
+                ) : (
+                    <div style={{ width: '100%', height: '100%', overflow: 'hidden', position: 'relative' }}>
                         <UniversalEditor
                             token={token}
                             fileId={fileId}
@@ -164,8 +164,8 @@ export default function EditorPage({ params }: EditorPageProps) {
                             forceAutoSave={false}
                             onAutoSaveComplete={handleClose}
                         />
-                    )}
-                </div>
+                    </div>
+                )}
             </div>
         </SecureViewWrapper>
     );

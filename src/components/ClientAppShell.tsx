@@ -31,7 +31,7 @@ export default function ClientAppShell({ children, footer }: Props) {
     return (
         <>
             <Navbar />
-            <div id="main-content">{children}</div>
+            <div id="main-content" style={{ background: '#FFFFFF', minHeight: '100vh' }}>{children}</div>
             {footer}
         </>
     );

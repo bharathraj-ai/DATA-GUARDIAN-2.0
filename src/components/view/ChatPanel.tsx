@@ -83,7 +83,7 @@ export const ChatPanel = memo(function ChatPanel() {
                                     fontSize: '11px', padding: '2px 8px', borderRadius: '10px',
                                     background: '#F3F4F6', color: '#6B7280',
                                 }}>
-                                    {p.name || p.email.split('@')[0]}
+                                    {p.name || p.email?.split('@')[0] || 'Guest'}
                                 </span>
                             ))}
                         </div>
@@ -98,7 +98,7 @@ export const ChatPanel = memo(function ChatPanel() {
                         ) : chats.map((c) => (
                             <div key={c.id} style={{ alignSelf: 'flex-start', maxWidth: '85%' }}>
                                 <div style={{ fontSize: '10px', color: '#9CA3AF', marginBottom: '2px', textAlign: 'left' }}>
-                                    {c.senderEmail.split('@')[0]}
+                                    {c.senderEmail?.split('@')[0] || 'Unknown'}
                                 </div>
                                 <div style={{
                                     background: '#F3F4F6', color: '#111111',
