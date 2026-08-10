@@ -99,21 +99,19 @@ export default function EditorPage({ params }: EditorPageProps) {
     }, [token, fileId, version]);
 
     const handleSubmitFinal = useCallback(async (editedFile: File) => {
-        try {
-            const formData = new FormData();
-            formData.append('file', editedFile);
+        const formData = new FormData();
+        formData.append('file', editedFile);
 
-            const res = await submitFinal(token, fileId, formData);
+        const res = await submitFinal(token, fileId, formData);
 
-            if (res.success) {
-                window.location.assign(`/view/${token}`);
-            } else {
-                alert(res.error || 'Failed to submit final document.');
-            }
-        } catch (err) {
-            console.error('Submit error:', err);
-            alert('An error occurred while submitting final.');
+        if (!res.success) {
+            throw new Error(res.error || 'Failed to submit final document.');
         }
+
+        // Leave the editor and return to the secure view page after commit
+        const viewUrl = `/view/${token}`;
+        router.replace(viewUrl);
+        window.location.assign(viewUrl);
     }, [token, fileId, router]);
 
     if (loading) {

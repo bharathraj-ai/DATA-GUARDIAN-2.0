@@ -300,6 +300,13 @@ export default function UniversalEditor({
 
       await actionFn(savedFile);
       isDirtyRef.current = false;
+
+      // After final commit, always return to the secure view page
+      if (isSubmit && token) {
+        window.location.assign(`/view/${token}`);
+        return;
+      }
+
       if (!silent) setLoading(false);
     } catch (e: any) {
       console.error("Save error:", e);
@@ -310,7 +317,7 @@ export default function UniversalEditor({
     } finally {
       isSavingRef.current = false;
     }
-  }, []);
+  }, [token]);
 
   useEffect(() => {
     docRef.current = doc;

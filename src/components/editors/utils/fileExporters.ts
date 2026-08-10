@@ -1,5 +1,15 @@
 import { DocumentData, TableElementData, TextElementData, ImageElementData } from "../types";
 
+/** Ensure exported filename keeps a valid extension for server MIME checks. */
+function withExt(name: string | undefined, ext: string, fallback = `document${ext}`): string {
+  const base = (name || "").trim() || fallback;
+  const lower = base.toLowerCase();
+  if (lower.endsWith(ext.toLowerCase())) return base;
+  // Strip a wrong/missing extension before appending the correct one
+  const withoutExt = base.replace(/\.[^./\\]+$/, "");
+  return `${withoutExt || fallback.replace(ext, "")}${ext}`;
+}
+
 export async function exportDocument(currentDoc: DocumentData): Promise<File> {
   if (currentDoc.type === 'pdf') {
     const { PDFDocument, rgb, StandardFonts } = await import("pdf-lib");
@@ -43,12 +53,12 @@ export async function exportDocument(currentDoc: DocumentData): Promise<File> {
       }
     }
     const pdfBytes = await pdfDoc.save();
-    return new File([pdfBytes as any], currentDoc.name || "document.pdf", { type: "application/pdf" });
+    return new File([pdfBytes as any], withExt(currentDoc.name, ".pdf"), { type: "application/pdf" });
 
   } else if (currentDoc.type === "xlsx" || currentDoc.type === "xls") {
     const { WorkbookAdapter } = await import("@/lib/workbookAdapter");
     const buf = await WorkbookAdapter.generateWorkbook(currentDoc);
-    return new File([buf as any], currentDoc.name || "edited.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    return new File([buf as any], withExt(currentDoc.name, ".xlsx"), { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
 
   } else if (currentDoc.type === "csv") {
     const allRows: any[] = [];
@@ -65,9 +75,9 @@ export async function exportDocument(currentDoc: DocumentData): Promise<File> {
       const XLSX = await import("xlsx");
       const worksheet = XLSX.utils.aoa_to_sheet(allRows);
       const csvStr = XLSX.utils.sheet_to_csv(worksheet);
-      return new File([csvStr], currentDoc.name || "edited.csv", { type: "text/csv" });
+      return new File([csvStr], withExt(currentDoc.name, ".csv"), { type: "text/csv" });
     } else {
-      return new File([""], currentDoc.name || "edited.csv", { type: "text/csv" });
+      return new File([""], withExt(currentDoc.name, ".csv"), { type: "text/csv" });
     }
 
   } else if (currentDoc.type === "image") {
@@ -78,10 +88,10 @@ export async function exportDocument(currentDoc: DocumentData): Promise<File> {
         const mimeType = matches[1];
         const b64Data = matches[2];
         const bytes = Uint8Array.from(atob(b64Data), c => c.charCodeAt(0));
-        return new File([bytes as any], currentDoc.name || "edited.png", { type: mimeType });
+        return new File([bytes as any], withExt(currentDoc.name, ".png"), { type: mimeType });
       }
     }
-    return new File([""], currentDoc.name || "edited.png", { type: "image/png" });
+    return new File([""], withExt(currentDoc.name, ".png"), { type: "image/png" });
 
   } else {
     const textChunks = currentDoc.pages.flatMap(p => p.elements.map(e => {
@@ -92,6 +102,6 @@ export async function exportDocument(currentDoc: DocumentData): Promise<File> {
       return "";
     }).filter(Boolean));
     const text = textChunks.join("\n\n");
-    return new File([text], currentDoc.name || "edited.txt", { type: "text/plain" });
+    return new File([text], withExt(currentDoc.name, ".txt"), { type: "text/plain" });
   }
 }
