@@ -26,6 +26,46 @@ export async function findUserFileForShareToken(
   });
 }
 
+const USER_FILE_CONTENT_SELECT = {
+  id: true,
+  fileName: true,
+  fileType: true,
+  fileSize: true,
+  version: true,
+  status: true,
+  encryptedContent: true,
+  iv: true,
+  authTag: true,
+  encryptedDek: true,
+  mongoFileId: true,
+  editingLocked: true,
+} as const;
+
+/**
+ * Load a single file's ciphertext only after ACL has already bound fileId → link.
+ */
+export async function loadUserFileContentForLink(fileId: string, secureLinkId: string) {
+  if (!fileId || !secureLinkId) return null;
+
+  return prisma.userFile.findFirst({
+    where: { id: fileId, secureLinkId },
+    select: USER_FILE_CONTENT_SELECT,
+  });
+}
+
+/**
+ * Load all files' ciphertext for a link (complete-work delivery). ACL must already pass.
+ */
+export async function loadUserFilesContentForLink(secureLinkId: string) {
+  if (!secureLinkId) return [];
+
+  return prisma.userFile.findMany({
+    where: { secureLinkId },
+    select: USER_FILE_CONTENT_SELECT,
+    take: 50,
+  });
+}
+
 /**
  * Returns the FileVersion only if it belongs to the given fileId.
  */

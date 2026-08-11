@@ -45,8 +45,9 @@ export async function submitFinal(
             return { success: false, error: mimeValidation.error };
         }
 
-        // 3. Get file record to check storage type
-        const fileRecord = authResult.context.secureLink.UserFile.find((f: any) => f.id === fileId);
+        // 3. Get file record to check storage type (bound to this link)
+        const { loadUserFileContentForLink } = await import('@/lib/security/resource-ownership');
+        const fileRecord = await loadUserFileContentForLink(fileId, authResult.context.secureLink.id);
         if (!fileRecord) {
             return { success: false, error: 'File not found.' };
         }

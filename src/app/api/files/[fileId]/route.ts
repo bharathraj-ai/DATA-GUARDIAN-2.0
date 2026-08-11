@@ -61,6 +61,7 @@ export async function GET(
       userId,
       fileId,
       isDownload ? 'download' : 'view',
+      { ownerId: document.ownerId, isDeleted: document.isDeleted },
     );
     if (!permission.allowed) {
       return NextResponse.json(

@@ -33,6 +33,7 @@ export async function GET(
     const annotations = await prisma.annotation.findMany({
       where: { fileId },
       orderBy: { createdAt: 'asc' },
+      take: 1000,
     });
 
     return NextResponse.json({ success: true, annotations });

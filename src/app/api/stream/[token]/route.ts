@@ -51,7 +51,12 @@ export async function GET(
     // Get secure link and encrypted data
     const secureLink = await prisma.secureLink.findUnique({
         where: { token },
-        include: {
+        select: {
+            id: true,
+            token: true,
+            expiresAt: true,
+            isUsed: true,
+            isRevoked: true,
             UserData: true,
             LinkAccess: {
                 select: {
@@ -59,7 +64,12 @@ export async function GET(
                     isUsed: true
                 }
             },
-            VendorAccess: true
+            VendorAccess: {
+                select: {
+                    email: true,
+                    level: true,
+                },
+            },
         },
     });
 
@@ -153,6 +163,10 @@ export async function GET(
             }
 
             const startTime = Date.now();
+            let lastChatTimestamp: Date | null = null;
+            let heartbeatTick = 0;
+            let cachedExpiresAt = secureLink.expiresAt;
+            let cachedLinkId = secureLink.id;
 
             // Track active session presence
             try {
@@ -252,11 +266,25 @@ export async function GET(
                         await logSessionEnd('session_invalidated');
                         return;
                     }
-                    // Authoritative DB checks (signed cookie already verified at connect)
-                    const link = await prisma.secureLink.findUnique({
-                        where: { token },
-                        select: { id: true, isRevoked: true, expiresAt: true },
-                    });
+                    // Authoritative DB revoke/expiry: always when Redis is absent;
+                    // when Redis explicitly says not-revoked, reconcile every 5 ticks (~15s).
+                    heartbeatTick += 1;
+                    const mustReconcileDb = revokedInRedis !== false || heartbeatTick === 1 || heartbeatTick % 5 === 0;
+                    let link: { id: string; isRevoked: boolean; expiresAt: Date } | null = {
+                        id: cachedLinkId,
+                        isRevoked: false,
+                        expiresAt: cachedExpiresAt,
+                    };
+                    if (mustReconcileDb) {
+                        link = await prisma.secureLink.findUnique({
+                            where: { token },
+                            select: { id: true, isRevoked: true, expiresAt: true },
+                        });
+                        if (link) {
+                            cachedLinkId = link.id;
+                            cachedExpiresAt = link.expiresAt;
+                        }
+                    }
 
                     if (!link || link.isRevoked) {
                         safeEnqueue(encoder.encode(`data: ${JSON.stringify({ type: 'revoked' })}\n\n`));
@@ -306,19 +334,27 @@ export async function GET(
                         if (session.level < highestActiveLevel) highestActiveLevel = session.level;
                     });
 
-                    // Fetch recent chat messages
+                    // Incremental chat: full snapshot once, then only newer rows
                     const recentChats = await prisma.chatMessage.findMany({
-                        where: { secureLinkId: link.id },
+                        where: {
+                            secureLinkId: link.id,
+                            ...(lastChatTimestamp ? { timestamp: { gt: lastChatTimestamp } } : {}),
+                        },
                         orderBy: { timestamp: 'asc' },
-                        take: 100
+                        take: lastChatTimestamp ? 50 : 100,
                     });
+                    if (recentChats.length > 0) {
+                        lastChatTimestamp = recentChats[recentChats.length - 1].timestamp;
+                    }
 
-                    // Fetch latest file edit timestamp
-                    const latestEditLog = await prisma.auditLog.findFirst({
-                        where: { linkId: link.id, action: 'VENDOR_EDITED_FILE' },
-                        orderBy: { timestamp: 'desc' },
-                        select: { timestamp: true }
-                    });
+                    // Latest-edit probe every 5 ticks (~15s) — not every heartbeat
+                    const latestEditLog = heartbeatTick === 1 || heartbeatTick % 5 === 0
+                        ? await prisma.auditLog.findFirst({
+                            where: { linkId: link.id, action: 'VENDOR_EDITED_FILE' },
+                            orderBy: { timestamp: 'desc' },
+                            select: { timestamp: true }
+                        })
+                        : null;
 
                     // Send heartbeat with countdown, presence, chat, and latest edit info
                     const heartbeat = {

@@ -143,7 +143,7 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
                 files: (secureLink as any).UserFile || [],
                 purpose: secureLink.purpose,
                 purposeDetail: secureLink.purposeDetail,
-                ownerName: ownerUser?.name || null,
+                ownerName: ownerUser?.name ?? null,
                 ownerEmail: ownerUser?.email || null,
                 isOwner: authResult.context.isOwner,
                 vendorStatus: vendorAccess?.status,

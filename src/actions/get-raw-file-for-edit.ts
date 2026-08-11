@@ -22,7 +22,8 @@ export async function getRawFileForEdit(token: string, fileId: string): Promise<
         }
 
         const secureLink = authResult.context.secureLink;
-        const fileRecord = secureLink.UserFile.find((f: any) => f.id === fileId);
+        const { loadUserFileContentForLink } = await import('@/lib/security/resource-ownership');
+        const fileRecord = await loadUserFileContentForLink(fileId, secureLink.id);
 
         if (!fileRecord) {
             return { success: false, error: 'File not found' };

@@ -374,8 +374,9 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
 
             return secureLink;
         }, {
-            maxWait: 5000,   // Reduced from 30s - fail fast on connection issues
-            timeout: 60000  // Reduced from 5min - most operations should complete quickly
+            maxWait: 5000,
+            // Do not hold a pool slot for 60s — that is what starves /create-link vendor list (P2024).
+            timeout: 15000,
         });
 
         // Audit log AFTER transaction

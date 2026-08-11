@@ -27,7 +27,8 @@ export async function GET(
         }
 
         const secureLink = authResult.context.secureLink;
-        const fileRecord = secureLink.UserFile.find((f) => f.id === fileId);
+        const { loadUserFileContentForLink } = await import('@/lib/security/resource-ownership');
+        const fileRecord = await loadUserFileContentForLink(fileId, secureLink.id);
 
         if (!fileRecord) {
             return NextResponse.json({ error: 'File not found' }, { status: 404 });

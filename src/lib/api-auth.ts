@@ -187,12 +187,55 @@ export async function authorizeApiRequest(
         }
     }
 
+    const needsBytes = action === 'edit' || action === 'download' || action === 'preview';
     const file = await prisma.userFile.findUnique({
         where: { id: fileId },
-        include: {
-            mongoFile: true,
+        select: {
+            id: true,
+            fileName: true,
+            fileType: true,
+            fileSize: true,
+            version: true,
+            editingLocked: true,
+            mongoFileId: true,
+            iv: true,
+            authTag: true,
+            encryptedDek: true,
+            encryptedContent: needsBytes,
+            mongoFile: {
+                select: { id: true, gridFSId: true, mimeType: true, isDeleted: true },
+            },
             SecureLink: {
-                include: { VendorAccess: true, LinkAccess: true },
+                select: {
+                    id: true,
+                    token: true,
+                    isRevoked: true,
+                    expiresAt: true,
+                    lockedAt: true,
+                    ownerId: true,
+                    allowedVendorEmail: true,
+                    allowEditing: true,
+                    allowDownload: true,
+                    allowComment: true,
+                    isUsed: true,
+                    VendorAccess: {
+                        select: {
+                            email: true,
+                            level: true,
+                            isRevoked: true,
+                            activeSessionId: true,
+                            activeDeviceHash: true,
+                        },
+                    },
+                    LinkAccess: {
+                        select: {
+                            vendorEmail: true,
+                            level: true,
+                            lockedAt: true,
+                            isUsed: true,
+                        },
+                    },
+                },
             },
         },
     });

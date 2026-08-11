@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { auth } from '@/lib/auth';
-import { getAvailableVendors } from '@/actions/get-vendors';
+import { listVendorOptions } from '@/lib/vendor-options';
 import CreateLinkClient from './CreateLinkClient';
 
 /**
@@ -24,7 +24,8 @@ export default async function CreateLinkPage() {
         redirect('/dashboard/vendor');
     }
 
-    const initialVendors = await getAvailableVendors();
+    // Role already checked above — skip a second auth()+findMany on this request.
+    const initialVendors = await listVendorOptions();
 
     return <CreateLinkClient initialVendors={initialVendors} />;
 }

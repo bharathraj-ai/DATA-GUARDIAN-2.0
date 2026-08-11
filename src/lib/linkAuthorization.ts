@@ -18,10 +18,53 @@ export type AuthorizationResult<T extends boolean = true> =
   | { success: false; status: number; error: string };
 
 export type SecureLinkWithRelations = Prisma.SecureLinkGetPayload<{
-  include: {
-    User: { select: { id: true, email: true } },
-    VendorAccess: true,
-    LinkAccess: true,
+  select: {
+    id: true,
+    token: true,
+    otpHash: true,
+    expiresAt: true,
+    isUsed: true,
+    createdAt: true,
+    userId: true,
+    isRevoked: true,
+    ownerToken: true,
+    deviceHash: true,
+    failedAttempts: true,
+    lockedAt: true,
+    notificationEmail: true,
+    purpose: true,
+    purposeDetail: true,
+    otpFirstAttemptAt: true,
+    otpVerifiedAt: true,
+    allowedVendorEmail: true,
+    allowEditing: true,
+    allowDownload: true,
+    allowComment: true,
+    maxViews: true,
+    maxDownloads: true,
+    ownerId: true,
+    User: { select: { id: true, email: true, name: true } },
+    VendorAccess: {
+      select: {
+        id: true,
+        email: true,
+        level: true,
+        isRevoked: true,
+        status: true,
+        activeSessionId: true,
+        activeDeviceHash: true,
+        lastSavedWork: true,
+        resumePoint: true,
+      },
+    },
+    LinkAccess: {
+      select: {
+        vendorEmail: true,
+        level: true,
+        lockedAt: true,
+        isUsed: true,
+      },
+    },
     UserFile: {
       select: {
         id: true,
@@ -29,15 +72,12 @@ export type SecureLinkWithRelations = Prisma.SecureLinkGetPayload<{
         fileType: true,
         fileSize: true,
         version: true,
-        encryptedContent: true,
-        iv: true,
-        authTag: true,
-        encryptedDek: true,
+        status: true,
         mongoFileId: true,
         editingLocked: true,
-      }
+      },
     },
-  }
+  },
 }>;
 
 export type LinkAuthorizationContext = {
@@ -112,13 +152,54 @@ export async function authorizeSecureLink(
 
   const secureLink = await prisma.secureLink.findUnique({
     where: { token },
-    include: {
-      User: { select: { id: true, email: true } },
-      VendorAccess: true,
-      LinkAccess: true,
-      // PERF-5: Select only the fields needed by all consumers of this context.
-      // Avoids loading large encryptedContent blobs for every auth check.
-      // complete-work.ts needs the content fields; all others only need metadata.
+    select: {
+      id: true,
+      token: true,
+      otpHash: true,
+      expiresAt: true,
+      isUsed: true,
+      createdAt: true,
+      userId: true,
+      isRevoked: true,
+      ownerToken: true,
+      deviceHash: true,
+      failedAttempts: true,
+      lockedAt: true,
+      notificationEmail: true,
+      purpose: true,
+      purposeDetail: true,
+      otpFirstAttemptAt: true,
+      otpVerifiedAt: true,
+      allowedVendorEmail: true,
+      allowEditing: true,
+      allowDownload: true,
+      allowComment: true,
+      maxViews: true,
+      maxDownloads: true,
+      ownerId: true,
+      User: { select: { id: true, email: true, name: true } },
+      VendorAccess: {
+        select: {
+          id: true,
+          email: true,
+          level: true,
+          isRevoked: true,
+          status: true,
+          activeSessionId: true,
+          activeDeviceHash: true,
+          lastSavedWork: true,
+          resumePoint: true,
+        },
+      },
+      LinkAccess: {
+        select: {
+          vendorEmail: true,
+          level: true,
+          lockedAt: true,
+          isUsed: true,
+        },
+      },
+      // Metadata only — never load encryptedContent on the ACL hot path.
       UserFile: {
         select: {
           id: true,
@@ -126,10 +207,7 @@ export async function authorizeSecureLink(
           fileType: true,
           fileSize: true,
           version: true,
-          encryptedContent: true,
-          iv: true,
-          authTag: true,
-          encryptedDek: true,
+          status: true,
           mongoFileId: true,
           editingLocked: true,
         },

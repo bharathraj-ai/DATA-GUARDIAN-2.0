@@ -75,6 +75,11 @@ export async function GET(req: NextRequest) {
         return;
       }
 
+      let lastChatTimestamp: Date | null = null;
+      let heartbeatTick = 0;
+      let cachedLinkId = authResult.context.secureLink.id;
+      let cachedExpiresAt = authResult.context.secureLink.expiresAt;
+
       const pollInterval = setInterval(async () => {
         if (closed) { clearInterval(pollInterval); return; }
         try {
@@ -88,11 +93,24 @@ export async function GET(req: NextRequest) {
             return;
           }
 
-          // DB fallback check
-          const link = await prisma.secureLink.findUnique({
-            where: { token },
-            select: { isRevoked: true, expiresAt: true, id: true },
-          });
+          heartbeatTick += 1;
+          // Redis is the 3s kill-switch. Reconcile Postgres every ~15s (and on first tick).
+          const mustReconcileDb = heartbeatTick === 1 || heartbeatTick % 5 === 0;
+          let link: { id: string; isRevoked: boolean; expiresAt: Date } | null = {
+            id: cachedLinkId,
+            isRevoked: false,
+            expiresAt: cachedExpiresAt,
+          };
+          if (mustReconcileDb) {
+            link = await prisma.secureLink.findUnique({
+              where: { token },
+              select: { isRevoked: true, expiresAt: true, id: true },
+            });
+            if (link) {
+              cachedLinkId = link.id;
+              cachedExpiresAt = link.expiresAt;
+            }
+          }
 
           if (!link || link.isRevoked) {
             send({ type: 'revoked' });
@@ -130,10 +148,11 @@ export async function GET(req: NextRequest) {
              if (session.level < highestActiveLevel) highestActiveLevel = session.level;
           });
 
-          // Fetch recent chat messages — private DMs only visible to participants
+          // Incremental chat: full snapshot once, then only newer rows
           const recentChats = await prisma.chatMessage.findMany({
             where: {
               secureLinkId: link.id,
+              ...(lastChatTimestamp ? { timestamp: { gt: lastChatTimestamp } } : {}),
               OR: viewerEmail
                 ? [
                     { receiverEmail: null },
@@ -143,9 +162,12 @@ export async function GET(req: NextRequest) {
                 : [{ receiverEmail: null }],
             },
             orderBy: { timestamp: 'asc' },
-            take: 100,
+            take: lastChatTimestamp ? 50 : 100,
             select: { id: true, senderEmail: true, receiverEmail: true, content: true, timestamp: true }
           });
+          if (recentChats.length > 0) {
+            lastChatTimestamp = recentChats[recentChats.length - 1].timestamp;
+          }
 
           // Push down state
           send({ 

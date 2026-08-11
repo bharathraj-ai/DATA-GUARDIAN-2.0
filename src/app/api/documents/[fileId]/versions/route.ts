@@ -31,6 +31,7 @@ export async function GET(
     const versions = await prisma.fileVersion.findMany({
       where: { fileId },
       orderBy: { versionNumber: 'desc' },
+      take: 50,
       select: {
         id: true,
         versionNumber: true,

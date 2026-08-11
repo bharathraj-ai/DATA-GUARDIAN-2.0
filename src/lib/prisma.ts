@@ -14,8 +14,14 @@ function buildDatasourceUrl(): string {
     // Long-lived Next.js process (dev/standalone): small pool is fine with PgBouncer,
     // but 5 is too tight when dashboard fires multiple queries + cleanup.
     // Neon serverless: prefer pooled host + pgbouncer=true.
-    parsed.searchParams.set('connection_limit', process.env.NODE_ENV === 'development' ? '10' : '7');
-    parsed.searchParams.set('pool_timeout', '60');
+    // Small client pool (PgBouncer multiplexes). High limits + 60s waits
+    // queue every request behind exhausted SSE/txn slots (P2024).
+    const defaultLimit = process.env.NODE_ENV === 'development' ? '15' : '12';
+    parsed.searchParams.set(
+      'connection_limit',
+      process.env.PRISMA_CONNECTION_LIMIT || defaultLimit,
+    );
+    parsed.searchParams.set('pool_timeout', process.env.PRISMA_POOL_TIMEOUT || '10');
     if (!parsed.searchParams.has('connect_timeout')) {
       parsed.searchParams.set('connect_timeout', '20');
     }
@@ -32,15 +38,15 @@ function buildDatasourceUrl(): string {
 function isTransientPrismaError(error: unknown): boolean {
   const msg = error instanceof Error ? error.message : String(error);
   const code = (error as { code?: string })?.code;
+  // Do NOT retry P2024 (pool timeout). Retrying re-queues waiters and
+  // makes create-link / dashboard starve for another full pool_timeout.
   return (
     code === 'P1017' ||
     code === 'P1001' ||
-    code === 'P2024' || // connection pool timeout
     /kind:\s*Closed/i.test(msg) ||
     /Connection.*closed/i.test(msg) ||
     /Server has closed the connection/i.test(msg) ||
-    /Can't reach database server/i.test(msg) ||
-    /Timed out fetching a new connection/i.test(msg)
+    /Can't reach database server/i.test(msg)
   );
 }
 
@@ -58,7 +64,20 @@ function createPrismaClient(): PrismaClient {
   // Disconnecting mid-flight starves parallel queries and causes P2024 pool timeouts.
   const extended = client.$extends({
     query: {
-      async $allOperations({ args, query }) {
+      async $allOperations({ model, operation, args, query }) {
+        if (model === 'AuditLog' && operation === 'create') {
+          const data = (args as { data?: { ownerId?: string | null; linkId?: string | null } }).data;
+          if (data && !data.ownerId && data.linkId) {
+            const link = await client.secureLink.findUnique({
+              where: { id: data.linkId },
+              select: { ownerId: true },
+            });
+            if (link?.ownerId) {
+              data.ownerId = link.ownerId;
+            }
+          }
+        }
+
         try {
           return await query(args);
         } catch (error) {

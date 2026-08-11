@@ -1,12 +1,9 @@
 'use server';
 
-import { prisma } from '@/lib/prisma';
 import { auth } from '@/lib/auth';
+import { listVendorOptions, type VendorOption } from '@/lib/vendor-options';
 
-export interface VendorOption {
-    email: string;
-    name: string | null;
-}
+export type { VendorOption };
 
 /**
  * Fetch vendors for the Create Secure Link dropdown.
@@ -24,20 +21,7 @@ export async function getAvailableVendors(): Promise<VendorOption[]> {
             return [];
         }
 
-        const vendors = await prisma.user.findMany({
-            where: {
-                role: 'VENDOR',
-            },
-            select: {
-                email: true,
-                name: true,
-            },
-            orderBy: {
-                name: 'asc',
-            },
-        });
-
-        return vendors;
+        return await listVendorOptions();
     } catch (error) {
         console.error('Error fetching vendors:', error);
         return [];

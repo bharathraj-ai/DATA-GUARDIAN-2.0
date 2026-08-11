@@ -61,8 +61,12 @@ export default function LiveActivityModal({ token, topic, onClose }: LiveActivit
                         if (data.activeParticipants) {
                             setParticipants(data.activeParticipants);
                         }
-                        if (data.chats) {
-                            setChats(data.chats);
+                        if (data.chats && data.chats.length > 0) {
+                            setChats((prev) => {
+                                const existing = new Set(prev.map((c) => c.id));
+                                const incoming = (data.chats as ChatMessage[]).filter((c) => !existing.has(c.id));
+                                return incoming.length ? [...prev, ...incoming] : prev;
+                            });
                         }
                     } else if (data.type === 'revoked' || data.type === 'expired') {
                         setStatus('disconnected');

@@ -47,14 +47,6 @@ function getStatus(link: { expiresAt: Date; isUsed: boolean; isRevoked: boolean 
     return 'active';
 }
 
-function scheduleCleanupIfNeeded(links: DashboardLink[]) {
-    if (!links.some((l) => l.status === 'expired' || l.status === 'revoked')) return;
-    // Dynamic import keeps the cleanup module off the dashboard hot path
-    import('@/actions/cleanup')
-        .then((m) => m.cleanupExpiredData())
-        .catch(() => {});
-}
-
 /** List-row fields only — no nested files/audits (loaded on expand). */
 const LIST_SELECT = {
     id: true,
@@ -80,6 +72,76 @@ const LIST_SELECT = {
     },
     _count: { select: { UserFile: true } },
 } as const;
+
+const VENDOR_LIST_SELECT = {
+    id: true,
+    token: true,
+    expiresAt: true,
+    isUsed: true,
+    isRevoked: true,
+    createdAt: true,
+    purpose: true,
+    purposeDetail: true,
+    notificationEmail: true,
+    failedAttempts: true,
+    lockedAt: true,
+    otpVerifiedAt: true,
+    allowedVendorEmail: true,
+} as const;
+
+/**
+ * Vendor inbox: indexed lookups by email, then one SecureLink fetch by id.
+ * Avoids OR + relation `some()` which the planner cannot use cleanly.
+ */
+async function findReceivedLinksByEmail(email: string) {
+    const vendorRows = await prisma.vendorAccess.findMany({
+        where: { email },
+        select: { secureLinkId: true },
+        take: 50,
+    });
+    const accessRows = await prisma.linkAccess.findMany({
+        where: { vendorEmail: email },
+        select: { secureLinkId: true },
+        take: 50,
+    });
+    const ids = [...new Set([
+        ...vendorRows.map((r) => r.secureLinkId),
+        ...accessRows.map((r) => r.secureLinkId),
+    ])];
+
+    return prisma.secureLink.findMany({
+        where: ids.length > 0
+            ? { OR: [{ allowedVendorEmail: email }, { id: { in: ids } }] }
+            : { allowedVendorEmail: email },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+        select: {
+            ...VENDOR_LIST_SELECT,
+            LinkAccess: {
+                select: { vendorEmail: true, level: true, isUsed: true },
+                where: { vendorEmail: email },
+                take: 1,
+            },
+            VendorAccess: {
+                select: { email: true, level: true, status: true },
+                where: { email },
+                take: 1,
+            },
+        },
+    });
+}
+
+function mapVendorLinks(links: Awaited<ReturnType<typeof findReceivedLinksByEmail>>): DashboardLink[] {
+    return links.map((link) => {
+        const vendorIsUsed = link.LinkAccess?.[0]?.isUsed ?? link.isUsed;
+        const row = mapListLink({ ...link, _count: { UserFile: 0 } }, vendorIsUsed);
+        const vendorAccessRecord = link.VendorAccess?.[0];
+        if (row.status === 'used' && vendorAccessRecord?.status && vendorAccessRecord.status !== 'completed') {
+            row.status = 'break';
+        }
+        return row;
+    });
+}
 
 function mapListLink(link: any, effectiveIsUsed: boolean): DashboardLink {
     const primaryVendor = link.LinkAccess?.[0]?.vendorEmail || link.allowedVendorEmail || null;
@@ -132,7 +194,6 @@ export async function getOwnedLinks(userId: string): Promise<DashboardLink[]> {
             return mapListLink(link, link.isUsed || anyVendorUsed);
         });
 
-        scheduleCleanupIfNeeded(mapped);
         return mapped;
     } catch (error) {
         console.error('Error fetching owned links:', error);
@@ -153,55 +214,7 @@ export async function getReceivedLinks(email: string): Promise<DashboardLink[]> 
             return [];
         }
 
-        const links = await prisma.secureLink.findMany({
-            where: {
-                OR: [
-                    { allowedVendorEmail: target },
-                    { VendorAccess: { some: { email: target } } },
-                    { LinkAccess: { some: { vendorEmail: target } } },
-                ],
-            },
-            orderBy: { createdAt: 'desc' },
-            take: 50,
-            select: {
-                id: true,
-                token: true,
-                expiresAt: true,
-                isUsed: true,
-                isRevoked: true,
-                createdAt: true,
-                purpose: true,
-                purposeDetail: true,
-                notificationEmail: true,
-                failedAttempts: true,
-                lockedAt: true,
-                otpVerifiedAt: true,
-                allowedVendorEmail: true,
-                LinkAccess: {
-                    select: { vendorEmail: true, level: true, isUsed: true },
-                    where: { vendorEmail: target },
-                    take: 1,
-                },
-                VendorAccess: {
-                    select: { email: true, level: true, status: true },
-                    where: { email: target },
-                    take: 1,
-                },
-            },
-        });
-
-        const mapped = links.map((link: any) => {
-            const vendorIsUsed = link.LinkAccess?.[0]?.isUsed ?? link.isUsed;
-            const row = mapListLink({ ...link, _count: { UserFile: 0 } }, vendorIsUsed);
-            const vendorAccessRecord = link.VendorAccess?.[0];
-            if (row.status === 'used' && vendorAccessRecord?.status && vendorAccessRecord.status !== 'completed') {
-                row.status = 'break';
-            }
-            return row;
-        });
-
-        scheduleCleanupIfNeeded(mapped);
-        return mapped;
+        return mapVendorLinks(await findReceivedLinksByEmail(target));
     } catch (error) {
         console.error('Error fetching received links:', error);
         return [];
@@ -311,8 +324,6 @@ export async function getOwnerDashboardInitial(): Promise<{
         const anyVendorUsed = link.LinkAccess?.some((a: any) => a.isUsed) || false;
         return mapListLink(link, link.isUsed || anyVendorUsed);
     });
-    scheduleCleanupIfNeeded(mapped);
-
     return {
         links: mapped,
         userId,
@@ -336,57 +347,8 @@ export async function getVendorDashboardInitial(): Promise<{
         return { links: [], email: null, name: null };
     }
 
-    // Reuse getReceivedLinks auth path but avoid double auth by inlining slim query
-    const links = await prisma.secureLink.findMany({
-        where: {
-            OR: [
-                { allowedVendorEmail: email },
-                { VendorAccess: { some: { email } } },
-                { LinkAccess: { some: { vendorEmail: email } } },
-            ],
-        },
-        orderBy: { createdAt: 'desc' },
-        take: 50,
-        select: {
-            id: true,
-            token: true,
-            expiresAt: true,
-            isUsed: true,
-            isRevoked: true,
-            createdAt: true,
-            purpose: true,
-            purposeDetail: true,
-            notificationEmail: true,
-            failedAttempts: true,
-            lockedAt: true,
-            otpVerifiedAt: true,
-            allowedVendorEmail: true,
-            LinkAccess: {
-                select: { vendorEmail: true, level: true, isUsed: true },
-                where: { vendorEmail: email },
-                take: 1,
-            },
-            VendorAccess: {
-                select: { email: true, level: true, status: true },
-                where: { email },
-                take: 1,
-            },
-        },
-    });
-
-    const mapped = links.map((link: any) => {
-        const vendorIsUsed = link.LinkAccess?.[0]?.isUsed ?? link.isUsed;
-        const row = mapListLink({ ...link, _count: { UserFile: 0 } }, vendorIsUsed);
-        const vendorAccessRecord = link.VendorAccess?.[0];
-        if (row.status === 'used' && vendorAccessRecord?.status && vendorAccessRecord.status !== 'completed') {
-            row.status = 'break';
-        }
-        return row;
-    });
-    scheduleCleanupIfNeeded(mapped);
-
     return {
-        links: mapped,
+        links: mapVendorLinks(await findReceivedLinksByEmail(email)),
         email,
         name: session?.user?.name ?? null,
     };

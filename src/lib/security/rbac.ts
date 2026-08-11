@@ -38,6 +38,7 @@ export async function checkDocumentPermission(
   userId: string,
   documentId: string,
   action: DocumentAction,
+  loaded?: { ownerId: string; isDeleted: boolean },
 ): Promise<DocumentAccessResult> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -55,7 +56,7 @@ export async function checkDocumentPermission(
     };
   }
 
-  const document = await prisma.document.findUnique({
+  const document = loaded ?? await prisma.document.findUnique({
     where: { id: documentId },
     select: { ownerId: true, isDeleted: true },
   });

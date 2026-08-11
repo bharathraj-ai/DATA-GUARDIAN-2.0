@@ -2,6 +2,7 @@
 
 import { prisma } from '@/lib/prisma';
 import { authorizeSecureLink } from '@/lib/linkAuthorization';
+import { loadUserFilesContentForLink } from '@/lib/security/resource-ownership';
 import { decryptBuffer, decryptDek } from '@/lib/crypto';
 import { downloadFromMongo } from '@/lib/mongo/operations';
 import { sendCompletedWorkEmail, type FileAttachment } from '@/lib/email';
@@ -31,24 +32,15 @@ export async function completeWork(token: string): Promise<CompleteWorkResult> {
 
         if (isEditingEnabled) {
             // ── EDITING MODE: Decrypt files and email to owner ──
-
-            // 2. Fetch the owner's email for delivery
-            const ownerUser = secureLink.ownerId
-                ? await prisma.user.findUnique({
-                    where: { id: secureLink.ownerId },
-                    select: { email: true }
-                })
-                : null;
-
-            ownerEmail = ownerUser?.email || (secureLink as any).notificationEmail;
+            ownerEmail = secureLink.User?.email || secureLink.notificationEmail;
 
             if (!ownerEmail) {
                 logger.error('No owner email found — cannot deliver edited files.');
                 return { success: false, error: 'Could not determine owner email for file delivery.' };
             }
 
-            // 3. Collect all files and decrypt them for email attachment
-            const files = secureLink.UserFile || [];
+            // 3. Load ciphertext only after ACL — not on the authorize hot path
+            const files = await loadUserFilesContentForLink(secureLink.id);
 
             // JSON editor state signature as bytes: {"type":"
             const JSON_EDITOR_SIGNATURE = Buffer.from('{"type":"');

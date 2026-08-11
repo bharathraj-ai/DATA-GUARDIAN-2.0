@@ -24,6 +24,7 @@ model Account {
   user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerAccountId])
+  @@index([userId])
 }
 
 model AuditLog {
@@ -31,12 +32,17 @@ model AuditLog {
   action     String
   timestamp  DateTime    @default(now())
   linkId     String?
+  /// Denormalized from SecureLink.ownerId so owner dashboards survive link cleanup
+  /// and avoid nested relation filters on the timestamp-ordered hot path.
+  ownerId    String?
   metadata   String?
   reason     String?
   SecureLink SecureLink? @relation(fields: [linkId], references: [id], onDelete: SetNull)
   @@index([action])
   @@index([linkId])
   @@index([timestamp])
+  @@index([linkId, action, timestamp])
+  @@index([ownerId, timestamp])
 }
 
 model SecureLink {
@@ -73,8 +79,8 @@ model SecureLink {
   VendorAccess       VendorAccess[]
   @@index([expiresAt])
   @@index([ownerId])
-  @@index([ownerToken])
-  @@index([token])
+  @@index([ownerId, createdAt])
+  @@index([allowedVendorEmail])
 }
 enum VendorStatus {
   active
@@ -127,6 +133,7 @@ model VendorAccess {
   @@unique([secureLinkId, email])
   @@index([secureLinkId])
   @@index([email])
+  @@index([activeSessionId])
 }
 
 /// Append-only OTP history for forensic audit.
@@ -145,6 +152,7 @@ model OtpHistory {
 
   @@index([vendorAccessId])
   @@index([status])
+  @@index([vendorAccessId, status])
 }
 
 
@@ -154,6 +162,8 @@ model Session {
   userId       String
   expires      DateTime
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 model User {
@@ -172,6 +182,8 @@ model User {
   SendRecord    SendRecord[]
   Document      Document[]
   documentGrants DocumentGrant[] @relation("DocumentGrantee")
+
+  @@index([role])
 }
 
 model UserData {
@@ -253,6 +265,8 @@ model SendRecord {
 
   @@index([ownerId])
   @@index([createdAt])
+  @@index([ownerId, createdAt])
+  @@index([ownerId, status])
 }
 
 /// Persistent annotation overlay stored separately from the encrypted document.
@@ -269,6 +283,7 @@ model Annotation {
 
   @@index([fileId])
   @@index([pageNumber])
+  @@index([fileId, createdAt])
 }
 
 /// Active editing session for presence tracking.
@@ -286,6 +301,7 @@ model DocumentSession {
 
   @@index([fileId])
   @@index([token])
+  @@index([token, lastSeenAt])
 }
 
 /// Append-only audit log of collaboration operations.
@@ -300,6 +316,7 @@ model CollabOperation {
 
   @@index([fileId])
   @@index([createdAt])
+  @@index([fileId, createdAt])
 }
 
 /// Link access mapping for multiple vendors with hierarchy levels.
@@ -333,6 +350,7 @@ model ChatMessage {
 
   @@index([secureLinkId])
   @@index([timestamp])
+  @@index([secureLinkId, timestamp])
 }
 
 // ============================================
@@ -363,6 +381,7 @@ model Document {
   @@index([classification])
   @@index([createdAt])
   @@index([isDeleted])
+  @@index([ownerId, isDeleted, createdAt])
 }
 
 /// Explicit grant for non-owner access to ONLYOFFICE-backed documents (deny-by-default).
@@ -412,6 +431,7 @@ model DocumentAuditLog {
   @@index([userId])
   @@index([action])
   @@index([createdAt])
+  @@index([documentId, createdAt])
 }
 
 /// Real-time collaboration chat messages per document.
@@ -428,6 +448,7 @@ model DocumentChatMessage {
 
   @@index([fileId])
   @@index([createdAt])
+  @@index([fileId, createdAt])
 }
 
 // ============================================

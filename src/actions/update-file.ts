@@ -64,7 +64,8 @@ export async function updateFile(
 
         // 6. Verify file ownership within this secure link
         const secureLink = authResult.context.secureLink;
-        const fileRecord = secureLink.UserFile.find((f: any) => f.id === fileId);
+        const { loadUserFileContentForLink } = await import('@/lib/security/resource-ownership');
+        const fileRecord = await loadUserFileContentForLink(fileId, secureLink.id);
 
         if (!fileRecord) {
             return { success: false, error: 'File not found.' };
