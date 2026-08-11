@@ -2,13 +2,13 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { motion, AnimatePresence } from 'framer-motion';
 import { verifyOTP } from '@/actions/verify-otp';
 import { validateShareAccess } from '@/actions/validate-share-access';
 import { sendVendorOTP } from '@/actions/send-vendor-otp';
 import { useSession, signIn } from 'next-auth/react';
 import { logger, redactToken } from '@/lib/logger';
-import { Lock, AlertTriangle } from 'lucide-react';
+import { Lock } from 'lucide-react';
+import styles from './otp.module.css';
 
 interface SharePageProps {
     params: any;
@@ -33,6 +33,7 @@ export default function SharePage({ params }: SharePageProps) {
     const [resendMessage, setResendMessage] = useState('');
     const [isResending, setIsResending] = useState(false);
     const [shake, setShake] = useState(false);
+    const [activeIndex, setActiveIndex] = useState(0);
     const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [accessState, setAccessState] = useState<AccessState>('checking');
@@ -121,12 +122,6 @@ export default function SharePage({ params }: SharePageProps) {
         const mins = Math.floor(seconds / 60);
         const secs = seconds % 60;
         return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-    };
-
-    const getTimerClass = (): string => {
-        if (countdown <= 30) return 'timer-danger';
-        if (countdown <= 60) return 'timer-warning';
-        return 'timer-safe';
     };
 
     const handleChange = (index: number, value: string) => {
@@ -262,8 +257,10 @@ export default function SharePage({ params }: SharePageProps) {
             const result = await verifyOTP({ token, otp: otpString, email: email || undefined });
 
             if (result.success) {
-                // Hard navigate immediately — avoid AnimatePresence exit + location change racing React DOM
-                window.location.assign(`/view/${token}?t=${Date.now()}`);
+                setState('success');
+                window.setTimeout(() => {
+                    window.location.assign(`/view/${token}?t=${Date.now()}`);
+                }, 1700);
                 return;
             } else {
                 setState('error');
@@ -298,10 +295,13 @@ export default function SharePage({ params }: SharePageProps) {
     // Loading state
     if (isLoading || accessState === 'checking' || status === 'loading') {
         return (
-            <main className="otp-wrapper">
-                <div className="otp-card">
-                    <div className="loading-spinner" />
-                    <p className="loading-text">Validating access permissions...</p>
+            <main className={styles.page}>
+                <div className={styles.wash} />
+                <div className={styles.card}>
+                    <div className={styles.wait}>
+                        <div className={styles.spin} style={{ borderColor: 'rgba(2,132,199,0.25)', borderTopColor: '#0284c7', width: 28, height: 28 }} />
+                        <p>Checking this share…</p>
+                    </div>
                 </div>
             </main>
         );
@@ -310,44 +310,23 @@ export default function SharePage({ params }: SharePageProps) {
     // SECURITY: Requires authentication — show sign-in prompt
     if (accessState === 'requires_auth') {
         return (
-            <main className="otp-wrapper">
-                <div className="bg-orb bg-orb-1" />
-                <div className="bg-orb bg-orb-2" />
-                <div className="bg-grid" />
-
-                <div className="otp-card">
-                    <div className="otp-header">
-                        <div className="lock-icon">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                            </svg>
-                        </div>
-                        <h1 className="otp-title">Authentication Required</h1>
-                        <p className="otp-subtitle">
-                            This secure link is restricted to an authorized recipient.
-                            Please sign in with Google to verify your identity.
-                        </p>
-                    </div>
+            <main className={styles.page}>
+                <div className={styles.wash} />
+                <div className={styles.card}>
+                    <p className={styles.kicker}>OTP gate</p>
+                    <h1 className={styles.title}>Sign in to continue</h1>
+                    <p className={styles.sub}>
+                        This share is locked to an authorized recipient. Sign in with Google to prove it.
+                    </p>
 
                     <button
                         onClick={() => signIn('google', { callbackUrl: `/share/${token}` })}
-                        className="otp-button idle"
-                        style={{ marginTop: '24px' }}
+                        className={styles.go}
+                        style={{ marginTop: 20 }}
                     >
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: '20px', height: '20px' }}>
-                            <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
-                            <polyline points="10 17 15 12 10 7" />
-                            <line x1="15" y1="12" x2="3" y2="12" />
-                        </svg>
                         Sign in with Google
                     </button>
-
-                    <div className="security-badge" style={{ marginTop: '24px' }}>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                        </svg>
-                        <span>Only the authorized recipient can access this link</span>
-                    </div>
+                    <p className={styles.hint}>Only the named vendor can open this link.</p>
                 </div>
             </main>
         );
@@ -359,27 +338,14 @@ export default function SharePage({ params }: SharePageProps) {
         const isExpired = accessError.includes('expired');
         const isEmailMismatch = accessError.includes('different recipient');
         return (
-            <main className="otp-wrapper">
-                <div className="bg-orb bg-orb-1" />
-                <div className="bg-orb bg-orb-2" />
-                <div className="bg-grid" />
-
-                <div className="otp-card">
-                    <div className="otp-header">
-                        <div className="lock-icon" style={{ color: '#ef4444' }}>
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                {isEmailMismatch ? (
-                                    <><circle cx="12" cy="12" r="10" /><line x1="4.93" y1="4.93" x2="19.07" y2="19.07" /></>
-                                ) : (
-                                    <><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></>
-                                )}
-                            </svg>
-                        </div>
-                        <h1 className="otp-title" style={{ color: '#ef4444' }}>
-                            {isRevoked ? 'Access Revoked' : isExpired ? 'Link Expired' : isEmailMismatch ? 'Unauthorized Access' : 'Access Denied'}
-                        </h1>
-                        <p className="otp-subtitle">{accessError}</p>
-                    </div>
+            <main className={styles.page}>
+                <div className={styles.wash} />
+                <div className={styles.card}>
+                    <p className={styles.kicker}>OTP gate</p>
+                    <h1 className={styles.title}>
+                        {isRevoked ? 'Access revoked' : isExpired ? 'Link expired' : isEmailMismatch ? 'Wrong account' : 'Access denied'}
+                    </h1>
+                    <p className={styles.sub}>{accessError}</p>
 
                     {isEmailMismatch && (
                         <div className="phishing-warning" style={{
@@ -409,19 +375,11 @@ export default function SharePage({ params }: SharePageProps) {
                         onClick={() => {
                             window.location.href = `/create-link?t=${Date.now()}`;
                         }}
-                        className="otp-button idle"
-                        style={{ marginTop: '16px' }}
+                        className={styles.go}
+                        style={{ marginTop: 16 }}
                     >
                         Return Home
                     </button>
-
-                    <div className="security-badge" style={{ marginTop: '24px' }}>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                        </svg>
-                        <span>Protected by Secure Protocol V2</span>
-                    </div>
                 </div>
             </main>
         );
@@ -430,116 +388,100 @@ export default function SharePage({ params }: SharePageProps) {
     // Dynamic Step Resolver to prevent rendering flash/race conditions
     const isStepOtp = step === 'otp';
 
-    // ACCESS GRANTED — Show OTP form (only reaches here if accessState === 'allowed')
+    const meterOffset = 100.53 * (1 - Math.max(0, countdown) / 300);
+    const meterTone = countdown <= 30 ? styles.meterHot : countdown <= 60 ? styles.meterWarn : '';
+
     return (
-        <main className="otp-wrapper">
-            {/* Decorative Background Elements */}
-            <div className="bg-orb bg-orb-1" />
-            <div className="bg-orb bg-orb-2" />
-            <div className="bg-grid" />
-
-            <div className="otp-card">
-                {/* Header */}
-                <div className="otp-header">
-                    <div className={`lock-icon ${state === 'success' ? 'unlocked' : ''}`}>
-                        {state === 'success' ? (
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                <path d="M9 12l2 2 4-4" />
-                                <circle cx="12" cy="12" r="10" />
-                            </svg>
-                        ) : (
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                            </svg>
-                        )}
-                    </div>
-                    <h1 className="otp-title">
-                        {state === 'success' ? 'Access Granted' : 'Secure Verification'}
-                    </h1>
-                    <p className="otp-subtitle">
-                        {state === 'success'
-                            ? 'Redirecting to protected data...'
-                            : 'Enter the 6-digit code to access protected information'
-                        }
-                    </p>
-                </div>
-
-                {/* Timer */}
-                {state !== 'success' && (
-                    <div className={`otp-timer ${getTimerClass()}`}>
-                        <svg className="timer-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <circle cx="12" cy="12" r="10" />
-                            <polyline points="12 6 12 12 16 14" />
+        <main className={styles.page}>
+            <div className={styles.wash} />
+            <div className={styles.card}>
+                {state === 'success' ? (
+                    <div className={styles.unlock}>
+                        <svg className={styles.lock} viewBox="0 0 64 64" fill="none" aria-hidden="true">
+                            <path
+                                className={styles.shackle}
+                                d="M20 28V22a12 12 0 0 1 24 0v6"
+                                stroke="#0284c7"
+                                strokeWidth="4"
+                                strokeLinecap="round"
+                            />
+                            <rect className={styles.body} x="14" y="28" width="36" height="26" rx="8" fill="#0284c7" />
+                            <circle cx="32" cy="41" r="3.5" fill="#e0f2fe" />
                         </svg>
-                        <span>
-                            {countdown > 0
-                                ? `OTP expires in ${formatTime(countdown)}`
-                                : 'OTP has expired'
-                            }
-                        </span>
+                        <h2>Share unlocked</h2>
+                        <p>Opening the vault…</p>
                     </div>
-                )}
+                ) : (
+                    <>
+                        <div className={styles.head}>
+                            <div className={styles.copy}>
+                                <p className={styles.kicker}>OTP gate</p>
+                                <h1 className={styles.title}>Unlock this share</h1>
+                                <p className={styles.sub}>
+                                    Six digits from the email we sent. They die with the ring on the right.
+                                </p>
+                            </div>
+                            <div className={styles.meter} aria-label={`Code expires in ${formatTime(countdown)}`}>
+                                <svg className={styles.meterSvg} viewBox="0 0 40 40">
+                                    <circle className={styles.meterTrack} cx="20" cy="20" r="16" />
+                                    <circle
+                                        className={`${styles.meterFill} ${meterTone}`}
+                                        cx="20"
+                                        cy="20"
+                                        r="16"
+                                        style={{ strokeDashoffset: meterOffset }}
+                                    />
+                                </svg>
+                                <span className={styles.meterTime}>
+                                    {countdown > 0 ? formatTime(countdown) : '00:00'}
+                                </span>
+                            </div>
+                        </div>
 
-                {/* Step 1: Email Input */}
-                {!isStepOtp && state !== 'success' && (
-                    <div className={`otp-input-container ${shake ? 'shake' : ''}`}>
-                        <label className="otp-label">Email Address</label>
-                        <input
-                            type="email"
-                            value={email}
-                            onChange={(e) => {
-                                setEmail(e.target.value);
-                                setError('');
-                            }}
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter') handleEmailSubmit();
-                            }}
-                            className={`otp-box filled ${error ? 'error' : ''}`}
-                            style={{ width: '100%', marginBottom: '16px', fontSize: '16px', padding: '12px' }}
-                            placeholder="Enter your email to receive OTP"
-                            disabled={state === 'loading'}
-                            autoFocus
-                        />
-                        <button
-                            onClick={handleEmailSubmit}
-                            disabled={state === 'loading' || !email}
-                            className={`otp-button ${state}`}
-                            style={{ margin: 0 }}
-                        >
-                            {state === 'loading' ? (
-                                <>
-                                    <span className="button-spinner" />
-                                    Sending...
-                                </>
-                            ) : (
-                                <>
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                        <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
-                                        <polyline points="22,6 12,13 2,6" />
-                                    </svg>
-                                    Send Verification Code
-                                </>
-                            )}
-                        </button>
-                    </div>
-                )}
-
-                {/* Step 2: OTP Input & Success Transition */}
-                <AnimatePresence mode="wait">
-                    {isStepOtp && state !== 'success' && (
-                        <motion.div
-                            key="otp-input"
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0, x: state === 'error' ? [-10, 10, -10, 10, 0] : 0 }}
-                            exit={{ opacity: 0, y: -20, scale: 0.95 }}
-                            transition={{ duration: 0.3 }}
-                            className={`otp-input-container ${shake ? 'shake' : ''}`}
-                        >
-                            <label className="otp-label">{email ? `Enter OTP sent to ${email}` : 'Enter the 6-digit OTP from your email'}</label>
-                            
-                            <div className={`rotating-border-wrapper ${state === 'loading' ? 'is-verifying' : ''}`}>
-                                <div className={`otp-boxes ${state === 'loading' ? 'otp-glow-loading shimmer-sweep' : state === 'error' ? 'otp-glow-error' : ''}`}>
+                        {!isStepOtp ? (
+                            <div>
+                                <input
+                                    type="email"
+                                    value={email}
+                                    onChange={(e) => {
+                                        setEmail(e.target.value);
+                                        setError('');
+                                    }}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter') handleEmailSubmit();
+                                    }}
+                                    className={styles.email}
+                                    placeholder="Authorized email"
+                                    disabled={state === 'loading'}
+                                    autoFocus
+                                />
+                                {error ? <p className={styles.error}>{error}</p> : null}
+                                <button
+                                    type="button"
+                                    onClick={handleEmailSubmit}
+                                    disabled={state === 'loading' || !email}
+                                    className={`${styles.go} ${state === 'loading' ? styles.busy : ''}`}
+                                >
+                                    {state === 'loading' ? <span className={styles.spin} /> : null}
+                                    {state === 'loading' ? 'Sending…' : 'Send the code'}
+                                </button>
+                            </div>
+                        ) : (
+                            <div>
+                                <p className={styles.sent}>
+                                    {email ? (
+                                        <>Code sent to <strong>{email}</strong></>
+                                    ) : (
+                                        'Enter the six-digit code from your email'
+                                    )}
+                                </p>
+                                <div
+                                    className={`${styles.track} ${state === 'loading' ? styles.checking : ''} ${shake || state === 'error' ? styles.bad : ''}`}
+                                >
+                                    <span
+                                        className={styles.scan}
+                                        style={{ transform: state === 'loading' ? undefined : `translateX(${activeIndex * 100}%)` }}
+                                    />
                                     {otp.map((digit, index) => (
                                         <input
                                             key={index}
@@ -551,185 +493,44 @@ export default function SharePage({ params }: SharePageProps) {
                                             onChange={(e) => handleChange(index, e.target.value)}
                                             onKeyDown={(e) => handleKeyDown(index, e)}
                                             onPaste={handlePaste}
-                                            className={`otp-box ${digit ? 'filled' : ''} ${error ? 'error' : ''}`}
+                                            onFocus={() => setActiveIndex(index)}
+                                            className={styles.slot}
                                             disabled={state === 'loading' || countdown <= 0}
                                             autoComplete="one-time-code"
                                         />
                                     ))}
                                 </div>
-                            </div>
-
-                            <AnimatePresence>
-                                {error && (
-                                    <motion.div
-                                        initial={{ opacity: 0, height: 0 }}
-                                        animate={{ opacity: 1, height: 'auto' }}
-                                        exit={{ opacity: 0, height: 0 }}
-                                        style={{ overflow: 'hidden' }}
-                                    >
-                                        <div style={{ color: '#ef4444', fontSize: '0.875rem', marginTop: '12px', textAlign: 'center' }}>{error}</div>
-                                    </motion.div>
-                                )}
-                            </AnimatePresence>
-
-                            <button
-                                onClick={handleSubmit}
-                                disabled={state === 'loading' || countdown <= 0 || otp.some((d) => !d)}
-                                className={`otp-button ${state}`}
-                                style={{ marginTop: '24px' }}
-                            >
-                                {state === 'loading' ? (
-                                    <motion.div
-                                        animate={{ opacity: [0.5, 1, 0.5] }}
-                                        transition={{ duration: 1.5, repeat: Infinity }}
-                                        style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
-                                    >
-                                        <span className="button-spinner" />
-                                        Verifying OTP...
-                                    </motion.div>
-                                ) : state === 'error' ? (
-                                    'Try Again'
-                                ) : (
-                                    <>
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                            <path d="M9 12l2 2 4-4" />
-                                            <circle cx="12" cy="12" r="10" />
-                                        </svg>
-                                        Verify Access
-                                    </>
-                                )}
-                            </button>
-
-                            <div style={{ marginTop: '16px', textAlign: 'center' }}>
-                                {resendMessage && (
-                                    <p style={{ color: '#10b981', fontSize: '0.875rem', marginBottom: '8px' }}>
-                                        {resendMessage}
-                                    </p>
-                                )}
+                                {error ? <p className={styles.error}>{error}</p> : null}
                                 <button
                                     type="button"
+                                    onClick={handleSubmit}
+                                    disabled={state === 'loading' || countdown <= 0 || otp.some((d) => !d)}
+                                    className={`${styles.go} ${state === 'loading' ? styles.busy : ''}`}
+                                >
+                                    {state === 'loading' ? <span className={styles.spin} /> : <Lock size={16} />}
+                                    {state === 'loading' ? 'Matching code…' : state === 'error' ? 'Try again' : 'Unlock'}
+                                </button>
+                                {resendMessage ? <p className={styles.note}>{resendMessage}</p> : null}
+                                <button
+                                    type="button"
+                                    className={styles.resend}
                                     onClick={handleResendOTP}
-                                    disabled={
-                                        isResending ||
-                                        resendCooldown > 0 ||
-                                        state === 'loading'
-                                    }
-                                    style={{
-                                        background: 'transparent',
-                                        border: 'none',
-                                        color:
-                                            resendCooldown > 0 || isResending
-                                                ? '#6B7280'
-                                                : '#40c4ff',
-                                        cursor:
-                                            resendCooldown > 0 || isResending
-                                                ? 'not-allowed'
-                                                : 'pointer',
-                                        fontSize: '0.875rem',
-                                        fontWeight: 600,
-                                        textDecoration: resendCooldown > 0 ? 'none' : 'underline',
-                                        padding: '4px 8px',
-                                    }}
+                                    disabled={isResending || resendCooldown > 0 || state === 'loading'}
                                 >
                                     {isResending
-                                        ? 'Sending new OTP...'
+                                        ? 'Sending a new code…'
                                         : resendCooldown > 0
-                                            ? `Resend OTP in ${resendCooldown}s`
+                                            ? `New code in ${resendCooldown}s`
                                             : countdown <= 0
-                                                ? 'OTP expired — Resend OTP'
-                                                : "Didn't get the code? Resend OTP"}
+                                                ? 'Code expired — send a new one'
+                                                : 'Send a new code'}
                                 </button>
                             </div>
-                        </motion.div>
-                    )}
+                        )}
 
-                    {isStepOtp && state === 'success' && (
-                        <motion.div
-                            key="otp-success"
-                            initial={{ opacity: 0, scale: 0.8 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            transition={{ type: 'spring', bounce: 0.5 }}
-                            style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 0' }}
-                        >
-                            <motion.div
-                                initial={{ scale: 0 }}
-                                animate={{ scale: 1 }}
-                                transition={{ type: 'spring', damping: 12, delay: 0.1 }}
-                                style={{ width: '80px', height: '80px', borderRadius: '50%', background: 'rgba(16, 185, 129, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '24px', boxShadow: '0 0 30px rgba(16, 185, 129, 0.4)' }}
-                            >
-                                <svg viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="3" style={{ width: '40px', height: '40px' }}>
-                                    <motion.path
-                                        initial={{ pathLength: 0 }}
-                                        animate={{ pathLength: 1 }}
-                                        transition={{ duration: 0.5, delay: 0.2 }}
-                                        d="M5 13l4 4L19 7"
-                                    />
-                                </svg>
-                            </motion.div>
-                            <h2 style={{ fontSize: '24px', fontWeight: 700, color: '#10b981', marginBottom: '8px' }}>Verified!</h2>
-                            <p style={{ color: '#6B7280' }}>Securing your connection...</p>
-                        </motion.div>
-                    )}
-                </AnimatePresence>
-
-                {/* Trust Indicators */}
-                <div className="trust-indicators">
-                    <div className="trust-item">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                        </svg>
-                        <span>Single-use access</span>
-                    </div>
-                    <div className="trust-item">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <circle cx="12" cy="12" r="10" />
-                            <polyline points="12 6 12 12 16 14" />
-                        </svg>
-                        <span>Auto-expires after viewing</span>
-                    </div>
-                    <div className="trust-item">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <polyline points="3 6 5 6 21 6" />
-                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                        </svg>
-                        <span>No data stored after expiry</span>
-                    </div>
-                </div>
-
-                {/* Anti-Phishing Warning */}
-                <div className="phishing-warning" style={{
-                    background: 'rgba(251, 191, 36, 0.1)',
-                    border: '1px solid rgba(251, 191, 36, 0.3)',
-                    borderRadius: '8px',
-                    padding: '12px 16px',
-                    margin: '16px 0',
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: '10px'
-                }}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="#fbbf24" strokeWidth="2" style={{ width: '20px', height: '20px', flexShrink: 0, marginTop: '2px' }}>
-                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-                        <line x1="12" y1="9" x2="12" y2="13" />
-                        <line x1="12" y1="17" x2="12.01" y2="17" />
-                    </svg>
-                    <div style={{ fontSize: '12px', color: '#fbbf24', lineHeight: '1.4' }}>
-                        <strong style={{ marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <AlertTriangle size={14} /> Anti-Phishing Notice
-                        </strong>
-                        We will <strong>never</strong> ask for your OTP via email, phone, or any website other than this page.
-                        <br />
-                        <span style={{ opacity: 0.8 }}>Verify you are on: <code style={{ background: 'rgba(0,0,0,0.3)', padding: '1px 4px', borderRadius: '3px' }}>{typeof window !== 'undefined' ? window.location.hostname : 'localhost'}</code></span>
-                    </div>
-                </div>
-
-                {/* Security Badge */}
-                <div className="security-badge">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                        <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                    </svg>
-                    <span>Protected by AES-256 encryption</span>
-                </div>
+                        <p className={styles.hint}>We only ask for this code on this page — never by email or phone.</p>
+                    </>
+                )}
             </div>
         </main>
     );

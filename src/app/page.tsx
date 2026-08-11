@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import ScrollReveal from '@/components/ScrollReveal';
+import HeroActions from '@/components/HeroActions';
 
 // Marketing page — no server data; cache as static
 export const dynamic = 'force-static';
@@ -60,23 +61,11 @@ export default function LandingPage() {
             </h1>
 
             <p className="hero-subtitle">
-              Share sensitive information with time-limited, encrypted links.
-              <br />
-              Complete control. Zero compromise.
+              Share sensitive information with encrypted links that expire on your terms —
+              by time, day count, or month. Complete control. Zero compromise.
             </p>
 
-            {/* CTA Buttons */}
-            <div className="hero-cta">
-              <Link href="/how-it-works" className="btn btn-primary btn-large">
-                <span>Get Started</span>
-                <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clipRule="evenodd" />
-                </svg>
-              </Link>
-              <Link href="/services" className="btn btn-secondary btn-large">
-                <span>View Features</span>
-              </Link>
-            </div>
+            <HeroActions />
 
             {/* Trust Indicators */}
             <div className="trust-badges">

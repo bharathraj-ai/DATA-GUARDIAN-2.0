@@ -412,3 +412,22 @@ export async function getOwnerDashboardData(userId: string): Promise<{
     const history = await getSendHistory(userId);
     return { links, history };
 }
+
+/** True when the owner already has a live (unexpired, unused, unrevoked) share. */
+export async function ownerHasActiveLink(userId: string): Promise<boolean> {
+    const session = await auth();
+    if (!session?.user?.id || session.user.id !== userId) return false;
+
+    const active = await prisma.secureLink.findFirst({
+        where: {
+            ownerId: userId,
+            isRevoked: false,
+            isUsed: false,
+            expiresAt: { gt: new Date() },
+            NOT: { LinkAccess: { some: { isUsed: true } } },
+        },
+        select: { id: true },
+    });
+
+    return Boolean(active);
+}

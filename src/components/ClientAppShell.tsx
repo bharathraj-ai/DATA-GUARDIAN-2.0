@@ -12,6 +12,10 @@ interface Props {
 export default function ClientAppShell({ children, footer }: Props) {
     const pathname = usePathname();
     const isFullscreenEditor = pathname?.startsWith('/editor/');
+    const hideSiteFooter =
+        pathname?.startsWith('/auth/role-select') ||
+        pathname?.startsWith('/auth/signin') ||
+        pathname?.startsWith('/view/');
 
     if (isFullscreenEditor) {
         return (
@@ -31,8 +35,8 @@ export default function ClientAppShell({ children, footer }: Props) {
     return (
         <>
             <Navbar />
-            <div id="main-content" style={{ background: '#FFFFFF', minHeight: '100vh' }}>{children}</div>
-            {footer}
+            <div id="main-content" style={{ background: hideSiteFooter ? '#f4f7fb' : '#FFFFFF', minHeight: '100vh' }}>{children}</div>
+            {hideSiteFooter ? null : footer}
         </>
     );
 }

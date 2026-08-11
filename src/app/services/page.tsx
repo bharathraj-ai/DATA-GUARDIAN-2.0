@@ -204,53 +204,18 @@ export default function ServicesPage() {
                 </div>
             </section>
 
-            {/* CTA Section */}
-            <section className="srv-cta-section">
-                <div className="container">
-                    <ScrollReveal>
-                        <div className="srv-cta-card">
-                            <div className="srv-cta-content">
-                                <div className="brand-badge badge-left">
-                                    <span>GET STARTED TODAY</span>
-                                </div>
-                                <h2 className="srv-cta-title">Ready to Protect Your Data?</h2>
-                                <p className="srv-cta-subtitle">
-                                    Start using Secure Protocol today.<br />No registration required.
-                                </p>
-                                <div className="srv-cta-buttons">
-                                    <Link href="/create-link" className="btn btn-primary btn-large">
-                                        <span>Create Secure Link</span>
-                                        <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-                                            <path fillRule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clipRule="evenodd" />
-                                        </svg>
-                                    </Link>
-                                    <Link href="/how-it-works" className="btn btn-outline-light btn-large">
-                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                            <circle cx="12" cy="12" r="10"></circle>
-                                            <line x1="12" y1="16" x2="12" y2="12"></line>
-                                            <line x1="12" y1="8" x2="12.01" y2="8"></line>
-                                        </svg>
-                                        <span>Learn More</span>
-                                    </Link>
-                                </div>
-                            </div>
-                            
-                            <div className="srv-cta-visual">
-                                <div className="srv-orbit-system">
-                                    <div className="srv-orbit-center">
-                                        <div className="srv-shield-glow"></div>
-                                        <svg width="128" height="128" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{position: 'relative', zIndex: 10}}>
-                                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" stroke="#2563eb" strokeWidth="1.5" fill="#eff6ff" strokeLinecap="round" strokeLinejoin="round"/>
-                                            <path d="M12 2v20" stroke="#2563eb" strokeWidth="1"/>
-                                            <path d="M4.5 11h15" stroke="#2563eb" strokeWidth="1"/>
-                                            <path d="M12 2v9h7.5" fill="#60a5fa" opacity="0.5"/>
-                                            <path d="M4.5 11h7.5v11" fill="#3b82f6" opacity="0.5"/>
-                                        </svg>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </ScrollReveal>
+            <section className="srv-gate">
+                <div className="container srv-gate-grid">
+                    <Link href="/create-link" className="srv-gate-panel">
+                        <span>Open a share</span>
+                        <strong>Encrypt and issue</strong>
+                        <small>Timed link, OTP, and revoke from the owner desk.</small>
+                    </Link>
+                    <Link href="/how-it-works" className="srv-gate-panel srv-gate-panel-b">
+                        <span>Read the protocol</span>
+                        <strong>Issue · Seal · Unlock</strong>
+                        <small>See the path a file takes before anyone can open it.</small>
+                    </Link>
                 </div>
             </section>
         </main>

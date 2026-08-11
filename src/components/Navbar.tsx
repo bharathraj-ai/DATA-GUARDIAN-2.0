@@ -27,9 +27,13 @@ export default function Navbar() {
     // Prefetch authenticated destinations so nav feels instant
     useEffect(() => {
         if (status !== 'authenticated') return;
-        const role = (session?.user as { role?: string })?.role;
+        const roleReady =
+            session?.user?.onboardingStep === 'COMPLETE' ||
+            (session?.user?.onboardingStep == null && Boolean(session?.user?.roleSelected));
+        const role = session?.user?.role;
         router.prefetch('/how-it-works');
         router.prefetch('/services');
+        if (!roleReady) return;
         if (role === 'OWNER') {
             router.prefetch('/dashboard/owner');
             router.prefetch('/create-link');
@@ -45,10 +49,13 @@ export default function Navbar() {
     ];
 
     const isAuthenticated = status === 'authenticated' && session?.user;
-    const userRole = (session?.user as { role?: string })?.role as string | undefined;
-    const isOwnerSide = userRole === 'OWNER';
-    const isVendorSide = userRole === 'VENDOR';
-    const roleLabel = userRole === 'OWNER' ? 'Owner' : 'Vendor';
+    const onboardingComplete =
+        session?.user?.onboardingStep === 'COMPLETE' ||
+        (session?.user?.onboardingStep == null && Boolean(session?.user?.roleSelected));
+    const userRole = session?.user?.role;
+    const isOwnerSide = onboardingComplete && userRole === 'OWNER';
+    const isVendorSide = onboardingComplete && userRole === 'VENDOR';
+    const roleLabel = isOwnerSide ? 'Owner' : isVendorSide ? 'Vendor' : null;
 
     return (
         <nav className={`navbar ${isScrolled ? 'navbar-scrolled' : ''}`}>
@@ -88,12 +95,6 @@ export default function Navbar() {
                                         Dashboard
                                     </Link>
                                 )}
-                                {isOwnerSide && (
-                                    <Link href="/create-link" className="btn btn-primary btn-sm">
-                                        Get Secure Link
-                                    </Link>
-                                )}
-
                                 {/* Profile Badge with Role */}
                                 <div className="navbar-profile-wrapper">
                                     <div className="navbar-profile-badge">
@@ -112,9 +113,15 @@ export default function Navbar() {
                                                 {session?.user?.name?.[0]?.toUpperCase() || '?'}
                                             </div>
                                         )}
-                                        <span className={`navbar-role-tag ${isOwnerSide ? 'navbar-role-tag--owner' : 'navbar-role-tag--vendor'}`}>
-                                            {roleLabel}
-                                        </span>
+                                        {roleLabel ? (
+                                            <span className={`navbar-role-tag ${isOwnerSide ? 'navbar-role-tag--owner' : 'navbar-role-tag--vendor'}`}>
+                                                {roleLabel}
+                                            </span>
+                                        ) : pathname !== '/auth/role-select' ? (
+                                            <Link href="/auth/role-select" className="navbar-role-tag navbar-role-tag--pending">
+                                                Choose role
+                                            </Link>
+                                        ) : null}
                                     </div>
                                     <button
                                         onClick={() => signOut({ callbackUrl: '/' })}
@@ -124,12 +131,13 @@ export default function Navbar() {
                                     </button>
                                 </div>
                             </>
-                    ) : (
-                        <>
-                            <Link href="/auth/signin" className="btn btn-secondary btn-sm">
-                                Sign In
-                            </Link>
-                        </>
+                    ) : pathname?.startsWith('/auth/signin') ? null : (
+                        <Link
+                            href="/auth/signin?intent=returning&callbackUrl=/dashboard"
+                            className="btn btn-secondary btn-sm"
+                        >
+                            Sign In
+                        </Link>
                     )}
                 </div>
 
@@ -226,6 +234,7 @@ export default function Navbar() {
                                             <p style={{ fontSize: '0.85rem', fontWeight: '600', color: '#0F172A' }}>
                                                 {session?.user?.name || 'User'}
                                             </p>
+                                            {roleLabel ? (
                                             <span style={{
                                                 fontSize: '0.65rem', fontWeight: '700', textTransform: 'uppercase',
                                                 letterSpacing: '0.5px',
@@ -237,18 +246,25 @@ export default function Navbar() {
                                             }}>
                                                 {roleLabel}
                                             </span>
+                                            ) : (
+                                            <Link
+                                                href="/auth/role-select"
+                                                onClick={() => setIsMobileMenuOpen(false)}
+                                                style={{
+                                                    fontSize: '0.65rem', fontWeight: '700', textTransform: 'uppercase',
+                                                    letterSpacing: '0.5px',
+                                                    padding: '2px 6px', borderRadius: '6px',
+                                                    background: '#E0F2FE',
+                                                    color: '#0284c7',
+                                                    textDecoration: 'none',
+                                                }}
+                                            >
+                                                Choose role
+                                            </Link>
+                                            )}
                                         </div>
                                     </div>
 
-                                    {isOwnerSide && (
-                                        <Link
-                                            href="/create-link"
-                                            className="btn btn-primary btn-full"
-                                            onClick={() => setIsMobileMenuOpen(false)}
-                                        >
-                                            Get Secure Link
-                                        </Link>
-                                    )}
                                     <button
                                         onClick={() => {
                                             setIsMobileMenuOpen(false);
@@ -259,16 +275,14 @@ export default function Navbar() {
                                         Sign Out
                                     </button>
                                 </>
-                        ) : (
-                            <>
-                                <Link
-                                    href="/auth/signin"
-                                    className="btn btn-secondary btn-full"
-                                    onClick={() => setIsMobileMenuOpen(false)}
-                                >
-                                    Sign In
-                                </Link>
-                            </>
+                        ) : pathname?.startsWith('/auth/signin') ? null : (
+                            <Link
+                                href="/auth/signin?intent=returning&callbackUrl=/dashboard"
+                                className="btn btn-secondary btn-full"
+                                onClick={() => setIsMobileMenuOpen(false)}
+                            >
+                                Sign In
+                            </Link>
                         )}
                     </div>
                 </div>

@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { auth } from '@/lib/auth';
 import { getAvailableVendors } from '@/actions/get-vendors';
+import { ownerHasActiveLink } from '@/actions/dashboard';
 import CreateLinkClient from './CreateLinkClient';
 
 /**
@@ -24,7 +25,10 @@ export default async function CreateLinkPage() {
         redirect('/dashboard/vendor');
     }
 
-    const initialVendors = await getAvailableVendors();
+    const [initialVendors, hasActiveLink] = await Promise.all([
+        getAvailableVendors(),
+        ownerHasActiveLink(session.user.id),
+    ]);
 
-    return <CreateLinkClient initialVendors={initialVendors} />;
+    return <CreateLinkClient initialVendors={initialVendors} hasActiveLink={hasActiveLink} />;
 }

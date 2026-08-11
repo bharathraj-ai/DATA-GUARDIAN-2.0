@@ -3,19 +3,15 @@ import type { Metadata } from 'next';
 import ScrollReveal from '@/components/ScrollReveal';
 import {
     Lock,
-    Zap,
     Shield,
     FileText,
     KeyRound,
     Share2,
     EyeOff,
     Ban,
-    CheckCircle2,
     ArrowRight,
     ShieldCheck,
     Timer,
-    User,
-    Building2,
 } from 'lucide-react';
 
 export const dynamic = 'force-static';
@@ -123,105 +119,50 @@ export default function HowItWorksPage() {
     return (
         <main className="hiw-page">
             <section className="hiw-hero">
-                <div className="container hiw-hero-inner">
-                    <div className="hiw-hero-left">
-                        <div className="brand-badge" style={{ display: 'inline-flex', marginBottom: 20 }}>
-                            <Shield size={14} strokeWidth={2.5} style={{ marginRight: 6 }} />
-                            <span>HOW IT WORKS</span>
-                        </div>
-                        <h1 className="hiw-hero-h1">
-                            Secure sharing in
+                <div className="container hiw-map">
+                    <header className="hiw-map-intro">
+                        <p className="hiw-map-kicker">The sharing protocol</p>
+                        <h1 className="hiw-map-title">
+                            Owner encrypts. Vault holds.
                             <br />
-                            <span className="gradient-text">three simple steps</span>
+                            Vendor unlocks.
                         </h1>
-                        <p className="hiw-hero-p">
-                            Protect, share, and revoke sensitive data with AES-256 encryption and OTP access —
-                            no technical expertise required. Live in under a minute.
+                        <p className="hiw-map-lead">
+                            One sealed path from issue to session. Expiry, OTP, and revoke stay in your hands after send.
                         </p>
-                        <div className="hiw-hero-actions">
-                            <Link href="/create-link" className="btn btn-primary btn-large">
-                                <span>Get Started Free</span>
-                                <ArrowRight size={18} />
-                            </Link>
-                            <Link href="/services" className="btn btn-secondary btn-large">
-                                <span>View All Features</span>
-                            </Link>
-                        </div>
-                        <ul className="hiw-hero-trust">
-                            <li>
-                                <CheckCircle2 size={16} /> End-to-end encrypted
-                            </li>
-                            <li>
-                                <CheckCircle2 size={16} /> OTP-protected access
-                            </li>
-                            <li>
-                                <CheckCircle2 size={16} /> Instant revocation
-                            </li>
-                        </ul>
+                    </header>
+
+                    <div className="hiw-track-wrap">
+                    <ol className="hiw-track">
+                        <li className="hiw-station">
+                            <span className="hiw-station-idx">01</span>
+                            <div className="hiw-station-icon">
+                                <FileText size={26} strokeWidth={1.8} />
+                            </div>
+                            <strong>Issue</strong>
+                            <small>Encrypt files and set how long the link lives</small>
+                        </li>
+                        <li className="hiw-rail" aria-hidden="true" />
+                        <li className="hiw-station hiw-station-core">
+                            <span className="hiw-station-idx">02</span>
+                            <div className="hiw-station-icon">
+                                <Lock size={26} strokeWidth={1.8} />
+                            </div>
+                            <strong>Seal</strong>
+                            <small>AES-256 vault — plaintext never lands here</small>
+                        </li>
+                        <li className="hiw-rail" aria-hidden="true" />
+                        <li className="hiw-station">
+                            <span className="hiw-station-idx">03</span>
+                            <div className="hiw-station-icon">
+                                <KeyRound size={26} strokeWidth={1.8} />
+                            </div>
+                            <strong>Unlock</strong>
+                            <small>Vendor enters OTP and works in a locked session</small>
+                        </li>
+                    </ol>
                     </div>
 
-                    <div className="hiw-hero-right" aria-hidden="true">
-                        <div className="hiw-proto">
-                            <div className="hiw-proto-head">
-                                <div>
-                                    <span className="hiw-proto-kicker">SECURE PROTOCOL</span>
-                                    <strong>Session graph</strong>
-                                </div>
-                                <span className="hiw-proto-live">
-                                    <i /> LIVE
-                                </span>
-                            </div>
-
-                            <div className="hiw-proto-flow">
-                                <div className="hiw-proto-node">
-                                    <div className="hiw-proto-icon">
-                                        <Building2 size={18} />
-                                    </div>
-                                    <span>Owner</span>
-                                    <small>encrypt &amp; issue</small>
-                                </div>
-                                <div className="hiw-proto-line">
-                                    <span>AES-256-GCM</span>
-                                </div>
-                                <div className="hiw-proto-node hiw-proto-node-core">
-                                    <div className="hiw-proto-icon">
-                                        <Shield size={18} />
-                                    </div>
-                                    <span>Vault</span>
-                                    <small>zero-knowledge</small>
-                                </div>
-                                <div className="hiw-proto-line">
-                                    <span>OTP + token</span>
-                                </div>
-                                <div className="hiw-proto-node">
-                                    <div className="hiw-proto-icon">
-                                        <User size={18} />
-                                    </div>
-                                    <span>Vendor</span>
-                                    <small>locked session</small>
-                                </div>
-                            </div>
-
-                            <dl className="hiw-proto-spec">
-                                <div>
-                                    <dt>cipher</dt>
-                                    <dd>AES-256-GCM</dd>
-                                </div>
-                                <div>
-                                    <dt>key wrap</dt>
-                                    <dd>KEK / DEK</dd>
-                                </div>
-                                <div>
-                                    <dt>auth</dt>
-                                    <dd>OTP · device bind</dd>
-                                </div>
-                                <div>
-                                    <dt>control</dt>
-                                    <dd>revoke · ttl</dd>
-                                </div>
-                            </dl>
-                        </div>
-                    </div>
                 </div>
             </section>
 
@@ -231,17 +172,14 @@ export default function HowItWorksPage() {
                         <span className="hiw-stat-num gradient-text">256-bit</span>
                         <span className="hiw-stat-label">AES encryption</span>
                     </div>
-                    <div className="hiw-stat-div" />
                     <div className="hiw-stat-item">
                         <span className="hiw-stat-num gradient-text">100%</span>
                         <span className="hiw-stat-label">Zero knowledge</span>
                     </div>
-                    <div className="hiw-stat-div" />
                     <div className="hiw-stat-item">
                         <span className="hiw-stat-num gradient-text">&lt; 60s</span>
                         <span className="hiw-stat-label">Time to share</span>
                     </div>
-                    <div className="hiw-stat-div" />
                     <div className="hiw-stat-item">
                         <span className="hiw-stat-num gradient-text">Instant</span>
                         <span className="hiw-stat-label">Link revocation</span>
@@ -249,7 +187,7 @@ export default function HowItWorksPage() {
                 </div>
             </section>
 
-            <section className="hiw-process-section">
+            <section className="hiw-process-section" id="hiw-process">
                 <div className="container">
                     <ScrollReveal>
                         <div className="hiw-section-header">
@@ -401,44 +339,6 @@ export default function HowItWorksPage() {
                             </ScrollReveal>
                         ))}
                     </div>
-                </div>
-            </section>
-
-            <section className="hiw-cta-outer">
-                <div className="container">
-                    <ScrollReveal>
-                        <div className="hiw-cta-box">
-                            <div className="hiw-cta-left">
-                                <div className="brand-badge" style={{ display: 'inline-flex', marginBottom: 20 }}>
-                                    <span>GET STARTED TODAY</span>
-                                </div>
-                                <h2 className="hiw-cta-h2">Ready to share data securely?</h2>
-                                <p className="hiw-cta-p">
-                                    Start in seconds. No credit card. Create a protected link and stay in control from the first send.
-                                </p>
-                                <div className="hiw-cta-btns">
-                                    <Link href="/create-link" className="btn btn-primary btn-large">
-                                        <span>Create Secure Link</span>
-                                        <ArrowRight size={18} />
-                                    </Link>
-                                    <Link href="/services" className="btn btn-secondary btn-large">
-                                        <span>Explore Services</span>
-                                    </Link>
-                                </div>
-                                <div className="hiw-cta-trust">
-                                    <span>
-                                        <Lock size={14} /> End-to-end encrypted
-                                    </span>
-                                    <span>
-                                        <Zap size={14} /> Instant setup
-                                    </span>
-                                    <span>
-                                        <Shield size={14} /> ISO 27001 standards
-                                    </span>
-                                </div>
-                            </div>
-                        </div>
-                    </ScrollReveal>
                 </div>
             </section>
         </main>

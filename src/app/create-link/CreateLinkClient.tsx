@@ -50,9 +50,10 @@ interface FormDataState {
 
 interface CreateLinkClientProps {
     initialVendors: VendorOption[];
+    hasActiveLink: boolean;
 }
 
-export default function CreateLinkClient({ initialVendors }: CreateLinkClientProps) {
+export default function CreateLinkClient({ initialVendors, hasActiveLink }: CreateLinkClientProps) {
     const router = useRouter();
     const [formData, setFormData] = useState<FormDataState>({
         firstName: '',
@@ -218,7 +219,7 @@ export default function CreateLinkClient({ initialVendors }: CreateLinkClientPro
             if (result.success && result.shareUrl) {
                 router.refresh();
                 setGeneratedLink(result.shareUrl);
-                setStatus({ message: 'Secure link created successfully!', type: 'success' });
+                setStatus({ message: 'The link and OTP have been sent to the vendor.', type: 'success' });
             } else {
                 setStatus({ message: result.error || 'Failed to generate link', type: 'error' });
             }
@@ -230,16 +231,6 @@ export default function CreateLinkClient({ initialVendors }: CreateLinkClientPro
             });
         } finally {
             setIsLoading(false);
-        }
-    };
-
-    const copyToClipboard = async () => {
-        if (!generatedLink) return;
-        try {
-            await navigator.clipboard.writeText(generatedLink);
-            setStatus({ message: 'Link copied to clipboard!', type: 'success' });
-        } catch {
-            setStatus({ message: 'Failed to copy. Please select and copy manually.', type: 'error' });
         }
     };
 
@@ -736,7 +727,7 @@ export default function CreateLinkClient({ initialVendors }: CreateLinkClientPro
                                 ) : (
                                     <>
                                         <Lock size={18} />
-                                        Generate Secure Link
+                                        {hasActiveLink || generatedLink ? 'Get Another Link' : 'Generate Secure Link'}
                                     </>
                                 )}
                             </button>
@@ -746,19 +737,13 @@ export default function CreateLinkClient({ initialVendors }: CreateLinkClientPro
                     {generatedLink && (
                         <div className={styles.resultsSection}>
                             <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', padding: '1.5rem', borderRadius: '8px', marginBottom: '1.5rem' }}>
-                                <h3 style={{ color: '#047857', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '1rem', fontSize: '1rem' }}>
+                                <h3 style={{ color: '#047857', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', fontSize: '1rem' }}>
                                     <CheckCircle2 size={18} />
-                                    Link Generated Successfully
+                                    Link generated successfully
                                 </h3>
-                                
-                                <div style={{ display: 'flex', gap: '12px', background: '#ffffff', border: '1px solid #e5e7eb', padding: '12px', borderRadius: '6px', alignItems: 'center' }}>
-                                    <div style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#2563eb', fontSize: '0.875rem' }}>
-                                        {generatedLink}
-                                    </div>
-                                    <button type="button" onClick={copyToClipboard} style={{ background: '#2563eb', color: 'white', border: 'none', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer', fontWeight: 500, fontSize: '0.8125rem' }}>
-                                        Copy
-                                    </button>
-                                </div>
+                                <p style={{ margin: 0, color: '#065f46', fontSize: '0.875rem', lineHeight: 1.5 }}>
+                                    The link and OTP have been sent to the vendor. You don’t need to share the URL yourself.
+                                </p>
                             </div>
                         </div>
                     )}

@@ -25,14 +25,8 @@ html, body {
   color: #0F172A !important;
 }
 #main-content {
-  background: #FFFFFF !important;
+  background: #ffffff !important;
   min-height: 100vh;
-}
-.app-page {
-  animation: none !important;
-  opacity: 1 !important;
-  transform: none !important;
-  background: #FFFFFF !important;
 }
 `,
                 }}
