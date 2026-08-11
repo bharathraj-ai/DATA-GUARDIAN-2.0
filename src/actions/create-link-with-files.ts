@@ -5,7 +5,8 @@ import {
     generateSecureToken,
     generateOTP,
     hashOTP,
-    calculateExpiry,
+    calculateExpiryFromMode,
+    type ExpiryMode,
     encryptData,
     generateDataHash,
     generateOwnerToken
@@ -57,7 +58,12 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
             phone: formData.get('phone'),
             gender: formData.get('gender'),
             age: Number(formData.get('age')),
-            validityMinutes: Number(formData.get('validityMinutes')),
+            validityMinutes: (() => {
+                const v = Number(formData.get('validityMinutes'));
+                return Number.isFinite(v) && v > 0 ? v : undefined;
+            })(),
+            expiryMode: (formData.get('expiryMode') as string) || 'time',
+            expiryAmount: Number(formData.get('expiryAmount') || formData.get('validityMinutes')),
         };
 
         // V2.1: Extract purpose and notification fields
@@ -172,7 +178,7 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
             }
         }
 
-        const { firstName, lastName, email, phone, gender, age, validityMinutes } = validatedData.data;
+        const { firstName, lastName, email, phone, gender, age, expiryMode, expiryAmount } = validatedData.data;
 
         // 3. Prepare User Data for Encryption
         const userData = {
@@ -188,7 +194,8 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
         const token = generateSecureToken();
         const ownerToken = generateOwnerToken();
         const globalOtp = generateOTP(); // Fallback/Global OTP
-        const expiresAt = calculateExpiry(validityMinutes);
+        const expiresAt = calculateExpiryFromMode(expiryMode as ExpiryMode, expiryAmount);
+        const validityMinutes = Math.max(1, Math.round((expiresAt.getTime() - Date.now()) / 60_000));
 
         // Break-Based OTP Rotation: compute task duration and break limits dynamically
         const taskDurationHours = Math.max(1, Math.round(validityMinutes / 60));

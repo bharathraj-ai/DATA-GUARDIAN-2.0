@@ -69,6 +69,29 @@ export function calculateExpiry(minutes: number): Date {
     return new Date(now.getTime() + minutes * 60 * 1000);
 }
 
+export type ExpiryMode = 'time' | 'days' | 'months';
+
+/**
+ * Link lifetime: time (minutes), calendar days, or calendar months.
+ */
+export function calculateExpiryFromMode(mode: ExpiryMode, amount: number): Date {
+    if (!Number.isFinite(amount) || amount < 1) {
+        throw new Error('Invalid expiry amount');
+    }
+    const now = new Date();
+    if (mode === 'time') {
+        return calculateExpiry(amount);
+    }
+    if (mode === 'days') {
+        const d = new Date(now);
+        d.setDate(d.getDate() + amount);
+        return d;
+    }
+    const d = new Date(now);
+    d.setMonth(d.getMonth() + amount);
+    return d;
+}
+
 // ============================================
 // AES-256-GCM ENCRYPTION UTILITIES
 // ============================================

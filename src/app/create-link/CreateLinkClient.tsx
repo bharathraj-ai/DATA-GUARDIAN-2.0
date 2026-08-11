@@ -8,6 +8,7 @@ import styles from './page.module.css';
 import { 
     Shield, 
     Calendar, 
+    Clock,
     Info,
     User, 
     Users, 
@@ -26,6 +27,8 @@ import {
     ChevronUp
 } from 'lucide-react';
 
+type ExpiryMode = 'time' | 'days' | 'months';
+
 interface FormDataState {
     firstName: string;
     lastName: string;
@@ -33,8 +36,9 @@ interface FormDataState {
     phone: string;
     gender: string;
     age: string;
-    validityMinutes: string;
-    validityUnit: 'minutes' | 'hours' | 'days';
+    expiryMode: ExpiryMode;
+    expiryAmount: string;
+    validityUnit: 'minutes' | 'hours';
     vendors: { email: string; level: number }[]; // Multi-vendor with levels
     vendorEmail: string; 
     vendorName?: string;
@@ -57,7 +61,8 @@ export default function CreateLinkClient({ initialVendors }: CreateLinkClientPro
         phone: '',
         gender: '',
         age: '',
-        validityMinutes: '15',
+        expiryMode: 'time',
+        expiryAmount: '15',
         validityUnit: 'minutes',
         vendors: [{ email: '', level: 1 }],
         vendorEmail: '',
@@ -117,15 +122,20 @@ export default function CreateLinkClient({ initialVendors }: CreateLinkClientPro
     };
 
     const validateForm = (): string | null => {
-        if (!formData.validityMinutes) return 'Time is required';
-        const minutes = parseInt(formData.validityMinutes);
-        if (isNaN(minutes) || minutes <= 0) return 'Time must be a positive number';
-        
-        let totalMinutes = minutes;
-        if (formData.validityUnit === 'hours') totalMinutes *= 60;
-        if (formData.validityUnit === 'days') totalMinutes *= 1440;
-        
-        if (totalMinutes > 10080) return 'Total validity cannot exceed 7 days (10,080 minutes)';
+        const amount = parseInt(formData.expiryAmount, 10);
+        if (!formData.expiryAmount || isNaN(amount) || amount <= 0) {
+            return 'Expiration value must be a positive number';
+        }
+        if (formData.expiryMode === 'time') {
+            const totalMinutes = formData.validityUnit === 'hours' ? amount * 60 : amount;
+            if (totalMinutes > 10080) return 'Time-based validity cannot exceed 7 days';
+        }
+        if (formData.expiryMode === 'days' && amount > 365) {
+            return 'Day count cannot exceed 365 days';
+        }
+        if (formData.expiryMode === 'months' && amount > 12) {
+            return 'Month period cannot exceed 12 months';
+        }
 
         if (sharingMode === 'individual') {
             if (!formData.vendorEmail) return 'Vendor email is required';
@@ -172,14 +182,16 @@ export default function CreateLinkClient({ initialVendors }: CreateLinkClientPro
         try {
             const data = new FormData();
             Object.entries(formData).forEach(([key, value]) => {
-                if (key === 'vendors' || key === 'vendorEmail' || key === 'validityUnit') {
-                    return; 
-                } else if (key === 'validityMinutes') {
-                    const mins = parseInt(formData.validityMinutes);
-                    let totalMins = mins;
-                    if (formData.validityUnit === 'hours') totalMins = mins * 60;
-                    else if (formData.validityUnit === 'days') totalMins = mins * 1440;
-                    data.append(key, totalMins.toString());
+                if (key === 'vendors' || key === 'vendorEmail' || key === 'validityUnit' || key === 'expiryMode') {
+                    return;
+                } else if (key === 'expiryAmount') {
+                    const amount = parseInt(formData.expiryAmount, 10);
+                    const resolved =
+                        formData.expiryMode === 'time' && formData.validityUnit === 'hours'
+                            ? amount * 60
+                            : amount;
+                    data.append('expiryMode', formData.expiryMode);
+                    data.append('expiryAmount', resolved.toString());
                 } else {
                     data.append(key, value as string);
                 }
@@ -270,37 +282,101 @@ export default function CreateLinkClient({ initialVendors }: CreateLinkClientPro
 
                         <div className={styles.formGroup}>
                             <label className={styles.formLabel}>Link Expiration</label>
+                            <p className={styles.stepSubtitle} style={{ marginLeft: 0, marginBottom: '0.75rem' }}>
+                                Choose how long this link stays valid. After that, access is broken and the link expires.
+                            </p>
+                            <div className={styles.expiryModeSelection}>
+                                <button
+                                    type="button"
+                                    className={`${styles.expiryModeCard} ${formData.expiryMode === 'time' ? styles.expiryModeCardActive : ''}`}
+                                    onClick={() => setFormData((prev) => ({ ...prev, expiryMode: 'time', expiryAmount: '15', validityUnit: 'minutes' }))}
+                                >
+                                    <Clock size={18} />
+                                    <span>Time</span>
+                                    <small>Minutes or hours</small>
+                                </button>
+                                <button
+                                    type="button"
+                                    className={`${styles.expiryModeCard} ${formData.expiryMode === 'days' ? styles.expiryModeCardActive : ''}`}
+                                    onClick={() => setFormData((prev) => ({ ...prev, expiryMode: 'days', expiryAmount: '7' }))}
+                                >
+                                    <Calendar size={18} />
+                                    <span>Days</span>
+                                    <small>Expires after N days</small>
+                                </button>
+                                <button
+                                    type="button"
+                                    className={`${styles.expiryModeCard} ${formData.expiryMode === 'months' ? styles.expiryModeCardActive : ''}`}
+                                    onClick={() => setFormData((prev) => ({ ...prev, expiryMode: 'months', expiryAmount: '1' }))}
+                                >
+                                    <Calendar size={18} />
+                                    <span>Months</span>
+                                    <small>Expires after N months</small>
+                                </button>
+                            </div>
                             <div className={styles.gridSettings}>
                                 <div style={{ display: 'flex', gap: '10px', flex: 1 }}>
                                     <div className={styles.inputWrapper} style={{ flex: 1 }}>
-                                        <Calendar className={styles.inputIcon} size={18} />
+                                        {formData.expiryMode === 'time' ? (
+                                            <Clock className={styles.inputIcon} size={18} />
+                                        ) : (
+                                            <Calendar className={styles.inputIcon} size={18} />
+                                        )}
                                         <input
                                             type="number"
-                                            name="validityMinutes"
-                                            value={formData.validityMinutes}
+                                            name="expiryAmount"
+                                            value={formData.expiryAmount}
                                             onChange={handleChange}
                                             className={styles.input}
                                             style={{ paddingLeft: '2.75rem' }}
                                             min="1"
+                                            max={
+                                                formData.expiryMode === 'months'
+                                                    ? 12
+                                                    : formData.expiryMode === 'days'
+                                                      ? 365
+                                                      : formData.validityUnit === 'hours'
+                                                        ? 168
+                                                        : 10080
+                                            }
                                             required
                                         />
                                     </div>
-                                    <div className={styles.inputWrapper} style={{ flex: 1 }}>
-                                        <select
-                                            name="validityUnit"
-                                            value={formData.validityUnit}
-                                            onChange={handleChange}
-                                            className={styles.input}
-                                        >
-                                            <option value="minutes">Minutes</option>
-                                            <option value="hours">Hours</option>
-                                            <option value="days">Days</option>
-                                        </select>
-                                    </div>
+                                    {formData.expiryMode === 'time' ? (
+                                        <div className={styles.inputWrapper} style={{ flex: 1 }}>
+                                            <select
+                                                name="validityUnit"
+                                                value={formData.validityUnit}
+                                                onChange={handleChange}
+                                                className={styles.input}
+                                                style={{ paddingLeft: '1rem' }}
+                                            >
+                                                <option value="minutes">Minutes</option>
+                                                <option value="hours">Hours</option>
+                                            </select>
+                                        </div>
+                                    ) : (
+                                        <div className={styles.inputWrapper} style={{ flex: 1 }}>
+                                            <input
+                                                className={styles.input}
+                                                style={{ paddingLeft: '1rem', background: '#f9fafb' }}
+                                                value={formData.expiryMode === 'days' ? 'Days' : 'Months'}
+                                                readOnly
+                                                tabIndex={-1}
+                                            />
+                                        </div>
+                                    )}
                                 </div>
                                 <div className={styles.infoBox}>
                                     <Info className={styles.infoBoxIcon} size={16} />
-                                    <span>The link will automatically expire after the selected time.</span>
+                                    <span>
+                                        {formData.expiryMode === 'time' &&
+                                            'The link expires after the selected time (minutes or hours).'}
+                                        {formData.expiryMode === 'days' &&
+                                            'The link expires after the selected number of days. Access is then broken.'}
+                                        {formData.expiryMode === 'months' &&
+                                            'The link expires after the selected number of months. Access is then broken.'}
+                                    </span>
                                 </div>
                             </div>
                         </div>

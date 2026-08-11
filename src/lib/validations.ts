@@ -7,7 +7,32 @@ export const userDataSchema = z.object({
     phone: z.string().max(15, 'Phone number too long').optional().or(z.literal('')),
     gender: z.string().optional().or(z.literal('')),
     age: z.number().int().max(150, 'Invalid age').optional().or(z.literal(0)),
-    validityMinutes: z.number().int().min(1, 'Validity must be at least 1 minute').max(10080, 'Validity cannot exceed 7 days'),
+    validityMinutes: z.number().int().min(1, 'Validity must be at least 1 minute').max(10080, 'Validity cannot exceed 7 days').optional(),
+    expiryMode: z.enum(['time', 'days', 'months']).default('time'),
+    expiryAmount: z.number().int().min(1, 'Expiration value must be at least 1'),
+}).superRefine((data, ctx) => {
+    const { expiryMode, expiryAmount } = data;
+    if (expiryMode === 'time' && expiryAmount > 10080) {
+        ctx.addIssue({
+            code: 'custom',
+            message: 'Time-based validity cannot exceed 7 days (10,080 minutes)',
+            path: ['expiryAmount'],
+        });
+    }
+    if (expiryMode === 'days' && expiryAmount > 365) {
+        ctx.addIssue({
+            code: 'custom',
+            message: 'Day count cannot exceed 365 days',
+            path: ['expiryAmount'],
+        });
+    }
+    if (expiryMode === 'months' && expiryAmount > 12) {
+        ctx.addIssue({
+            code: 'custom',
+            message: 'Month period cannot exceed 12 months',
+            path: ['expiryAmount'],
+        });
+    }
 });
 
 export type UserDataInput = z.infer<typeof userDataSchema>;
