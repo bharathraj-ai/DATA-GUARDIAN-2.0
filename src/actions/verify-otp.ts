@@ -167,9 +167,14 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
             };
         }
 
+        const sessionEmail = session?.user?.email?.toLowerCase().trim();
+        const effectiveVendorEmail = vendorEmail || sessionEmail || '';
+
         // Get effective access state (Per-vendor if available, otherwise global legacy)
         const vendorAccess = secureLink.LinkAccess?.find(
-            a => userEmail && a.vendorEmail.toLowerCase() === userEmail.toLowerCase()
+            (a) =>
+                (effectiveVendorEmail && a.vendorEmail.toLowerCase() === effectiveVendorEmail) ||
+                (sessionEmail && a.vendorEmail.toLowerCase() === sessionEmail),
         );
 
         const isLocked = vendorAccess ? vendorAccess.lockedAt : secureLink.lockedAt;
@@ -195,10 +200,13 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
         }
 
         // 3. ZERO TRUST: Email binding validation using VendorAccess
-        let vendor = null;
-        if (vendorEmail) {
-            vendor = secureLink.VendorAccess.find(v => v.email === vendorEmail);
-            if (!vendor) {
+        let vendor: (typeof secureLink.VendorAccess)[number] | null = null;
+        if (effectiveVendorEmail) {
+            vendor =
+                secureLink.VendorAccess.find(
+                    (v) => v.email.toLowerCase() === effectiveVendorEmail,
+                ) ?? null;
+            if (!vendor && secureLink.VendorAccess.length > 0) {
                 return {
                     success: false,
                     error: `This link was created for a different recipient. Access denied.`,
@@ -345,40 +353,35 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
             };
         }
 
-        // SINGLE-USE OTP: a consumed code cannot mint a new session.
-        // Resend / break rotation installs a fresh hash — that new code is allowed.
-        // Active sessions continue via signed cookie + activeSessionId (no OTP re-entry).
-        const hasFreshVendorOtp = Boolean(vendor?.currentOtpHash || vendor?.otpHash);
-        const hasFreshLinkAccessOtp = Boolean(vendorAccess?.otpHash);
-        const hasFreshOtp = hasFreshVendorOtp || hasFreshLinkAccessOtp;
+        const linkHasVendors =
+            (secureLink.VendorAccess?.length ?? 0) > 0 ||
+            (secureLink.LinkAccess?.length ?? 0) > 0;
 
-        if (vendorAccess?.isUsed && !hasFreshOtp) {
+        const perVendorHash =
+            vendor?.currentOtpHash ||
+            vendor?.otpHash ||
+            vendorAccess?.otpHash ||
+            null;
+
+        const targetHash =
+            perVendorHash ||
+            (!linkHasVendors ? secureLink.otpHash : null);
+
+        // SINGLE-USE OTP: consumed codes cannot re-auth. Resend / break rotation installs a fresh hash.
+        if (linkHasVendors && !perVendorHash) {
             return {
                 success: false,
-                error: 'This OTP has already been used. Request a new OTP to continue.',
+                error:
+                    'This code was already used or the link was opened on another device. Tap "Send a new code", then enter the latest OTP from your email.',
                 errorType: 'USED',
             };
         }
-        // VendorAccess: both current and legacy hashes cleared after consume (no resend yet)
-        if (vendor && !hasFreshVendorOtp) {
+
+        if (!targetHash || targetHash.startsWith('USED:')) {
             return {
                 success: false,
-                error: 'This OTP has already been used. Request a new OTP to continue.',
-                errorType: 'USED',
-            };
-        }
-        // Legacy open link (no per-vendor rows): SecureLink.isUsed blocks re-OTP unless hash rotated
-        if (
-            !vendor &&
-            !vendorAccess &&
-            secureLink.isUsed &&
-            (!secureLink.otpHash || secureLink.otpHash.startsWith('USED:')) &&
-            (secureLink.VendorAccess?.length ?? 0) === 0 &&
-            (secureLink.LinkAccess?.length ?? 0) === 0
-        ) {
-            return {
-                success: false,
-                error: 'This OTP has already been used. Request a new OTP to continue.',
+                error:
+                    'No active OTP for this link. Tap "Send a new code" to get a fresh code by email.',
                 errorType: 'USED',
             };
         }
@@ -404,15 +407,7 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
 
         // Break-Based OTP Rotation: Use currentOtpHash if available (only valid OTP after rotation)
         // Falls back to legacy otpHash for backward compatibility with pre-rotation vendors
-        const targetHash = vendor?.currentOtpHash || vendor?.otpHash || vendorAccess?.otpHash || secureLink.otpHash;
-
-        if (!targetHash) {
-            return {
-                success: false,
-                error: 'No OTP request found. Please request a new OTP.',
-                errorType: 'EXPIRED',
-            };
-        }
+        // targetHash computed above (per-vendor first; legacy open links use SecureLink.otpHash)
 
         // Check if the vendor's current OTP has expired (break-rotation expiry)
         if (vendor?.currentOtpExpiresAt && vendor.currentOtpExpiresAt < new Date()) {
