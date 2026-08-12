@@ -26,12 +26,24 @@ export async function GET(
     const token = req.nextUrl.searchParams.get('token');
     if (!token) return NextResponse.json({ error: 'Missing token' }, { status: 401 });
 
-    // Verify token → session → link → file ownership
-    const authResult = await authorizeApiRequest(fileId, token, { httpMethod: req.method, action: 'preview' });
+    // Full base64 data-URL is download-equivalent. Editors may still load bytes.
+    let authResult = await authorizeApiRequest(fileId, token, {
+      httpMethod: req.method,
+      action: 'download',
+    });
     if (authResult.errorResponse) {
-      return authResult.errorResponse;
+      authResult = await authorizeApiRequest(fileId, token, {
+        httpMethod: req.method,
+        action: 'edit',
+      });
+      if (authResult.errorResponse) {
+        return authResult.errorResponse;
+      }
     }
     const { file } = authResult;
+    if (!file) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
     let encryptedBytes = file.encryptedContent;
     if (!encryptedBytes && (file as any).mongoFile?.gridFSId) {

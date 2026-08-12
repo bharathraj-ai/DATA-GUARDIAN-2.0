@@ -1,8 +1,7 @@
 'use server';
 
 import { prisma } from '@/lib/prisma';
-import { verifyOTPHash, encryptData } from '@/lib/crypto';
-import crypto from 'crypto';
+import { verifyOTPHash, encryptData, hashOTP } from '@/lib/crypto';
 import { otpVerifySchema, OTPVerifyInput } from '@/lib/validations';
 import { cookies, headers } from 'next/headers';
 import { generateDeviceHash, isActiveSessionFresh } from '@/lib/fingerprint';
@@ -36,8 +35,7 @@ export type VerifyOTPResult = {
  * - Redis session with TTL (auto-expire)
  * - Kill switch check (Revocation)
  * - ANTI-PHISHING: Rate limiting (10 attempts/15 min per IP)
- * - ANTI-PHISHING: 3-minute OTP verification window
- * - ANTI-PHISHING: Single-use OTP enforcement
+ * - ANTI-PHISHING: Single-use OTP enforcement (hash cleared after success)
  */
 export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Promise<VerifyOTPResult> {
     try {
@@ -209,8 +207,7 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
             }
         } else if (secureLink.VendorAccess && secureLink.VendorAccess.length > 0) {
             // Break-Based OTP Rotation: Try currentOtpHash first (active OTP only)
-            const hmacHash = crypto.createHmac('sha256', process.env.ENCRYPTION_KEY!)
-                .update(otp).digest('hex');
+            const hmacHash = await hashOTP(otp);
 
             // Priority 1: Match against currentOtpHash (the only valid OTP after rotation)
             vendor = secureLink.VendorAccess.find(
@@ -348,9 +345,44 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
             };
         }
 
-        // Single-use OTP check removed to allow reuse
+        // SINGLE-USE OTP: a consumed code cannot mint a new session.
+        // Resend / break rotation installs a fresh hash — that new code is allowed.
+        // Active sessions continue via signed cookie + activeSessionId (no OTP re-entry).
+        const hasFreshVendorOtp = Boolean(vendor?.currentOtpHash || vendor?.otpHash);
+        const hasFreshLinkAccessOtp = Boolean(vendorAccess?.otpHash);
+        const hasFreshOtp = hasFreshVendorOtp || hasFreshLinkAccessOtp;
 
-        // OTP verification window removed to allow infinite reuse as requested by user
+        if (vendorAccess?.isUsed && !hasFreshOtp) {
+            return {
+                success: false,
+                error: 'This OTP has already been used. Request a new OTP to continue.',
+                errorType: 'USED',
+            };
+        }
+        // VendorAccess: both current and legacy hashes cleared after consume (no resend yet)
+        if (vendor && !hasFreshVendorOtp) {
+            return {
+                success: false,
+                error: 'This OTP has already been used. Request a new OTP to continue.',
+                errorType: 'USED',
+            };
+        }
+        // Legacy open link (no per-vendor rows): SecureLink.isUsed blocks re-OTP unless hash rotated
+        if (
+            !vendor &&
+            !vendorAccess &&
+            secureLink.isUsed &&
+            (!secureLink.otpHash || secureLink.otpHash.startsWith('USED:')) &&
+            (secureLink.VendorAccess?.length ?? 0) === 0 &&
+            (secureLink.LinkAccess?.length ?? 0) === 0
+        ) {
+            return {
+                success: false,
+                error: 'This OTP has already been used. Request a new OTP to continue.',
+                errorType: 'USED',
+            };
+        }
+
         const now = new Date();
 
         // NOTE: Permanent link-level device binding removed.
@@ -506,7 +538,7 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
 
         // Signed session cookie is authoritative; Redis cache is best-effort
         const { mintShareSession } = await import('@/lib/share-session');
-        const minted = mintShareSession(token, ttlSeconds);
+        const minted = mintShareSession(token, ttlSeconds, vendor?.email || vendorEmail || userEmail || null);
         const sessionId = minted.sessionId;
         // Bind CURRENT recipient device to this active access session (not the link creator)
         await tryCreateSession(token, sessionId, ttlSeconds, currentDeviceHash);
@@ -529,7 +561,19 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
                     where: { id: vendorAccess.id },
                     data: {
                         ...updateData,
+                        otpHash: null, // single-use: consume per-vendor OTP
                         ...(needsFirstAttemptTracking ? { otpFirstAttemptAt: now } : {}),
+                    },
+                });
+                // Owner dashboard + stream gates read SecureLink.isUsed / otpVerifiedAt
+                await tx.secureLink.update({
+                    where: { id: secureLink.id },
+                    data: {
+                        isUsed: true,
+                        otpVerifiedAt: now,
+                        ...(needsFirstAttemptTracking && !secureLink.otpFirstAttemptAt
+                            ? { otpFirstAttemptAt: now }
+                            : {}),
                     },
                 });
             } else {
@@ -537,6 +581,8 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
                     where: { id: secureLink.id },
                     data: {
                         ...updateData,
+                        // Rotate link OTP hash to a dead value so the code cannot be replayed
+                        otpHash: `USED:${secureLink.id}:${now.getTime()}`,
                         ...(needsFirstAttemptTracking ? { otpFirstAttemptAt: now } : {}),
                     },
                 });
@@ -547,6 +593,16 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
                 if (vendor.status === 'break' && vendor.breakStartedAt) {
                     totalBreakDuration += Math.floor((now.getTime() - vendor.breakStartedAt.getTime()) / 1000);
                 }
+
+                // Consume OTP (single-use): clear hashes so the same code cannot re-auth
+                await tx.otpHistory.updateMany({
+                    where: { vendorAccessId: vendor.id, status: 'ACTIVE' },
+                    data: {
+                        status: 'INVALIDATED',
+                        invalidatedAt: now,
+                        reason: 'OTP_CONSUMED',
+                    },
+                });
 
                 await tx.vendorAccess.update({
                     where: { id: vendor.id },
@@ -559,6 +615,8 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
                         activeDeviceHash: currentDeviceHash,
                         lastLoginAt: now,
                         lastSeenAt: now,
+                        currentOtpHash: null,
+                        otpHash: null,
                     },
                 });
             }

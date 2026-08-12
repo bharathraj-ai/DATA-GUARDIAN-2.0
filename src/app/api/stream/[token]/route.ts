@@ -87,16 +87,15 @@ export async function GET(
 
     // Determine current user's level
     let userLevel = 2;
-    // SEC-3: vendor_email cookie is AES-256-GCM encrypted — decrypt before use
+    // SEC-3: vendor identity from signed session first; encrypted cookie only (no plaintext)
     const rawVendorEmailCookie = request.cookies.get('vendor_email')?.value;
-    let vendorEmail: string | undefined;
-    if (rawVendorEmailCookie) {
+    let vendorEmail: string | undefined = verified.vendorEmail || undefined;
+    if (!vendorEmail && rawVendorEmailCookie) {
         try {
             const decoded = decryptData<{ email: string }>(rawVendorEmailCookie);
             vendorEmail = decoded.email;
         } catch {
-            // Graceful fallback: plaintext cookie from a pre-encryption session
-            vendorEmail = rawVendorEmailCookie.includes(':') ? undefined : rawVendorEmailCookie;
+            vendorEmail = undefined;
         }
     }
     if (vendorEmail && secureLink.VendorAccess) {
@@ -111,13 +110,23 @@ export async function GET(
         return new Response('Expired', { status: 410 });
     }
 
-    // Decrypt data
+    // Decrypt data — mask PII for SSE (full unmasked only via authenticated actions that need it)
     let userData: DecryptedUserData;
     try {
         userData = decryptData<DecryptedUserData>(secureLink.UserData.encryptedData);
     } catch {
         return new Response('Decryption failed', { status: 500 });
     }
+
+    const { maskEmail, maskPhone } = await import('@/lib/masking');
+    const maskedUserData = {
+        firstName: userData.firstName,
+        lastName: userData.lastName,
+        email: maskEmail(userData.email),
+        phone: maskPhone(userData.phone),
+        gender: userData.gender,
+        age: userData.age,
+    };
 
     // Create SSE stream
     const encoder = new TextEncoder();
@@ -150,7 +159,7 @@ export async function GET(
             const initialSeconds = Math.max(0, Math.floor((secureLink.expiresAt.getTime() - Date.now()) / 1000));
             const initialData = {
                 type: 'data',
-                userData,
+                userData: maskedUserData,
                 expiresAt: secureLink.expiresAt.toISOString(),
                 remainingSeconds: initialSeconds,
             };
@@ -266,10 +275,10 @@ export async function GET(
                         await logSessionEnd('session_invalidated');
                         return;
                     }
-                    // Authoritative DB revoke/expiry: always when Redis is absent;
-                    // when Redis explicitly says not-revoked, reconcile every 5 ticks (~15s).
+                    // Authoritative DB revoke/expiry EVERY heartbeat (≤3s) so kill-switch
+                    // works within 3s even when Redis is absent or stale.
                     heartbeatTick += 1;
-                    const mustReconcileDb = revokedInRedis !== false || heartbeatTick === 1 || heartbeatTick % 5 === 0;
+                    const mustReconcileDb = true;
                     let link: { id: string; isRevoked: boolean; expiresAt: Date } | null = {
                         id: cachedLinkId,
                         isRevoked: false,
@@ -334,11 +343,25 @@ export async function GET(
                         if (session.level < highestActiveLevel) highestActiveLevel = session.level;
                     });
 
-                    // Incremental chat: full snapshot once, then only newer rows
+                    // Incremental chat: full snapshot once, then only newer rows.
+                    // Filter DMs — only group chat + messages involving this viewer.
                     const recentChats = await prisma.chatMessage.findMany({
                         where: {
                             secureLinkId: link.id,
                             ...(lastChatTimestamp ? { timestamp: { gt: lastChatTimestamp } } : {}),
+                            OR: vendorEmail
+                                ? [
+                                    { receiverEmail: null },
+                                    { senderEmail: vendorEmail },
+                                    { receiverEmail: vendorEmail },
+                                  ]
+                                : userEmail
+                                  ? [
+                                      { receiverEmail: null },
+                                      { senderEmail: userEmail },
+                                      { receiverEmail: userEmail },
+                                    ]
+                                  : [{ receiverEmail: null }],
                         },
                         orderBy: { timestamp: 'asc' },
                         take: lastChatTimestamp ? 50 : 100,

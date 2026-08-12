@@ -59,7 +59,25 @@ export function CollaborationProvider({ children, token, initialCapabilities, in
                     } else if (data.type === 'revoked' || data.type === 'expired' || data.type === 'session_invalid') {
                         store.setAccessStatus(data.type);
                         eventSource?.close();
-                        // Force a reload so the server component catches the revoked/expired state and shows the error screen
+
+                        // After "Take Break", cookies are cleared on purpose — go to dashboard,
+                        // do not reload /view (that shows Access Denied).
+                        try {
+                            if (sessionStorage.getItem('dg:post-break-redirect') === '1') {
+                                sessionStorage.removeItem('dg:post-break-redirect');
+                                window.location.replace('/dashboard/vendor');
+                                return;
+                            }
+                        } catch {
+                            /* ignore */
+                        }
+
+                        if (data.type === 'session_invalid') {
+                            window.location.replace('/dashboard/vendor');
+                            return;
+                        }
+
+                        // Revoked / expired: reload so the server shows the error screen
                         window.location.reload();
                     }
                 } catch (err) {

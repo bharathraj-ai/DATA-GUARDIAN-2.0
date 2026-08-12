@@ -64,7 +64,7 @@ const LIST_SELECT = {
     otpVerifiedAt: true,
     allowedVendorEmail: true,
     LinkAccess: {
-        select: { vendorEmail: true, level: true, isUsed: true },
+        select: { vendorEmail: true, level: true, isUsed: true, otpVerifiedAt: true },
     },
     VendorAccess: {
         select: { email: true, level: true, status: true },
@@ -118,7 +118,7 @@ async function findReceivedLinksByEmail(email: string) {
         select: {
             ...VENDOR_LIST_SELECT,
             LinkAccess: {
-                select: { vendorEmail: true, level: true, isUsed: true },
+                select: { vendorEmail: true, level: true, isUsed: true, otpVerifiedAt: true },
                 where: { vendorEmail: email },
                 take: 1,
             },
@@ -145,6 +145,15 @@ function mapVendorLinks(links: Awaited<ReturnType<typeof findReceivedLinksByEmai
 
 function mapListLink(link: any, effectiveIsUsed: boolean): DashboardLink {
     const primaryVendor = link.LinkAccess?.[0]?.vendorEmail || link.allowedVendorEmail || null;
+    // Prefer link-level stamp; fall back to any vendor LinkAccess verify time
+    const vendorVerifiedAt: Date | null =
+        (link.LinkAccess || [])
+            .map((a: { otpVerifiedAt?: Date | null }) => a.otpVerifiedAt)
+            .filter(Boolean)
+            .sort(
+                (a: Date, b: Date) =>
+                    new Date(b).getTime() - new Date(a).getTime(),
+            )[0] ?? null;
     return {
         id: link.id,
         token: link.token,
@@ -161,7 +170,7 @@ function mapListLink(link: any, effectiveIsUsed: boolean): DashboardLink {
         notificationEmail: link.notificationEmail,
         failedAttempts: link.failedAttempts,
         lockedAt: link.lockedAt,
-        otpVerifiedAt: link.otpVerifiedAt,
+        otpVerifiedAt: link.otpVerifiedAt ?? vendorVerifiedAt,
         status: getStatus({ ...link, isUsed: effectiveIsUsed }),
         fileCount: link._count?.UserFile ?? 0,
         files: [],
@@ -373,4 +382,23 @@ export async function getOwnerDashboardData(userId: string): Promise<{
     const links = await getOwnedLinks(userId);
     const history = await getSendHistory(userId);
     return { links, history };
+}
+
+/** True when the owner already has a live (unexpired, unused, unrevoked) share. */
+export async function ownerHasActiveLink(userId: string): Promise<boolean> {
+    const session = await auth();
+    if (!session?.user?.id || session.user.id !== userId) return false;
+
+    const active = await prisma.secureLink.findFirst({
+        where: {
+            ownerId: userId,
+            isRevoked: false,
+            isUsed: false,
+            expiresAt: { gt: new Date() },
+            NOT: { LinkAccess: { some: { isUsed: true } } },
+        },
+        select: { id: true },
+    });
+
+    return Boolean(active);
 }

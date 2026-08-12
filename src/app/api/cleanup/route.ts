@@ -5,14 +5,10 @@ import { authorizeCronRequest } from '@/lib/security/cron-auth';
 export const dynamic = 'force-dynamic';
 
 /**
- * POST /api/cleanup
- * 
- * Scheduled task (cron job) to hard delete expired data.
- * Protected by timing-safe Bearer token authentication.
- * 
- * MUST be invoked as POST to prevent GET-based CSRF and adhere to REST semantics.
+ * Scheduled cleanup — Vercel Cron uses GET; external schedulers may use POST.
+ * Both require Authorization: Bearer CRON_SECRET.
  */
-export async function POST(request: Request) {
+async function runCleanup(request: Request) {
   const cron = authorizeCronRequest(request);
   if (!cron.ok) {
     return NextResponse.json(
@@ -44,4 +40,12 @@ export async function POST(request: Request) {
   }
 
   return NextResponse.json({ error: result.error }, { status: 500, headers });
+}
+
+export async function GET(request: Request) {
+  return runCleanup(request);
+}
+
+export async function POST(request: Request) {
+  return runCleanup(request);
 }

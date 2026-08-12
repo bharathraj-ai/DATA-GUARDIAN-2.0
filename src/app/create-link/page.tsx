@@ -1,31 +1,39 @@
 import { redirect } from 'next/navigation';
 import { auth } from '@/lib/auth';
 import { listVendorOptions } from '@/lib/vendor-options';
+import { ownerHasActiveLink } from '@/actions/dashboard';
+import { getDbUserRole } from '@/lib/security/roles';
+import { getOnboardingStep } from '@/lib/onboarding';
 import CreateLinkClient from './CreateLinkClient';
 
 /**
  * Auth + vendor list on the server — form paints with data ready (no client waterfall).
+ * Role gate uses Postgres, never JWT alone.
  */
 export default async function CreateLinkPage() {
     const session = await auth();
 
-    if (!session?.user) {
+    if (!session?.user?.id) {
         redirect('/auth/signin?callbackUrl=/create-link');
     }
 
-    const onboardingComplete =
-        session.user.onboardingStep === 'COMPLETE' ||
-        (session.user.onboardingStep == null && session.user.roleSelected);
-    if (!onboardingComplete) {
+    const dbUser = await getDbUserRole(session.user.id);
+    if (!dbUser) {
+        redirect('/auth/signin?callbackUrl=/create-link');
+    }
+
+    if (getOnboardingStep(dbUser.roleSelected) === 'ROLE_SELECTION') {
         redirect('/auth/role-select?callbackUrl=/create-link');
     }
 
-    if (session.user.role !== 'OWNER') {
+    if (dbUser.role !== 'OWNER') {
         redirect('/dashboard/vendor');
     }
 
-    // Role already checked above — skip a second auth()+findMany on this request.
-    const initialVendors = await listVendorOptions();
+    const [initialVendors, hasActiveLink] = await Promise.all([
+        listVendorOptions(),
+        ownerHasActiveLink(session.user.id),
+    ]);
 
-    return <CreateLinkClient initialVendors={initialVendors} />;
+    return <CreateLinkClient initialVendors={initialVendors} hasActiveLink={hasActiveLink} />;
 }

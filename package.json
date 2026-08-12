@@ -7,7 +7,9 @@
     "dev:clean": "node -e \"require('fs').rmSync('.next',{recursive:true,force:true})\" && next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "jest --config jest.config.ts",
+    "test:security": "jest --config jest.config.ts tests/security"
   },
   "dependencies": {
     "@next-auth/prisma-adapter": "^1.0.7",

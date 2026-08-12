@@ -167,7 +167,7 @@ export const authOptions: NextAuthOptions = {
             return postLoginContinueUrl(canonicalBase);
         },
 
-        async jwt({ token, user, trigger, session }) {
+        async jwt({ token, user, trigger }) {
             // Initial sign-in: copy identity from adapter user (DB defaults included)
             if (user) {
                 const roleSelected =
@@ -181,28 +181,17 @@ export const authOptions: NextAuthOptions = {
                 );
             }
 
-            // Client called update() after role selection — prefer payload, else DB
-            if (trigger === 'update') {
-                if (session?.role !== undefined || session?.roleSelected !== undefined) {
-                    if (session.role !== undefined) {
-                        token.role = normalizeRole(session.role as string);
-                    }
-                    if (session.roleSelected !== undefined) {
-                        token.roleSelected = Boolean(session.roleSelected);
-                    } else if (session.role !== undefined) {
-                        token.roleSelected = true;
-                    }
-                    token.onboardingStep = getOnboardingStep(Boolean(token.roleSelected));
-                } else if (token.id) {
-                    const dbUser = await prisma.user.findUnique({
-                        where: { id: token.id as string },
-                        select: { role: true, roleSelected: true },
-                    });
-                    if (dbUser) {
-                        token.role = normalizeRole(dbUser.role);
-                        token.roleSelected = dbUser.roleSelected ?? false;
-                        token.onboardingStep = getOnboardingStep(dbUser.roleSelected);
-                    }
+            // Client called update() after role selection — ALWAYS refresh from DB.
+            // Never trust client-supplied role / roleSelected (privilege-escalation vector).
+            if (trigger === 'update' && token.id) {
+                const dbUser = await prisma.user.findUnique({
+                    where: { id: token.id as string },
+                    select: { role: true, roleSelected: true },
+                });
+                if (dbUser) {
+                    token.role = normalizeRole(dbUser.role);
+                    token.roleSelected = dbUser.roleSelected ?? false;
+                    token.onboardingStep = getOnboardingStep(dbUser.roleSelected);
                 }
             }
 

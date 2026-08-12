@@ -15,7 +15,7 @@ import { userDataSchema } from '@/lib/validations';
 import { validateMimeType, ALLOWED_EXTENSIONS } from '@/lib/security/file-validator';
 import { z } from 'zod';
 import { auth } from '@/lib/auth';
-import { canCreateSecureLinks } from '@/lib/security/roles';
+import { requireOwnerRole } from '@/lib/security/roles';
 import { checkUploadRateLimit, extractClientIP, formatRateLimitError } from '@/lib/rate-limit';
 import { headers } from 'next/headers';
 import path from 'path';
@@ -32,13 +32,12 @@ export type CreateSecureLinkResult = {
 
 export async function createSecureLinkWithFiles(formData: FormData): Promise<CreateSecureLinkResult> {
     try {
-        // ZERO TRUST: Only OWNER role can create secure links
+        // ZERO TRUST: Only OWNER role (from Postgres, not JWT) can create secure links
         const session = await auth();
-        if (!session?.user) {
+        if (!session?.user?.id) {
             return { success: false, error: 'Authentication required.' };
         }
-        const userRole = (session.user as { role?: string })?.role;
-        if (!canCreateSecureLinks(userRole)) {
+        if (!(await requireOwnerRole(session.user.id))) {
             return { success: false, error: 'You do not have permission to create secure links.' };
         }
 
@@ -81,16 +80,26 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
         const vendorEmail = formData.get('vendorEmail') as string | null;
         const vendorsStr = formData.get('vendors') as string | null;
         
-        // Parse hierarchical vendors
+        // Parse hierarchical vendors — clamp level to 1..10 (1 = team leader)
         let vendors: { email: string; level: number }[] = [];
         if (vendorsStr) {
             try {
-                vendors = JSON.parse(vendorsStr);
+                const parsed = JSON.parse(vendorsStr);
+                if (!Array.isArray(parsed) || parsed.length === 0) {
+                    return { success: false, error: 'Invalid vendors list' };
+                }
+                vendors = parsed.map((v: { email?: string; level?: number }) => {
+                    const email = String(v.email || '').toLowerCase().trim();
+                    const level = Math.min(10, Math.max(1, Number(v.level) || 2));
+                    return { email, level };
+                }).filter((v: { email: string }) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.email));
+                if (vendors.length === 0) {
+                    return { success: false, error: 'At least one valid vendor email is required.' };
+                }
             } catch (e) {
                 return { success: false, error: 'Invalid vendors JSON format' };
             }
         } else if (vendorEmail) {
-            // Fallback: Make them a standard Level 2 user
             vendors = [{ email: vendorEmail.toLowerCase(), level: 2 }];
         }
 

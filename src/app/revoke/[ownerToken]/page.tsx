@@ -26,7 +26,7 @@ export default function RevokePage({ params }: RevokePageProps) {
     const [isRevoking, setIsRevoking] = useState(false);
     const [revokeResult, setRevokeResult] = useState<RevokeAccessResult | null>(null);
     const [showConfirm, setShowConfirm] = useState(false);
-    const [deleteData, setDeleteData] = useState(false);
+    const [dataDeleted, setDataDeleted] = useState(false);
     const [timeLeft, setTimeLeft] = useState<string>('');
 
     // Live countdown timer — updates every second
@@ -69,6 +69,7 @@ export default function RevokePage({ params }: RevokePageProps) {
                     expiresAt: new Date(result.status.expiresAt),
                     createdAt: new Date(result.status.createdAt),
                 });
+                setDataDeleted(Boolean(result.status.dataDeleted));
             } else {
                 setError(result.error || 'Failed to get link status');
             }
@@ -78,13 +79,14 @@ export default function RevokePage({ params }: RevokePageProps) {
 
     async function handleRevoke() {
         setIsRevoking(true);
-        const result = await revokeAccess(ownerToken, deleteData);
+        const result = await revokeAccess(ownerToken, true);
         setRevokeResult(result);
         setShowConfirm(false);
         setIsRevoking(false);
 
         if (result.success) {
-            // Brief success flash, then leave the revoke page (link may already be purged)
+            setDataDeleted(true);
+            // Brief success flash, then leave the revoke page (link is purged)
             setTimeout(() => {
                 router.replace('/dashboard/owner');
             }, 1200);
@@ -345,19 +347,11 @@ export default function RevokePage({ params }: RevokePageProps) {
                                     </svg>
                                     <div>
                                         <p className="warning-title">This action cannot be undone</p>
-                                        <p className="warning-text">The recipient will immediately lose access to all shared data.</p>
+                                        <p className="warning-text">
+                                        The recipient loses access immediately and all shared files and encrypted data are permanently deleted.
+                                    </p>
                                     </div>
                                 </div>
-
-                                <label className="delete-option">
-                                    <input
-                                        type="checkbox"
-                                        checked={deleteData}
-                                        onChange={(e) => setDeleteData(e.target.checked)}
-                                    />
-                                    <span className="checkbox-custom" />
-                                    <span>Also delete encrypted data immediately</span>
-                                </label>
 
                                 <div className="confirm-actions">
                                     <button onClick={() => setShowConfirm(false)} className="cancel-btn">
@@ -370,7 +364,7 @@ export default function RevokePage({ params }: RevokePageProps) {
                                                 Revoking...
                                             </>
                                         ) : (
-                                            'Confirm Revoke'
+                                            'Confirm Revoke & Delete'
                                         )}
                                     </button>
                                 </div>
@@ -387,8 +381,12 @@ export default function RevokePage({ params }: RevokePageProps) {
                         </div>
                         <p className="inactive-text">
                             {status.isRevoked
-                                ? 'This link has been revoked. No further action needed.'
-                                : 'This link has expired. Data is automatically cleaned up.'}
+                                ? dataDeleted
+                                    ? 'This link has been revoked and all shared data has been permanently deleted.'
+                                    : 'This link has been revoked. No further action needed.'
+                                : dataDeleted
+                                    ? 'This link has expired and all shared data has been permanently deleted.'
+                                    : 'This link has expired. Data cleanup is in progress.'}
                         </p>
                     </div>
                 )}

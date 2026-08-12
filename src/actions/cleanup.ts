@@ -3,16 +3,17 @@
 import { prisma } from '@/lib/prisma';
 import { auth } from '@/lib/auth';
 import { executeCleanup, executeSingleLinkCleanup, type CleanupResult } from '@/lib/cleanup-core';
-import { canCreateSecureLinks } from '@/lib/security/roles';
+import { requireOwnerRole } from '@/lib/security/roles';
 
 /**
- * Bulk purge expired/revoked links. OWNER-only.
+ * Bulk purge expired/revoked links. OWNER-only (DB role).
  * Cron jobs must use POST /api/cleanup with CRON_SECRET — not this action.
+ * Scoped: only purges links owned by the caller (never global tenant wipe).
  */
 export async function cleanupExpiredData(): Promise<CleanupResult> {
     try {
         const session = await auth();
-        if (!session?.user?.id || !canCreateSecureLinks(session.user.role)) {
+        if (!session?.user?.id || !(await requireOwnerRole(session.user.id))) {
             return {
                 success: false,
                 deletedLinks: 0,
@@ -24,7 +25,7 @@ export async function cleanupExpiredData(): Promise<CleanupResult> {
             };
         }
 
-        return await executeCleanup();
+        return await executeCleanup({ ownerId: session.user.id });
     } catch (error) {
         console.error('Action cleanup error:', error instanceof Error ? error.message : 'Unknown');
         return {
@@ -94,7 +95,7 @@ export async function getCleanupStats(): Promise<{
     };
 
     const session = await auth();
-    if (!session?.user?.id || !canCreateSecureLinks(session.user.role)) {
+    if (!session?.user?.id || !(await requireOwnerRole(session.user.id))) {
         return empty;
     }
 

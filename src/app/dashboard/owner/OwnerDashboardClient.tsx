@@ -16,7 +16,6 @@ import {
     Clock, 
     Calendar, 
     Check, 
-    Copy, 
     Settings, 
     ChevronDown, 
     ChevronUp, 
@@ -57,8 +56,6 @@ export default function OwnerDashboardClient({
     const [links, setLinks] = useState<DashboardLink[]>(initialLinks);
     const [sendHistory] = useState<SendHistoryRecord[]>(initialHistory);
     const [isLoading] = useState(false);
-    const [copiedId, setCopiedId] = useState<string | null>(null);
-    const [filter, setFilter] = useState<'all' | 'active' | 'expired' | 'revoked' | 'used'>('all');
     const [revokingId, setRevokingId] = useState<string | null>(null);
     const [confirmRevokeId, setConfirmRevokeId] = useState<string | null>(null);
     const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -225,23 +222,14 @@ export default function OwnerDashboardClient({
         return icons[action] || <FileText size={16} />;
     };
 
-    const handleCopy = (token: string, id: string) => {
-        const url = `${window.location.origin}/share/${token}`;
-        navigator.clipboard.writeText(url);
-        setCopiedId(id);
-        setTimeout(() => setCopiedId(null), 2000);
-    };
-
     const handleRevoke = async (link: DashboardLink) => {
         setRevokingId(link.id);
         try {
-            const result = await revokeAccess(link.ownerToken!, false);
+            const result = await revokeAccess(link.ownerToken!, true);
             if (result.success) {
-                setLinks(prev => prev.map(l =>
-                    l.id === link.id ? { ...l, isRevoked: true, status: 'revoked' as const } : l
-                ));
+                setLinks(prev => prev.filter(l => l.id !== link.id));
                 setNotification({
-                    message: `🔒 Access revoked${link.allowedVendorEmail ? ` for ${link.allowedVendorEmail}` : ''}. The link is no longer accessible.`,
+                    message: `Access revoked${link.allowedVendorEmail ? ` for ${link.allowedVendorEmail}` : ''} and all shared data permanently deleted.`,
                     type: 'success',
                 });
             } else {
@@ -286,8 +274,6 @@ export default function OwnerDashboardClient({
         }
         return true;
     });
-
-    const filteredLinks = filter === 'all' ? links : links.filter(l => l.status === filter);
 
     // Combined stats: links (active data) + sendHistory (preserved records)
     // sendHistory only contains expired/revoked/cleaned records
@@ -389,7 +375,6 @@ export default function OwnerDashboardClient({
                             ))}
                         </div>
 
-                        {/* Actions & Filters Bar */}
                         <div className="action-filter-wrapper">
                             <Link href="/create-link" className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 24px', borderRadius: '12px' }}>
                                 <svg width="18" height="18" viewBox="0 0 20 20" fill="currentColor">
@@ -397,19 +382,6 @@ export default function OwnerDashboardClient({
                                 </svg>
                                 <span style={{ fontWeight: 600 }}>Create New Link</span>
                             </Link>
-
-                            <div className="segmented-filter-bar">
-                                {(['all', 'active', 'used', 'expired', 'revoked'] as const).map((f) => (
-                                    <button
-                                        key={f}
-                                        onClick={() => setFilter(f)}
-                                        className={`segment-pill-btn ${filter === f ? 'active' : ''}`}
-                                    >
-                                        <span>{f.charAt(0).toUpperCase() + f.slice(1)}</span>
-                                        <span className="segment-pill-count">{counts[f]}</span>
-                                    </button>
-                                ))}
-                            </div>
                         </div>
 
                         {/* Tab Switcher */}
@@ -722,26 +694,22 @@ export default function OwnerDashboardClient({
                                         <div className="button-spinner" style={{ width: '32px', height: '32px', margin: '0 auto 12px' }}></div>
                                         <p style={{ color: 'var(--color-text-secondary)' }}>Loading your links...</p>
                                     </div>
-                                ) : filteredLinks.length === 0 ? (
+                                ) : links.length === 0 ? (
                                     <div className="app-form-card" style={{ textAlign: 'center', padding: '48px' }}>
                                         <div style={{ fontSize: '3rem', marginBottom: '16px' }}>
                                             <Link2 size={48} style={{ margin: '0 auto' }} />
                                         </div>
                                         <p style={{ color: 'var(--text-secondary)', marginBottom: '16px' }}>
-                                            {filter === 'all'
-                                                ? "You haven't created any secure links yet."
-                                                : `No ${filter} links found.`}
+                                            You haven't created any secure links yet.
                                         </p>
-                                        {filter === 'all' && (
-                                            <Link href="/create-link" className="btn btn-primary">
-                                                Create Your First Link
-                                            </Link>
-                                        )}
+                                        <Link href="/create-link" className="btn btn-primary">
+                                            Create Your First Link
+                                        </Link>
                                     </div>
 
                                 ) : (
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                                        {filteredLinks.map((link) => (
+                                        {links.map((link) => (
                                             <div key={link.id} className="premium-link-card">
                                                 {/* Top Row: Avatar Circle, Vendor info, Status badges */}
                                                 <div className="card-header-flex">
@@ -790,20 +758,10 @@ export default function OwnerDashboardClient({
                                                     </div>
                                                 </div>
 
-                                                {/* URL Widget Container */}
-                                                <div className="premium-url-widget">
-                                                    <span className="premium-url-label">URL</span>
-                                                    <span className="premium-url-text">
-                                                        {typeof window !== 'undefined' ? `${window.location.origin}/share/${link.token}` : `/share/${link.token}`}
-                                                    </span>
-                                                    <button
-                                                        onClick={() => handleCopy(link.token, 'link-' + link.id)}
-                                                        className={`premium-url-copy-btn ${copiedId === 'link-' + link.id ? 'copied' : ''}`}
-                                                        title="Copy Share URL"
-                                                    >
-                                                        {copiedId === 'link-' + link.id ? <Check size={14} /> : <Copy size={14} />}
-                                                    </button>
-                                                </div>
+                                                <p className="premium-url-sent">
+                                                    Link and OTP sent to the vendor
+                                                    {link.allowedVendorEmail ? ` (${link.allowedVendorEmail})` : ''}.
+                                                </p>
 
                                                 {/* Properties Detail Grid */}
                                                 <div style={{

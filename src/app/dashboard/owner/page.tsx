@@ -1,12 +1,14 @@
 import { redirect } from 'next/navigation';
 import { auth } from '@/lib/auth';
 import { getOwnerDashboardData } from '@/actions/dashboard';
+import { getDbUserRole } from '@/lib/security/roles';
+import { getOnboardingStep } from '@/lib/onboarding';
 import OwnerDashboardClient from './OwnerDashboardClient';
 
 /**
  * Prefetch dashboard data on the server so the client skips the
  * session → server-action waterfall on first paint.
- * Uses sequential DB reads to avoid Neon connection-pool timeouts.
+ * Role gate uses Postgres, never JWT alone.
  */
 export default async function OwnerDashboardPage() {
     const session = await auth();
@@ -15,15 +17,16 @@ export default async function OwnerDashboardPage() {
         redirect('/auth/signin?callbackUrl=/dashboard/owner');
     }
 
-    // Prefer onboardingStep; fall back to roleSelected for older JWTs
-    const onboardingComplete =
-        session.user.onboardingStep === 'COMPLETE' ||
-        (session.user.onboardingStep == null && session.user.roleSelected);
-    if (!onboardingComplete) {
+    const dbUser = await getDbUserRole(session.user.id);
+    if (!dbUser) {
+        redirect('/auth/signin?callbackUrl=/dashboard/owner');
+    }
+
+    if (getOnboardingStep(dbUser.roleSelected) === 'ROLE_SELECTION') {
         redirect('/auth/role-select?callbackUrl=/dashboard/owner');
     }
 
-    if (session.user.role === 'VENDOR') {
+    if (dbUser.role === 'VENDOR') {
         redirect('/dashboard/vendor');
     }
 

@@ -33,17 +33,11 @@ export type RevokeAccessResult = {
 };
 
 /**
- * Revokes access to a secure link (Kill Switch)
- * 
- * This action:
- * 1. Immediately invalidates any active Redis session
- * 2. Marks the link as revoked in the database
- * 3. Optionally deletes the encrypted data immediately
- * 4. Creates an audit log entry
+ * Revokes access to a secure link (Kill Switch) and permanently deletes all linked data.
  */
 export async function revokeAccess(
     ownerToken: string,
-    deleteDataImmediately: boolean = false
+    _deleteDataImmediately: boolean = true // kept for callers; purge always runs
 ): Promise<RevokeAccessResult> {
     try {
         const session = await auth();
@@ -58,7 +52,12 @@ export async function revokeAccess(
         // Find the secure link by owner token
         const secureLink = await prisma.secureLink.findUnique({
             where: { ownerToken },
-            include: { UserData: true },
+            select: {
+                id: true,
+                token: true,
+                ownerId: true,
+                isRevoked: true,
+            },
         });
 
         if (!secureLink) {
@@ -74,13 +73,14 @@ export async function revokeAccess(
                 data: {
                     action: 'REVOKE_ACCESS_DENIED',
                     linkId: secureLink.id,
+                    ownerId: secureLink.ownerId,
                     reason: 'Unauthorized user attempted to revoke link',
                     metadata: JSON.stringify({
                         attemptedBy: session.user.id,
-                        actualOwner: secureLink.ownerId
-                    })
-                }
-            }).catch(e => logger.warn('Failed to log REVOKE_ACCESS_DENIED', e.message));
+                        actualOwner: secureLink.ownerId,
+                    }),
+                },
+            }).catch((e) => logger.warn('Failed to log REVOKE_ACCESS_DENIED', e.message));
 
             return {
                 success: false,
@@ -89,69 +89,71 @@ export async function revokeAccess(
         }
 
         if (secureLink.isRevoked) {
+            // Still purge any leftover ciphertext if a prior revoke left data behind
+            const cleanup = await executeSingleLinkCleanup(secureLink.token);
+            if (cleanup.success) {
+                return {
+                    success: true,
+                    message: 'Access already revoked. Remaining data has been permanently deleted.',
+                };
+            }
             return {
                 success: false,
                 error: 'This link has already been revoked.',
             };
         }
 
-        // KILL SWITCH: Invalidate Redis session IMMEDIATELY (parallel with DB update)
+        // KILL SWITCH: Invalidate Redis + mark revoked, then hard-delete data
         const [redisResult] = await Promise.all([
             tryInvalidateSession(secureLink.token),
-            // Start DB transaction in parallel for speed
             prisma.$transaction(async (tx) => {
-                // Mark as revoked
                 await tx.secureLink.update({
                     where: { id: secureLink.id },
                     data: { isRevoked: true },
                 });
 
-                // Clear active session device bindings (binding must not outlive kill switch)
                 await tx.vendorAccess.updateMany({
                     where: { secureLinkId: secureLink.id },
                     data: {
                         activeSessionId: null,
                         activeDeviceHash: null,
+                        isRevoked: true,
                     },
                 });
 
-                // Create audit log for revocation
                 await tx.auditLog.create({
                     data: {
                         action: 'REVOKE_ACCESS_SUCCESS',
                         linkId: secureLink.id,
-                        reason: 'Owner requested manual revocation',
-                        metadata: JSON.stringify({ killSwitchLatencyMs: 0, revokedBy: session.user.id }), // Will be updated below
+                        ownerId: session.user.id,
+                        reason: 'Owner requested manual revocation — data purge follows',
+                        metadata: JSON.stringify({
+                            revokedBy: session.user.id,
+                            dataDeleted: true,
+                        }),
                     },
                 });
-
-                // Optionally delete encrypted data immediately
-                if (deleteDataImmediately && secureLink.UserData) {
-                    // Create audit log BEFORE deleting (to satisfy FK constraint)
-                    await tx.auditLog.create({
-                        data: {
-                            action: 'DATA_DELETED',
-                            linkId: secureLink.id,
-                        },
-                    });
-
-                    // Now delete the user data
-                    await tx.userData.delete({
-                        where: { id: secureLink.UserData.id },
-                    });
-                }
-            })
+            }),
         ]);
 
-        // Log kill switch performance
-        logger.info(`[KILL SWITCH] Link ${secureLink.id} revoked by ${session.user.id} | Redis: ${redisResult.success ? `${redisResult.latencyMs}ms` : 'N/A'} | Target: <100ms`);
+        logger.info(
+            `[KILL SWITCH] Link ${secureLink.id} revoked by ${session.user.id} | Redis: ${
+                redisResult.success ? `${redisResult.latencyMs}ms` : 'N/A'
+            }`,
+        );
 
-        // AUTO-CLEANUP: Purge ALL data after revocation (fire-and-forget)
-        executeSingleLinkCleanup(secureLink.token).catch(() => { });
+        const cleanup = await executeSingleLinkCleanup(secureLink.token);
+        if (!cleanup.success) {
+            logger.error(`[KILL SWITCH] Cleanup failed for ${secureLink.id}: ${cleanup.error}`);
+            return {
+                success: false,
+                error: 'Access was revoked but data cleanup failed. It will retry on the next cleanup run.',
+            };
+        }
 
         return {
             success: true,
-            message: 'Access revoked and all data permanently deleted.',
+            message: 'Access revoked and all shared data permanently deleted.',
         };
     } catch (error) {
         logger.error('Error revoking access:', error instanceof Error ? error.message : 'Unknown');
@@ -163,7 +165,8 @@ export async function revokeAccess(
 }
 
 /**
- * Gets the current status of a secure link for the owner
+ * Gets the current status of a secure link for the owner.
+ * Expired/revoked links trigger an immediate data purge.
  */
 export async function getLinkStatus(ownerToken: string): Promise<{
     success: boolean;
@@ -173,6 +176,7 @@ export async function getLinkStatus(ownerToken: string): Promise<{
         isExpired: boolean;
         expiresAt: Date;
         createdAt: Date;
+        dataDeleted?: boolean;
     };
     error?: string;
 }> {
@@ -190,21 +194,22 @@ export async function getLinkStatus(ownerToken: string): Promise<{
             where: { ownerToken },
             select: {
                 id: true,
+                token: true,
                 ownerId: true,
                 isUsed: true,
                 isRevoked: true,
                 expiresAt: true,
                 createdAt: true,
                 LinkAccess: {
-                    select: { isUsed: true }
-                }
+                    select: { isUsed: true },
+                },
             },
         });
 
         if (!secureLink) {
             return {
                 success: false,
-                error: 'Invalid owner token. This link may not exist.',
+                error: 'Invalid owner token. This link may not exist (data may already be deleted).',
             };
         }
 
@@ -213,13 +218,14 @@ export async function getLinkStatus(ownerToken: string): Promise<{
                 data: {
                     action: 'GET_LINK_STATUS_DENIED',
                     linkId: secureLink.id,
+                    ownerId: secureLink.ownerId,
                     reason: 'Unauthorized user attempted to view link status',
                     metadata: JSON.stringify({
                         attemptedBy: session.user.id,
-                        actualOwner: secureLink.ownerId
-                    })
-                }
-            }).catch(e => logger.warn('Failed to log GET_LINK_STATUS_DENIED', e.message));
+                        actualOwner: secureLink.ownerId,
+                    }),
+                },
+            }).catch((e) => logger.warn('Failed to log GET_LINK_STATUS_DENIED', e.message));
 
             return {
                 success: false,
@@ -227,14 +233,15 @@ export async function getLinkStatus(ownerToken: string): Promise<{
             };
         }
 
-        // SEC-2: Success audit log removed — getLinkStatus is a read-only polling
-        // operation called frequently from the dashboard. Logging every successful
-        // read creates significant DB bloat with no security benefit.
-        // The GET_LINK_STATUS_DENIED log above (unauthorized access) is preserved.
-
         const now = new Date();
         const isExpired = secureLink.expiresAt < now;
-        const anyVendorUsed = secureLink.LinkAccess?.some(a => a.isUsed) || false;
+        const anyVendorUsed = secureLink.LinkAccess?.some((a) => a.isUsed) || false;
+
+        let dataDeleted = false;
+        if (secureLink.isRevoked || isExpired) {
+            const cleanup = await executeSingleLinkCleanup(secureLink.token);
+            dataDeleted = cleanup.success;
+        }
 
         return {
             success: true,
@@ -244,6 +251,7 @@ export async function getLinkStatus(ownerToken: string): Promise<{
                 isExpired,
                 expiresAt: secureLink.expiresAt,
                 createdAt: secureLink.createdAt,
+                dataDeleted,
             },
         };
     } catch (error) {

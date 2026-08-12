@@ -26,6 +26,17 @@ export async function getFilePreview(token: string, fileId: string): Promise<Fil
             throw new Error(authResult.error);
         }
 
+        const caps = authResult.context.capabilities;
+        // Full base64 export is download-equivalent; editors may still load for edit UX
+        if (!caps.canDownload && !caps.canEdit) {
+            return {
+                success: false,
+                error: 'Preview export blocked: download is disabled for this link. Use the in-app viewer.',
+                restricted: true,
+                restrictionType: 'download_disabled',
+            };
+        }
+
         const requestHeaders = await headers();
         const clientIP = extractClientIP(requestHeaders);
         const rateLimit = await checkUploadRateLimit(clientIP);

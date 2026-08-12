@@ -10,7 +10,7 @@ import {
 import { hasRolePermission } from '@/lib/security/rbac';
 import { logDocumentEvent, extractRequestInfo } from '@/lib/security/auditLog';
 import { validateMagicBytesForExtension } from '@/lib/file-magic';
-import { normalizeRole } from '@/lib/security/roles';
+import { getDbUserRole } from '@/lib/security/roles';
 import { checkUploadRateLimit, extractClientIP } from '@/lib/rate-limit';
 import { headers } from 'next/headers';
 
@@ -52,9 +52,13 @@ export async function POST(request: NextRequest) {
     }
 
     const userId = session.user.id;
-    const userRole = normalizeRole((session.user as { role?: string }).role);
+    const dbRole = await getDbUserRole(userId);
+    if (!dbRole) {
+      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+    }
+    const userRole = dbRole.role;
 
-    // ── RBAC check ──────────────────────────────────────────────
+    // ── RBAC check (Postgres role — never JWT) ──────────────────
     if (!hasRolePermission(userRole, 'upload')) {
       return NextResponse.json(
         { error: 'You do not have permission to upload documents' },

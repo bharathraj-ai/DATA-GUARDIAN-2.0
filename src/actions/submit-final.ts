@@ -57,7 +57,7 @@ export async function submitFinal(
         logger.info(`FileId: ${fileId}, Vendor: ${redactEmail(vendorEmail)}, FileName: ${uploadedFile.name}, Storage: ${isMongoBacked ? 'Mongo' : 'inline'}`);
 
         if (isMongoBacked) {
-            // ── Mongo path: upload final version to Mongo ─────────────────
+            // ── Mongo path: encrypt then upload ciphertext to GridFS ─────
             const mongoFile = await prisma.mongoFile.findUnique({
                 where: { id: (fileRecord as any).mongoFileId },
                 select: { folder: true, uploadedBy: true, projectId: true, vendorId: true },
@@ -67,8 +67,12 @@ export async function submitFinal(
                 return { success: false, error: 'Mongo file record not found.' };
             }
 
+            const dek = generateDek();
+            const { iv, authTag, encryptedContent } = encryptBuffer(fileBuffer, dek);
+            const encryptedDek = encryptDek(dek);
+
             const mongoUpload = await uploadToMongo({
-                buffer: fileBuffer,
+                buffer: encryptedContent,
                 originalFileName: fileRecord.fileName,
                 mimeType: mimeValidation.mimeType!,
                 fileExtension: ext.replace('.', ''),
@@ -76,7 +80,6 @@ export async function submitFinal(
                 uploadedBy: mongoFile.uploadedBy,
             });
 
-            // Update MongoFile with new submission key
             await prisma.mongoFile.update({
                 where: { id: (fileRecord as any).mongoFileId },
                 data: {
@@ -89,7 +92,7 @@ export async function submitFinal(
                 },
             });
 
-            // Update UserFile metadata — clear encryption fields since Mongo stores raw
+            // Keep DEK envelope metadata so downloads remain decryptable
             await prisma.userFile.update({
                 where: { id: fileId },
                 data: {
@@ -98,11 +101,10 @@ export async function submitFinal(
                     submittedAt: new Date(),
                     submittedBy: vendorEmail,
                     version: { increment: 1 },
-                    // Clear old inline encryption metadata — the Mongo file is stored raw
-                    encryptedContent: null,
-                    iv: null,
-                    authTag: null,
-                    encryptedDek: null,
+                    encryptedContent: null, // bytes live in GridFS
+                    iv,
+                    authTag,
+                    encryptedDek,
                 } as any
             });
         } else {

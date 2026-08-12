@@ -168,6 +168,21 @@ export async function sendVendorOTP(input: {
                 },
             });
 
+            // Fresh OTP must be enterable after a prior successful unlock (single-use
+            // applies to the old code, not to this vendor forever).
+            await tx.linkAccess.updateMany({
+                where: {
+                    secureLinkId: secureLink.id,
+                    vendorEmail: { equals: normalizedEmail, mode: 'insensitive' },
+                },
+                data: {
+                    isUsed: false,
+                    otpHash,
+                    failedAttempts: 0,
+                    lockedAt: null,
+                },
+            });
+
             await tx.otpHistory.create({
                 data: {
                     vendorAccessId: vendor.id,

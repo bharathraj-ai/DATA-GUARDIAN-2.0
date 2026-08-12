@@ -60,10 +60,11 @@ export async function validateShareAccess(token: string): Promise<ValidateShareA
 
         // Check if link is revoked
         if (secureLink.isRevoked) {
+            await executeSingleLinkCleanup(token).catch(() => {});
             return {
                 allowed: false,
                 requiresAuth: false,
-                error: 'This link has been revoked by the owner.',
+                error: 'This link has been revoked by the owner. All data has been permanently deleted.',
                 errorType: 'REVOKED',
             };
         }
@@ -71,8 +72,7 @@ export async function validateShareAccess(token: string): Promise<ValidateShareA
         // Check if link is expired
         const now = new Date();
         if (secureLink.expiresAt < now) {
-            // AUTO-CLEANUP: Delete all data when expired
-            executeSingleLinkCleanup(token).catch(() => { });
+            await executeSingleLinkCleanup(token).catch(() => {});
             return {
                 allowed: false,
                 requiresAuth: false,

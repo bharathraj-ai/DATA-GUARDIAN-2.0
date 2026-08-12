@@ -343,12 +343,13 @@ export async function completeWork(token: string): Promise<CompleteWorkResult> {
             }
         }
 
-        // 8. AUTO-CLEANUP: Purge ALL data for this link (async, non-blocking)
-        import('@/lib/cleanup-core').then(({ executeSingleLinkCleanup }) => {
-            executeSingleLinkCleanup(token).catch(err => {
-                logger.error('Failed to cleanup link data:', err);
-            });
-        });
+        // 8. AUTO-CLEANUP: Purge ALL ciphertext / files for this link (awaited)
+        const { executeSingleLinkCleanup } = await import('@/lib/cleanup-core');
+        const cleanup = await executeSingleLinkCleanup(token);
+        if (!cleanup.success) {
+            logger.error('Failed to cleanup link data after complete-work:', cleanup.error);
+            // Access is already revoked; cron will retry. Still report success to vendor.
+        }
 
         return { success: true };
     } catch (error) {

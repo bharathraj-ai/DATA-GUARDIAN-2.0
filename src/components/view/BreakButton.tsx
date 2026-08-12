@@ -2,7 +2,6 @@
 
 import React, { useState } from 'react';
 import { takeBreak } from '@/actions/break-session';
-import { useRouter } from 'next/navigation';
 import { Ban, CheckCircle2, Info, Coffee, Loader2 } from 'lucide-react';
 
 type ToastType = 'error' | 'success' | 'info';
@@ -17,36 +16,34 @@ interface ToastState {
 export function BreakButton({ token }: { token: string }) {
     const [isLoading, setIsLoading] = useState(false);
     const [toast, setToast] = useState<ToastState>({ visible: false, type: 'error', title: '', message: '' });
-    const router = useRouter();
 
     const showToast = (type: ToastType, title: string, message: string) => {
         setToast({ visible: true, type, title, message });
-        // Auto-dismiss after 5 seconds
         setTimeout(() => setToast(prev => ({ ...prev, visible: false })), 5000);
     };
 
     const handleBreak = async () => {
         setIsLoading(true);
         try {
-            const lastSavedWork = (window as any).__VENDOR_DRAFT__ || null;
-            const resumePoint = {
-                path: window.location.pathname,
-                scroll: window.scrollY
-            };
-
+            // Do NOT ship the full draft blob on break — that is what made "Saving Session" slow.
+            // Background autosave already persists work; we only send a tiny resume pointer.
             const payload = {
-                lastSavedWork,
-                resumePoint,
+                resumePoint: {
+                    path: window.location.pathname,
+                    scroll: window.scrollY,
+                },
                 draftVersion: 999999,
             };
 
             const res = await takeBreak(token, payload);
             if (res.success) {
-                showToast('success', 'Break Started', res.message || 'New OTP sent to your email.');
-                // Small delay so user sees the toast before redirect
-                setTimeout(() => {
-                    window.location.href = '/dashboard';
-                }, 1500);
+                try {
+                    sessionStorage.setItem('dg:post-break-redirect', '1');
+                } catch {
+                    /* ignore */
+                }
+                window.location.replace('/dashboard/vendor');
+                return;
             } else {
                 showToast('error', 'Break Failed', res.error || 'Failed to take break.');
             }
@@ -89,7 +86,7 @@ export function BreakButton({ token }: { token: string }) {
                 {isLoading ? (
                     <>
                         <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
-                        Saving Session...
+                        Starting break...
                     </>
                 ) : (
                     <>

@@ -10,9 +10,10 @@ export type CleanupResult = {
     error?: string;
 };
 
-export async function executeCleanup(): Promise<CleanupResult> {
+export async function executeCleanup(options?: { ownerId?: string }): Promise<CleanupResult> {
     try {
         const now = new Date();
+        const ownerFilter = options?.ownerId ? { ownerId: options.ownerId } : {};
 
         // Implement Batching/Pagination
         const BATCH_SIZE = 100;
@@ -28,9 +29,14 @@ export async function executeCleanup(): Promise<CleanupResult> {
             // Find a batch of expired or revoked secure links
             const linksBatch = await prisma.secureLink.findMany({
                 where: {
-                    OR: [
-                        { expiresAt: { lt: now } },
-                        { isRevoked: true },
+                    AND: [
+                        ownerFilter,
+                        {
+                            OR: [
+                                { expiresAt: { lt: now } },
+                                { isRevoked: true },
+                            ],
+                        },
                     ],
                 },
                 select: {
@@ -100,6 +106,7 @@ export async function executeCleanup(): Promise<CleanupResult> {
                 .filter((id): id is string => !!id);
 
             // Delete batch in a transaction
+            // Order matters: UserFile references MongoFile — delete files before mongo metadata.
             const result = await prisma.$transaction(async (tx) => {
                 // 0. Update SendRecord statuses (these survive deletion)
                 for (const link of linksBatch) {
@@ -122,22 +129,21 @@ export async function executeCleanup(): Promise<CleanupResult> {
                                 expiredAt: now,
                             },
                         });
+
+                        // Keep owner audit trail after link purge
+                        await tx.auditLog.updateMany({
+                            where: { linkId: link.id, ownerId: null },
+                            data: { ownerId: link.ownerId },
+                        });
                     }
                 }
 
-                // 1. Delete MongoFile metadata records
-                if (allMongoFileIds.length > 0) {
-                    await tx.mongoFile.deleteMany({
-                        where: { id: { in: allMongoFileIds } },
-                    });
-                }
-
-                // 2. Delete chat messages
+                // 1. Delete chat messages
                 await tx.chatMessage.deleteMany({
                     where: { secureLinkId: { in: linkIds } },
                 });
 
-                // 3. Delete collaboration data for all files
+                // 2. Delete collaboration data for all files
                 if (allFileIds.length > 0) {
                     await tx.documentSession.deleteMany({
                         where: { fileId: { in: allFileIds } },
@@ -150,12 +156,19 @@ export async function executeCleanup(): Promise<CleanupResult> {
                     });
                 }
 
-                // 4. Delete attached files (cascades FileVersion, Annotation)
+                // 3. Delete attached files first (FK → MongoFile; cascades FileVersion/Annotation)
                 const deletedFiles = await tx.userFile.deleteMany({
                     where: {
                         secureLinkId: { in: linkIds },
                     },
                 });
+
+                // 4. Delete MongoFile metadata (upload/access logs cascade)
+                if (allMongoFileIds.length > 0) {
+                    await tx.mongoFile.deleteMany({
+                        where: { id: { in: allMongoFileIds } },
+                    });
+                }
 
                 // 5. Delete secure links (cascades VendorAccess, LinkAccess)
                 const deletedLinks = await tx.secureLink.deleteMany({
@@ -295,23 +308,23 @@ export async function executeSingleLinkCleanup(token: string): Promise<{ success
                         expiredAt: now,
                     },
                 });
+
+                await tx.auditLog.updateMany({
+                    where: { linkId: secureLink.id, ownerId: null },
+                    data: { ownerId: secureLink.ownerId },
+                });
             }
 
             const mongoFileIds = secureLink.UserFile
                 .map((f) => f.mongoFileId)
                 .filter((id): id is string => !!id);
 
-            if (mongoFileIds.length > 0) {
-                await tx.mongoFile.deleteMany({
-                    where: { id: { in: mongoFileIds } },
-                });
-            }
+            const fileIds = secureLink.UserFile.map((f) => f.id);
 
             await tx.chatMessage.deleteMany({
                 where: { secureLinkId: secureLink.id },
             });
 
-            const fileIds = secureLink.UserFile.map((f) => f.id);
             if (fileIds.length > 0) {
                 await tx.documentSession.deleteMany({
                     where: { fileId: { in: fileIds } },
@@ -324,9 +337,16 @@ export async function executeSingleLinkCleanup(token: string): Promise<{ success
                 });
             }
 
+            // UserFile before MongoFile (FK)
             await tx.userFile.deleteMany({
                 where: { secureLinkId: secureLink.id },
             });
+
+            if (mongoFileIds.length > 0) {
+                await tx.mongoFile.deleteMany({
+                    where: { id: { in: mongoFileIds } },
+                });
+            }
 
             await tx.secureLink.deleteMany({
                 where: { id: secureLink.id },

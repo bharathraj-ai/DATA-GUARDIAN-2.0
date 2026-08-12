@@ -16,8 +16,8 @@ export async function getAvailableVendors(): Promise<VendorOption[]> {
             return [];
         }
 
-        const { canCreateSecureLinks } = await import('@/lib/security/roles');
-        if (!canCreateSecureLinks(session.user.role)) {
+        const { requireOwnerRole } = await import('@/lib/security/roles');
+        if (!(await requireOwnerRole(session.user.id))) {
             return [];
         }
 

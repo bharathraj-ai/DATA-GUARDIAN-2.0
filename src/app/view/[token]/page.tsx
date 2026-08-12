@@ -1,6 +1,9 @@
 import React from 'react';
 import { redirect } from 'next/navigation';
 import { getUserData } from '@/actions/get-user';
+import { auth } from '@/lib/auth';
+import { getDbUserRole } from '@/lib/security/roles';
+import { dashboardPathForRole, getOnboardingStep } from '@/lib/onboarding';
 import { AlertTriangle } from 'lucide-react';
 import { CollaborationProvider } from '@/components/view/CollaborationProvider';
 import { SessionTimer } from '@/components/view/SessionTimer';
@@ -11,6 +14,7 @@ import { CompleteWorkButton } from '@/components/view/CompleteWorkButton';
 import { BreakButton } from '@/components/view/BreakButton';
 import { VendorAutoSave } from '@/components/view/VendorAutoSave';
 import { DraftHydrator } from '@/components/view/DraftHydrator';
+import styles from './view.module.css';
 
 export const metadata = {
     title: 'Secure View | Data Guardian',
@@ -29,42 +33,49 @@ export default async function ViewPage({ params }: { params: Promise<{ token: st
             redirect(`/share/${cleanToken}`);
         }
 
+        // After break / lost share session: send logged-in vendors to their dashboard
+        // instead of a dead-end Access Denied card on /view.
+        const isSessionGone =
+            result.errorType === 'SESSION_INVALID' ||
+            (typeof result.error === 'string' &&
+                /missing or invalid session|unauthorized/i.test(result.error));
+
+        if (isSessionGone) {
+            const session = await auth();
+            if (session?.user?.id) {
+                const dbUser = await getDbUserRole(session.user.id);
+                if (dbUser && getOnboardingStep(dbUser.roleSelected) === 'COMPLETE') {
+                    redirect(dashboardPathForRole(dbUser.role));
+                }
+                redirect('/dashboard');
+            }
+        }
+
         const title =
             result.errorType === 'REVOKED' ? 'Access Revoked' :
             result.errorType === 'EXPIRED' ? 'Session Expired' :
             'Access Denied';
 
         return (
-            <main 
-                className="profile-wrapper" 
-                style={{ 
-                    paddingTop: '120px', 
-                    minHeight: '100vh', 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    justifyContent: 'center' 
-                }}
-            >
-                <div className="profile-card" style={{ width: '100%', textAlign: 'center', padding: '60px 40px' }}>
+            <main className={styles.desk}>
+                <div className={styles.denied}>
                     <div style={{
-                        width: '64px', height: '64px', borderRadius: '50%', background: '#FEE2E2',
+                        width: 56, height: 56, borderRadius: '50%', background: '#FEE2E2',
                         color: '#EF4444', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        margin: '0 auto 24px'
+                        margin: '0 auto 16px',
                     }}>
-                        <AlertTriangle size={32} />
+                        <AlertTriangle size={28} />
                     </div>
-                    <h2 style={{ fontSize: '28px', fontWeight: 800, color: '#0F172A', marginBottom: '12px' }}>
-                        {title}
-                    </h2>
-                    <p style={{ fontSize: '16px', color: '#475569', fontWeight: 500 }}>
-                        {result.error}
-                    </p>
+                    <h2>{title}</h2>
+                    <p>{result.error}</p>
                 </div>
             </main>
         );
     }
 
     const { data } = result;
+    const sharedBy = data.ownerName || data.ownerEmail || null;
+    const initial = sharedBy ? sharedBy[0].toUpperCase() : (data.firstName?.[0] || 'S');
 
     return (
         // Seed Zustand store with server-fetched capabilities & remaining time
@@ -75,108 +86,82 @@ export default async function ViewPage({ params }: { params: Promise<{ token: st
             initialRemainingSeconds={data.remainingSeconds}
         >
           <SecureViewWrapper token={cleanToken} viewerEmail={data.maskedEmail}>
-            <main className="profile-wrapper" style={{ position: 'relative', paddingTop: '120px', paddingBottom: '60px' }}>
-                <div className="bg-orb bg-orb-1" />
-                <div className="bg-orb bg-orb-2" />
-                <div className="bg-grid" />
-
-                <div className="profile-card">
-                    {/* Header */}
-                    <div className="profile-header">
-                        <div className="header-top">
-                            <h1 className="profile-title" style={{ color: '#0F172A' }}>Secure Shared Profile</h1>
-                            <div className="status-badges">
-                                <span className="status-badge connected">
-                                    <span className="status-dot" /> LIVE
-                                </span>
-                            </div>
-                        </div>
-                        <SessionTimer />
+            <main className={styles.desk}>
+                <header className={styles.top}>
+                    <div>
+                        <p className={styles.kicker}>Live session</p>
+                        <h1 className={styles.title}>Shared vault</h1>
                     </div>
-
-                    {/* Identity */}
-                    <div className="identity-section">
-                        <div className="avatar">
-                            <span className="avatar-initials">
-                                {data.firstName[0]}{data.lastName[0]}
-                            </span>
+                    <div className={styles.meta}>
+                        <span className={styles.live}>
+                            <span className={styles.dot} />
+                            LIVE
+                        </span>
+                        <div className={styles.chip}>
+                            <SessionTimer />
                         </div>
-                        <h2 className="identity-name" style={{ color: '#0F172A' }}>{data.firstName} {data.lastName}</h2>
-                        <p className="identity-label" style={{ color: '#475569' }}>Shared securely for temporary access</p>
                     </div>
+                </header>
 
-                    {/* Sender Context */}
-                    {(data.ownerName || data.ownerEmail || data.purpose || data.purposeDetail) && (
-                        <div style={{
-                            background: 'linear-gradient(135deg, rgba(99,102,241,0.08), rgba(139,92,246,0.08))',
-                            border: '1px solid rgba(99,102,241,0.2)',
-                            borderRadius: '12px', padding: '16px 20px', margin: '0 0 4px 0',
-                            display: 'flex', alignItems: 'flex-start', gap: '12px',
-                        }}>
-                            {(data.ownerName || data.ownerEmail) && (
-                                <div style={{
-                                    width: '36px', height: '36px', borderRadius: '50%',
-                                    background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                    color: '#fff', fontSize: '14px', fontWeight: 700, flexShrink: 0,
-                                }}>
-                                    {(data.ownerName ? data.ownerName[0] : data.ownerEmail ? data.ownerEmail[0] : '?').toUpperCase()}
+                <div className={styles.grid}>
+                    <aside className={styles.brief}>
+                        {sharedBy ? (
+                            <div className={styles.who}>
+                                <span className={styles.avatar}>{initial}</span>
+                                <div>
+                                    <small>From</small>
+                                    <strong>{sharedBy}</strong>
                                 </div>
-                            )}
-                            <div style={{ flex: 1 }}>
-                                {(data.ownerName || data.ownerEmail) && (
-                                    <>
-                                        <div style={{ fontSize: '11px', color: '#9CA3AF', textTransform: 'uppercase', fontWeight: 600 }}>Shared by</div>
-                                        <div style={{ fontSize: '15px', fontWeight: 600 }}>{data.ownerName || data.ownerEmail}</div>
-                                    </>
-                                )}
-                                {data.purpose && (
-                                    <div style={{ marginTop: (data.ownerName || data.ownerEmail) ? '12px' : '0' }}>
-                                        <div style={{ fontSize: '12px', fontWeight: 600, color: '#4F46E5', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Title</div>
-                                        <div style={{ fontSize: '14px', fontWeight: 500, color: '#1F2937' }}>{data.purpose}</div>
-                                    </div>
-                                )}
-                                {data.purposeDetail && (
-                                    <div style={{ marginTop: '8px', background: '#F9FAFB', padding: '8px 12px', borderRadius: '6px', borderLeft: '3px solid #6366F1' }}>
-                                        <div style={{ fontSize: '11px', color: '#6B7280', fontWeight: 600, textTransform: 'uppercase', marginBottom: '2px' }}>Message</div>
-                                        <div style={{ fontSize: '13px', color: '#4B5563', whiteSpace: 'pre-wrap' }}>{data.purposeDetail}</div>
-                                    </div>
-                                )}
                             </div>
-                        </div>
-                    )}
+                        ) : (
+                            <div className={styles.who}>
+                                <span className={styles.avatar}>{initial}</span>
+                                <div>
+                                    <small>Recipient</small>
+                                    <strong>{data.firstName} {data.lastName}</strong>
+                                </div>
+                            </div>
+                        )}
 
-                    {/* File List — Client Component: handles edit/preview interactions */}
-                    <div className="data-section">
-                        <div className="data-card">
-                            <FileList 
-                                token={cleanToken} 
+                        {data.purpose ? (
+                            <div className={styles.field}>
+                                <small>Title</small>
+                                <p>{data.purpose}</p>
+                            </div>
+                        ) : null}
+
+                        {data.purposeDetail ? (
+                            <div className={styles.field}>
+                                <small>Note</small>
+                                <p>{data.purposeDetail}</p>
+                            </div>
+                        ) : null}
+                    </aside>
+
+                    <section className={styles.work}>
+                        <div className={styles.files}>
+                            <FileList
+                                token={cleanToken}
                                 files={data.files.map((f: any) => ({
                                     id: f.id,
                                     fileName: f.fileName,
                                     fileSize: f.fileSize,
                                     fileType: f.fileType,
                                     status: f.status
-                                }))} 
-                                isOwner={data.isOwner} 
+                                }))}
+                                isOwner={data.isOwner}
                             />
                         </div>
-                    </div>
 
-                    {!data.isOwner && (
-                        <>
-                            <DraftHydrator lastSavedWork={data.lastSavedWork} resumePoint={data.resumePoint} />
-                            <div style={{ padding: '0 24px', marginBottom: '24px', display: 'flex', flexDirection: 'column' }}>
+                        {!data.isOwner && (
+                            <div className={styles.actions}>
+                                <DraftHydrator lastSavedWork={data.lastSavedWork} resumePoint={data.resumePoint} />
                                 <CompleteWorkButton token={cleanToken} />
                                 <BreakButton token={cleanToken} />
                                 <VendorAutoSave token={cleanToken} />
                             </div>
-                        </>
-                    )}
-
-                    <div className="trust-footer">
-                        <p className="trust-text">Protected by Data Guardian V2 (Enterprise)</p>
-                    </div>
+                        )}
+                    </section>
                 </div>
 
                 <ChatPanel />

@@ -53,8 +53,9 @@ export type SecureLinkWithRelations = Prisma.SecureLinkGetPayload<{
         status: true,
         activeSessionId: true,
         activeDeviceHash: true,
-        lastSavedWork: true,
-        resumePoint: true,
+        breaksUsed: true,
+        allowedBreaks: true,
+        draftVersion: true,
       },
     },
     LinkAccess: {
@@ -118,10 +119,21 @@ export async function authorizeSecureLink(
   token: string,
   action: 'view' | 'preview' | 'edit' | 'download' | 'comment' = 'view',
   fileId?: string,
+  options?: { lite?: boolean },
 ): Promise<AuthorizationResult> {
   if (!token) {
     return { success: false, status: 400, error: 'Missing access token' };
   }
+
+  const lite = Boolean(options?.lite);
+  // File metadata for view/edit/download; skip on lite (break) paths
+  const needsFiles =
+    !lite &&
+    (Boolean(fileId) ||
+      action === 'view' ||
+      action === 'edit' ||
+      action === 'download' ||
+      action === 'preview');
 
   const cookieStore = await cookies();
   const sessionCookie = cookieStore.get('session_id')?.value;
@@ -130,6 +142,7 @@ export async function authorizeSecureLink(
     return { success: false, status: 401, error: 'Unauthorized: Missing or invalid session' };
   }
   const sessionId = verified.sessionId;
+  const signedVendorEmail = normalizeEmail(verified.vendorEmail);
 
   try {
     // Optional Redis kill-switch cache (null = use DB below)
@@ -155,29 +168,33 @@ export async function authorizeSecureLink(
     select: {
       id: true,
       token: true,
-      otpHash: true,
       expiresAt: true,
       isUsed: true,
-      createdAt: true,
       userId: true,
       isRevoked: true,
-      ownerToken: true,
-      deviceHash: true,
-      failedAttempts: true,
       lockedAt: true,
-      notificationEmail: true,
-      purpose: true,
-      purposeDetail: true,
-      otpFirstAttemptAt: true,
-      otpVerifiedAt: true,
       allowedVendorEmail: true,
       allowEditing: true,
       allowDownload: true,
       allowComment: true,
-      maxViews: true,
-      maxDownloads: true,
       ownerId: true,
-      User: { select: { id: true, email: true, name: true } },
+      ...(lite
+        ? {}
+        : {
+            otpHash: true,
+            createdAt: true,
+            ownerToken: true,
+            deviceHash: true,
+            failedAttempts: true,
+            notificationEmail: true,
+            purpose: true,
+            purposeDetail: true,
+            otpFirstAttemptAt: true,
+            otpVerifiedAt: true,
+            maxViews: true,
+            maxDownloads: true,
+            User: { select: { id: true, email: true, name: true } },
+          }),
       VendorAccess: {
         select: {
           id: true,
@@ -187,8 +204,9 @@ export async function authorizeSecureLink(
           status: true,
           activeSessionId: true,
           activeDeviceHash: true,
-          lastSavedWork: true,
-          resumePoint: true,
+          breaksUsed: true,
+          allowedBreaks: true,
+          draftVersion: true,
         },
       },
       LinkAccess: {
@@ -199,19 +217,22 @@ export async function authorizeSecureLink(
           isUsed: true,
         },
       },
-      // Metadata only — never load encryptedContent on the ACL hot path.
-      UserFile: {
-        select: {
-          id: true,
-          fileName: true,
-          fileType: true,
-          fileSize: true,
-          version: true,
-          status: true,
-          mongoFileId: true,
-          editingLocked: true,
-        },
-      },
+      ...(needsFiles
+        ? {
+            UserFile: {
+              select: {
+                id: true,
+                fileName: true,
+                fileType: true,
+                fileSize: true,
+                version: true,
+                status: true,
+                mongoFileId: true,
+                editingLocked: true,
+              },
+            },
+          }
+        : {}),
     },
   });
 
@@ -225,8 +246,8 @@ export async function authorizeSecureLink(
 
   const authSession = await auth();
   const sessionEmail = normalizeEmail(authSession?.user?.email);
-  // SEC-3: vendor_email cookie is AES-256-GCM encrypted — decrypt before use.
-  // Falls back gracefully to plaintext for backward compatibility with existing sessions.
+  // Identity: prefer MAC-bound email from share session; never accept plaintext vendor_email cookie.
+  // Encrypted vendor_email cookie is legacy fallback only when decrypt succeeds.
   const rawCookieEmail = cookieStore.get('vendor_email')?.value;
   let cookieEmail: string | null = null;
   if (rawCookieEmail) {
@@ -234,12 +255,22 @@ export async function authorizeSecureLink(
       const decoded = decryptData<{ email: string }>(rawCookieEmail);
       cookieEmail = normalizeEmail(decoded.email);
     } catch {
-      // Graceful fallback: plaintext cookie from a pre-encryption session
-      cookieEmail = normalizeEmail(rawCookieEmail.includes(':') ? null : rawCookieEmail);
+      // Reject plaintext spoof — encrypted cookies contain ':' separators
+      cookieEmail = null;
     }
   }
-  const effectiveEmail = cookieEmail || sessionEmail;
+  const effectiveEmail = signedVendorEmail || cookieEmail || sessionEmail;
   const isOwner = authSession?.user?.id !== undefined && authSession.user.id === secureLink.ownerId;
+
+  // Active session binding: if any vendor holds an activeSessionId, cookie must match
+  // (prevents reuse of pre-break / superseded signed cookies when Redis is absent).
+  const vendorsWithActive = secureLink.VendorAccess.filter((v) => v.activeSessionId);
+  if (!isOwner && vendorsWithActive.length > 0) {
+    const matched = vendorsWithActive.some((v) => v.activeSessionId === sessionId && !v.isRevoked);
+    if (!matched) {
+      return { success: false, status: 401, error: 'Unauthorized: Session superseded or ended' };
+    }
+  }
 
   const hasEmailGate =
     Boolean(secureLink.allowedVendorEmail) ||
@@ -305,17 +336,19 @@ export async function authorizeSecureLink(
   }
 
   if (fileId) {
-    const fileBelongsToLink = secureLink.UserFile.some((file) => file.id === fileId);
+    const files = (secureLink as { UserFile?: { id: string }[] }).UserFile ?? [];
+    const fileBelongsToLink = files.some((file) => file.id === fileId);
     if (!fileBelongsToLink) {
       return { success: false, status: 404, error: 'File not found for this link' };
     }
   }
 
-  const capabilities = resolveCapabilities(secureLink, isAuthorized, isOwner);
+  const capabilities = resolveCapabilities(secureLink as any, isAuthorized, isOwner);
 
   // Per-file edit lock (in addition to link-level allowEditing)
   if (action === 'edit' && fileId) {
-    const target = secureLink.UserFile.find((f) => f.id === fileId);
+    const files = (secureLink as { UserFile?: { id: string; editingLocked?: boolean }[] }).UserFile ?? [];
+    const target = files.find((f) => f.id === fileId);
     if (target?.editingLocked) {
       return { success: false, status: 403, error: 'Forbidden: File editing is locked' };
     }

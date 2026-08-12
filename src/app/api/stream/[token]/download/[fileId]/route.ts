@@ -130,7 +130,7 @@ export async function GET(
                         fileName: fileRecord.fileName,
                         ipAddress,
                         userAgent,
-                        token,
+                        tokenPrefix: token.substring(0, 4) + '***',
                     }),
                 },
             });

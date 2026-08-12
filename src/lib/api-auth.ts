@@ -172,6 +172,7 @@ export async function authorizeApiRequest(
         return { errorResponse: NextResponse.json({ error: 'Unauthorized: Missing Hardened Session' }, { status: 401 }) };
     }
     const sessionId = verified.sessionId;
+    const signedVendorEmail = normalizeEmail(verified.vendorEmail);
 
     if (redis) {
         const isRevoked = await redis.exists(`revoked:${token}`);
@@ -325,10 +326,11 @@ export async function authorizeApiRequest(
             const decoded = decryptData<{ email: string }>(rawCookieEmail);
             cookieEmail = normalizeEmail(decoded.email);
         } catch {
-            cookieEmail = normalizeEmail(rawCookieEmail.includes(':') ? null : rawCookieEmail);
+            // Reject plaintext spoof attempts
+            cookieEmail = null;
         }
     }
-    const effectiveEmail = cookieEmail || sessionEmail;
+    const effectiveEmail = signedVendorEmail || cookieEmail || sessionEmail;
     const isOwner = Boolean(authSession?.user?.id && authSession.user.id === secureLink.ownerId);
 
     const hasEmailGate =

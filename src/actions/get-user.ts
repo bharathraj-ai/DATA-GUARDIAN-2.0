@@ -94,12 +94,14 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
         }
 
         const now = new Date();
-        if (secureLink.expiresAt < now) {
-            executeSingleLinkCleanup(token).catch(() => { });
+        if (secureLink.expiresAt < now || secureLink.isRevoked) {
+            await executeSingleLinkCleanup(token).catch(() => {});
             return {
                 success: false,
-                error: 'This link has expired. All data has been permanently deleted.',
-                errorType: 'EXPIRED',
+                error: secureLink.isRevoked
+                    ? 'This link has been revoked. All data has been permanently deleted.'
+                    : 'This link has expired. All data has been permanently deleted.',
+                errorType: secureLink.isRevoked ? 'REVOKED' : 'EXPIRED',
             };
         }
 
@@ -118,11 +120,26 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
             };
         }
 
-        let vendorAccess = null;
+        let vendorAccess = null as {
+            status?: string;
+            lastSavedWork?: unknown;
+            resumePoint?: unknown;
+        } | null;
+
         if (authResult.context.effectiveEmail && !authResult.context.isOwner) {
-            vendorAccess = (secureLink as any).VendorAccess?.find(
-                (v: any) => v.email.toLowerCase() === authResult.context.effectiveEmail!.toLowerCase()
-            );
+            const email = authResult.context.effectiveEmail.toLowerCase();
+            const draftRow = await prisma.vendorAccess.findFirst({
+                where: {
+                    secureLinkId: secureLink.id,
+                    email: { equals: email, mode: 'insensitive' },
+                },
+                select: {
+                    status: true,
+                    lastSavedWork: true,
+                    resumePoint: true,
+                },
+            });
+            vendorAccess = draftRow;
         }
 
         // Derive owner info from the User relation already loaded by authorizeSecureLink

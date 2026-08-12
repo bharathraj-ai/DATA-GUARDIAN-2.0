@@ -84,8 +84,16 @@ export async function GET(req: NextRequest) {
         if (closed) { clearInterval(pollInterval); return; }
         try {
           // Check Redis for revocation flag (set by revoke-access action)
-          const revoked = await redis.get(`revoked:${token}`);
-          if (revoked) {
+          let redisRevoked = false;
+          try {
+            const revoked = await redis.get(`revoked:${token}`);
+            redisRevoked = Boolean(revoked);
+          } catch {
+            // Fail closed on Redis errors: reconcile DB immediately (do not skip revoke checks)
+            redisRevoked = false;
+            heartbeatTick = 0; // force DB reconcile below
+          }
+          if (redisRevoked) {
             send({ type: 'revoked' });
             closed = true;
             clearInterval(pollInterval);
@@ -94,8 +102,8 @@ export async function GET(req: NextRequest) {
           }
 
           heartbeatTick += 1;
-          // Redis is the 3s kill-switch. Reconcile Postgres every ~15s (and on first tick).
-          const mustReconcileDb = heartbeatTick === 1 || heartbeatTick % 5 === 0;
+          // Always reconcile Postgres every 3s (kill-switch ≤3s even if Redis is down)
+          const mustReconcileDb = true;
           let link: { id: string; isRevoked: boolean; expiresAt: Date } | null = {
             id: cachedLinkId,
             isRevoked: false,
@@ -178,7 +186,33 @@ export async function GET(req: NextRequest) {
               chats: recentChats
           });
         } catch {
-          // Network hiccup — keep polling
+          // On unexpected errors, force a DB revoke check once more then fail closed if revoked
+          try {
+            const link = await prisma.secureLink.findUnique({
+              where: { token: token! },
+              select: { isRevoked: true, expiresAt: true },
+            });
+            if (!link || link.isRevoked) {
+              send({ type: 'revoked' });
+              closed = true;
+              clearInterval(pollInterval);
+              controller.close();
+              return;
+            }
+            if (new Date() > link.expiresAt) {
+              send({ type: 'expired' });
+              closed = true;
+              clearInterval(pollInterval);
+              controller.close();
+              return;
+            }
+          } catch {
+            send({ type: 'error', message: 'Monitor unavailable' });
+            closed = true;
+            clearInterval(pollInterval);
+            try { controller.close(); } catch { /* already closed */ }
+            return;
+          }
           send({ type: 'heartbeat', timestamp: new Date().toISOString() });
         }
       }, 3000);

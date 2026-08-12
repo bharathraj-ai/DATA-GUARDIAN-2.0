@@ -26,8 +26,26 @@ function isPathInsideRoot(resolved: string, root: string): boolean {
   return resolved === normalizedRoot || resolved.startsWith(normalizedRoot + path.sep);
 }
 
-/** Reject path segments that could escape (absolute, .., empty). */
-function assertSafeSegment(segment: string, label: string): string {
+/** Basename-only filename (no directories). Exported for tests + create-link. */
+export function safeBaseName(fileName: string): string {
+  if (!fileName || /[/\\]/.test(fileName)) {
+    throw new Error('Path traversal detected — file name must be basename only');
+  }
+  if (fileName.includes('\0')) {
+    throw new Error('Path traversal detected — null byte in file name');
+  }
+  if (fileName.includes('..')) {
+    throw new Error('Path traversal detected — parent segment in file name');
+  }
+  const base = path.basename(fileName);
+  if (!base || base === '.' || base === '..') {
+    throw new Error('Invalid file name');
+  }
+  return base;
+}
+
+/** Reject path segments that could escape (absolute, .., empty). Exported for tests. */
+export function assertSafeSegment(segment: string, label: string): string {
   if (!segment || typeof segment !== 'string') {
     throw new Error(`Invalid ${label}`);
   }
@@ -44,18 +62,6 @@ function assertSafeSegment(segment: string, label: string): string {
     throw new Error(`Path traversal detected — invalid ${label}`);
   }
   return normalized;
-}
-
-/** Basename-only filename (no directories). */
-function safeBaseName(fileName: string): string {
-  if (!fileName || /[/\\]/.test(fileName)) {
-    throw new Error('Path traversal detected — file name must be basename only');
-  }
-  const base = path.basename(fileName);
-  if (!base || base === '.' || base === '..') {
-    throw new Error('Invalid file name');
-  }
-  return base;
 }
 
 function resolveStoragePath(...segments: string[]): string {
