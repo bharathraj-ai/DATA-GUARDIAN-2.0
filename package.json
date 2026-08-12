@@ -5,8 +5,9 @@
   "scripts": {
     "dev": "next dev",
     "dev:clean": "node -e \"require('fs').rmSync('.next',{recursive:true,force:true})\" && next dev",
-    "postinstall": "prisma generate",
-    "build": "prisma generate && next build",
+    "postinstall": "node scripts/prisma-generate.js",
+    "build": "node scripts/prisma-generate.js && next build",
+    "vercel-build": "node scripts/prisma-generate.js && next build",
     "start": "next start",
     "lint": "eslint",
     "test": "jest --config jest.config.ts",
