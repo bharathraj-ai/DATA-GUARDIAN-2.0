@@ -55,9 +55,18 @@ function sleep(ms: number) {
 }
 
 function createPrismaClient(): PrismaClient {
+  const datasourceUrl = buildDatasourceUrl();
+  // During `next build` page collection, env may be unset — avoid hard-crash.
+  // Runtime requests must still have DATABASE_URL configured on Vercel.
+  if (!datasourceUrl && process.env.NEXT_PHASE === 'phase-production-build') {
+    return new PrismaClient({
+      log: ['error'],
+    });
+  }
+
   const client = new PrismaClient({
     log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
-    datasourceUrl: buildDatasourceUrl(),
+    ...(datasourceUrl ? { datasourceUrl } : {}),
   });
 
   // Retry transient Neon/pool errors WITHOUT $disconnect().
