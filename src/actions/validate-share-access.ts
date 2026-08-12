@@ -9,6 +9,8 @@ export type ValidateShareAccessResult = {
     requiresAuth: boolean;
     error?: string;
     errorType?: 'NOT_FOUND' | 'EXPIRED' | 'REVOKED' | 'LOCKED' | 'NOT_AUTHENTICATED' | 'EMAIL_MISMATCH';
+    /** True when this vendor already unlocked elsewhere and must request a new OTP here */
+    needsFreshOtp?: boolean;
 };
 
 /**
@@ -34,7 +36,16 @@ export async function validateShareAccess(token: string): Promise<ValidateShareA
                 LinkAccess: {
                     select: {
                         vendorEmail: true,
+                        isUsed: true,
+                        otpHash: true,
                     }
+                },
+                VendorAccess: {
+                    select: {
+                        email: true,
+                        currentOtpHash: true,
+                        otpHash: true,
+                    },
                 },
             },
         });
@@ -122,8 +133,29 @@ export async function validateShareAccess(token: string): Promise<ValidateShareA
             }
         }
 
+        // Detect OTP already consumed (e.g. opened on localhost, now on production with same DB)
+        let needsFreshOtp = false;
+        if (secureLink.LinkAccess && secureLink.LinkAccess.length > 0) {
+            const session = await auth();
+            const userEmail = session?.user?.email?.toLowerCase().trim();
+            if (userEmail) {
+                const linkRow = secureLink.LinkAccess.find(
+                    (a) => a.vendorEmail.toLowerCase() === userEmail,
+                );
+                const vendorRow = secureLink.VendorAccess?.find(
+                    (v) => v.email.toLowerCase() === userEmail,
+                );
+                const hasActiveOtp = Boolean(
+                    vendorRow?.currentOtpHash ||
+                    vendorRow?.otpHash ||
+                    linkRow?.otpHash,
+                );
+                needsFreshOtp = Boolean(linkRow?.isUsed && !hasActiveOtp);
+            }
+        }
+
         // All checks passed
-        return { allowed: true, requiresAuth: false };
+        return { allowed: true, requiresAuth: false, needsFreshOtp };
     } catch (error) {
         console.error('Error validating share access:', error instanceof Error ? error.message : 'Unknown');
         return {

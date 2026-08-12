@@ -37,6 +37,7 @@ export default function SharePage({ params }: SharePageProps) {
     const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [accessState, setAccessState] = useState<AccessState>('checking');
+    const [needsFreshOtp, setNeedsFreshOtp] = useState(false);
 
     // Force refresh on mount to clear any cached data
     useEffect(() => {
@@ -78,6 +79,12 @@ export default function SharePage({ params }: SharePageProps) {
 
             if (result.allowed) {
                 setAccessState('allowed');
+                setNeedsFreshOtp(Boolean(result.needsFreshOtp));
+                if (result.needsFreshOtp) {
+                    setError(
+                        'This link was already opened elsewhere (e.g. localhost). Tap "Send a new code" and use the latest OTP from your email.',
+                    );
+                }
                 setIsLoading(false);
             } else if (result.requiresAuth) {
                 setAccessState('requires_auth');
@@ -219,6 +226,7 @@ export default function SharePage({ params }: SharePageProps) {
                 setCountdown(300);
                 setResendCooldown(60);
                 setResendMessage('A new OTP has been sent to your email.');
+                setNeedsFreshOtp(false);
                 setOtp(['', '', '', '', '', '']);
                 inputRefs.current[0]?.focus();
             } else {
@@ -255,7 +263,11 @@ export default function SharePage({ params }: SharePageProps) {
         setResendMessage('');
 
         try {
-            const result = await verifyOTP({ token, otp: otpString, email: email || undefined });
+            const result = await verifyOTP({
+                token,
+                otp: otpString,
+                email: (email || sessionData?.user?.email || '').trim() || undefined,
+            });
 
             if (result.success) {
                 setState('success');
