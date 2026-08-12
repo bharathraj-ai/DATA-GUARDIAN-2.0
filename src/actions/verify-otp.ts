@@ -75,6 +75,7 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
                     lockedAt: true,
                     deviceHash: true,
                     userId: true,
+                    ownerId: true,
                     createdAt: true,
                     maxViews: true,
                     // V2.1 fields
@@ -475,6 +476,7 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
                     data: {
                         action: shouldLock ? 'LOCKED' : 'DENIED',
                         linkId: secureLink.id,
+                        ownerId: secureLink.ownerId,
                         reason: shouldLock ? 'Max OTP attempts reached: Locked' : 'Invalid OTP entered',
                     },
                 });
@@ -484,6 +486,7 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
                     data: {
                         action: 'OTP_LOGIN_FAILURE',
                         linkId: secureLink.id,
+                        ownerId: secureLink.ownerId,
                         reason: 'OTP verification failed',
                         metadata: JSON.stringify({
                             attemptsRemaining: Math.max(0, attemptsRemaining),
@@ -620,6 +623,7 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
                 data: {
                     action: 'ACCESSED',
                     linkId: secureLink.id,
+                    ownerId: secureLink.ownerId,
                     metadata: JSON.stringify({
                         ttlSeconds,
                         purpose: secureLink.purpose || undefined,
@@ -633,6 +637,7 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
                 data: {
                     action: 'OTP_LOGIN_SUCCESS',
                     linkId: secureLink.id,
+                    ownerId: secureLink.ownerId,
                     reason: 'OTP verification successful',
                     metadata: JSON.stringify({
                         isBreakResume: vendor?.status === 'break',
@@ -686,10 +691,23 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
             // It's already set as an httpOnly cookie — the only safe channel
         };
     } catch (error) {
-        console.error('Error verifying OTP:', error instanceof Error ? error.message : 'Unknown');
+        const message = error instanceof Error ? error.message : 'Unknown';
+        console.error('Error verifying OTP:', message);
+
+        let userMessage = 'Verification failed. Please try again.';
+        if (/OTP_HMAC_SECRET|ENCRYPTION_KEY is required for OTP/i.test(message)) {
+            userMessage = 'Server OTP secret is missing or different in production.';
+        } else if (/ENCRYPTION_KEY not configured|ENCRYPTION_KEY must be 64 hex/i.test(message)) {
+            userMessage = 'Server encryption key is missing or invalid in production.';
+        } else if (/SESSION_HMAC_SECRET|NEXTAUTH_SECRET.*share sessions/i.test(message)) {
+            userMessage = 'Server session secret is missing or different in production.';
+        } else if (/P1001|P2024|Can't reach database|Timed out fetching a new connection/i.test(message)) {
+            userMessage = 'Production database is unreachable or overloaded.';
+        }
+
         return {
             success: false,
-            error: 'Verification failed. Please try again.',
+            error: userMessage,
         };
     }
 }
