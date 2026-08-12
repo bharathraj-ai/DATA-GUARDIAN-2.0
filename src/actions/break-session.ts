@@ -219,14 +219,28 @@ export async function takeBreak(
             }
         })();
 
-        // Email — fire-and-forget
-        void import('@/lib/email').then(({ sendOTPEmail }) => {
-            const remainingMs = secureLink.expiresAt.getTime() - Date.now();
-            const validityMinutes = Math.max(1, Math.floor(remainingMs / 60000));
-            sendOTPEmail(vendorEmail, token, newOtp, Math.min(validityMinutes, 10))
-                .then(() => logger.info(`Break OTP sent to ${redactEmail(vendorEmail)}`))
-                .catch((err) => logger.error('Failed to send break OTP email:', err.message));
-        });
+        // Email — must complete before response (Vercel freezes fire-and-forget work)
+        try {
+            const { sendOTPEmail, isEmailConfigured } = await import('@/lib/email');
+            if (isEmailConfigured()) {
+                const remainingMs = secureLink.expiresAt.getTime() - Date.now();
+                const validityMinutes = Math.max(1, Math.floor(remainingMs / 60000));
+                await sendOTPEmail(
+                    vendorEmail,
+                    token,
+                    newOtp,
+                    Math.min(validityMinutes, 10),
+                );
+                logger.info(`Break OTP sent to ${redactEmail(vendorEmail)}`);
+            } else {
+                logger.error('[EMAIL] Not configured — break OTP email not sent');
+            }
+        } catch (err) {
+            logger.error(
+                'Failed to send break OTP email:',
+                err instanceof Error ? err.message : 'Unknown',
+            );
+        }
 
         return {
             success: true,

@@ -20,6 +20,7 @@ import { checkUploadRateLimit, extractClientIP, formatRateLimitError } from '@/l
 import { headers } from 'next/headers';
 import path from 'path';
 import { logger, redactToken, redactEmail } from '@/lib/logger';
+import { isEmailConfigured } from '@/lib/email';
 
 export type CreateSecureLinkResult = {
     success: boolean;
@@ -408,15 +409,20 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
 
         logger.info(`Link created with ${files.length} files. ID: ${redactToken(result.id)}`);
 
-        // 📧 Send OTP email to all vendors per their unique OTPs (fire-and-forget)
+        // 📧 Send OTP email to all vendors (await — Vercel kills fire-and-forget SMTP)
         if (vendorAccessData.length > 0) {
-            import('@/lib/email').then(({ sendOTPEmail }) => {
-                vendorAccessData.forEach(v => {
-                    sendOTPEmail(v.email, token, v.otp, validityMinutes)
-                        .then(() => logger.info(`OTP sent to ${redactEmail(v.email)}`))
-                        .catch((err) => logger.error('Failed to send OTP:', err.message));
-                });
-            });
+            if (!isEmailConfigured()) {
+                logger.error('[EMAIL] Not configured — OTP emails were not sent');
+            } else {
+                const { sendOTPEmail } = await import('@/lib/email');
+                await Promise.allSettled(
+                    vendorAccessData.map((v) =>
+                        sendOTPEmail(v.email, token, v.otp, validityMinutes).then(() =>
+                            logger.info(`OTP sent to ${redactEmail(v.email)}`),
+                        ),
+                    ),
+                );
+            }
         }
 
         return {

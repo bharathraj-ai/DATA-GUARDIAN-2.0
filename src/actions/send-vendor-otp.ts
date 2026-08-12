@@ -5,6 +5,7 @@ import { generateOTP, hashOTP } from '@/lib/crypto';
 import { checkOTPRateLimit, extractClientIP, formatRateLimitError } from '@/lib/rate-limit';
 import { headers } from 'next/headers';
 import { logger, redactEmail } from '@/lib/logger';
+import { isEmailConfigured } from '@/lib/email';
 
 /** Minimum seconds between OTP emails for the same vendor+link (anti-spam). */
 const RESEND_COOLDOWN_SECONDS = 60;
@@ -205,19 +206,30 @@ export async function sendVendorOTP(input: {
             });
         });
 
-        // Fire-and-forget email — never return OTP in the response
-        import('@/lib/email')
-            .then(({ sendOTPEmail }) =>
-                sendOTPEmail(normalizedEmail, token, otp, validityMinutes),
-            )
-            .catch((err) => {
-                logger.error(
-                    `[EMAIL FAILED] Could not send OTP to ${redactEmail(normalizedEmail)}`,
-                    err instanceof Error ? err.message : err,
-                );
-            });
+        if (!isEmailConfigured()) {
+            logger.error('[EMAIL] EMAIL_USER/EMAIL_PASS (or SMTP_USER/SMTP_PASS) not set on server');
+            return {
+                success: false,
+                error: 'Email is not configured on the server. Contact the link owner.',
+            };
+        }
 
-        logger.info(`OTP REQUESTED FOR: ${redactEmail(normalizedEmail)}`);
+        try {
+            const { sendOTPEmail } = await import('@/lib/email');
+            await sendOTPEmail(normalizedEmail, token, otp, validityMinutes);
+        } catch (err) {
+            logger.error(
+                `[EMAIL FAILED] Could not send OTP to ${redactEmail(normalizedEmail)}`,
+                err instanceof Error ? err.message : err,
+            );
+            return {
+                success: false,
+                error:
+                    'Could not deliver the OTP email. Check spam or try again in a minute.',
+            };
+        }
+
+        logger.info(`OTP SENT TO: ${redactEmail(normalizedEmail)}`);
 
         return { success: true };
     } catch (e) {
