@@ -233,13 +233,11 @@ export default function CreateLinkClient({ initialVendors, hasActiveLink }: Crea
 
             const result = await createSecureLinkWithFiles(data);
 
-            if (result.success && result.shareUrl) {
-                router.refresh();
-                setGeneratedLink(result.shareUrl);
-                setStatus({ message: 'The link and OTP have been sent to the vendor.', type: 'success' });
-            } else {
-                setStatus({ message: result.error || 'Failed to generate link', type: 'error' });
+            if (result.success) {
+                router.replace('/dashboard/owner?created=1');
+                return;
             }
+            setStatus({ message: result.error || 'Failed to generate link', type: 'error' });
         } catch (err: any) {
             console.error('Upload Error:', err);
             setStatus({
@@ -715,7 +713,7 @@ export default function CreateLinkClient({ initialVendors, hasActiveLink }: Crea
                                 type="file"
                                 multiple
                                 onChange={handleFileChange}
-                                accept=".xls,.xlsx,.csv,.png,.jpg,.jpeg,.pdf,.txt"
+                                accept=".xls,.xlsx,.csv,.png,.jpg,.jpeg,.pdf,.txt,.doc,.docx,.odt"
                                 id="file-upload"
                                 style={{ display: 'none' }}
                             />
@@ -731,7 +729,7 @@ export default function CreateLinkClient({ initialVendors, hasActiveLink }: Crea
                             </div>
                         </div>
                         <div className={styles.dropzoneHint}>
-                            Max 128MB per file • Supported: Image, PDF, Excel, CSV, Text
+                            Max 128MB per file • Supported: Word, PDF, Excel, CSV, Images, Text
                         </div>
                         {files && files.length > 0 && (
                             <div className={styles.fileList}>

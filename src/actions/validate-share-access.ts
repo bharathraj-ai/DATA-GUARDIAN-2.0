@@ -3,6 +3,7 @@
 import { prisma } from '@/lib/prisma';
 import { auth } from '@/lib/auth';
 import { executeSingleLinkCleanup } from '@/lib/cleanup-core';
+import { checkLinkRateLimit } from '@/lib/rate-limit';
 
 export type ValidateShareAccessResult = {
     allowed: boolean;
@@ -24,6 +25,15 @@ export type ValidateShareAccessResult = {
  */
 export async function validateShareAccess(token: string): Promise<ValidateShareAccessResult> {
     try {
+        const linkLimit = await checkLinkRateLimit(token);
+        if (!linkLimit.allowed) {
+            return {
+                allowed: false,
+                requiresAuth: false,
+                error: 'Too many requests. Please try again shortly.',
+            };
+        }
+
         // Find the secure link
         const secureLink = await prisma.secureLink.findUnique({
             where: { token },

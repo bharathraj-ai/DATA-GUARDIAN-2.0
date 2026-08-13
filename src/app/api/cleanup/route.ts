@@ -39,7 +39,7 @@ async function runCleanup(request: Request) {
     );
   }
 
-  return NextResponse.json({ error: result.error }, { status: 500, headers });
+  return NextResponse.json({ error: 'Cleanup failed' }, { status: 500, headers });
 }
 
 export async function GET(request: Request) {

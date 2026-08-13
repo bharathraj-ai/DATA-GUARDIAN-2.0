@@ -10,6 +10,9 @@ const nextConfig: NextConfig = {
   compress: true,
   productionBrowserSourceMaps: false,
   reactStrictMode: true,
+  compiler: {
+    removeConsole: isProd ? { exclude: ['error', 'warn'] } : false,
+  },
 
   typescript: {
     ignoreBuildErrors: false,
@@ -51,7 +54,6 @@ const nextConfig: NextConfig = {
       'uuid',
       'next-auth',
       'lucide-react',
-      'framer-motion',
     ],
   },
 

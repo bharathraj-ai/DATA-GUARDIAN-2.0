@@ -2,7 +2,7 @@
 
 import { prisma } from '@/lib/prisma';
 import { generateOTP, hashOTP } from '@/lib/crypto';
-import { checkOTPRateLimit, extractClientIP, formatRateLimitError } from '@/lib/rate-limit';
+import { checkOTPRateLimit, checkLinkRateLimit, extractClientIP, formatRateLimitError } from '@/lib/rate-limit';
 import { headers } from 'next/headers';
 import { logger, redactEmail } from '@/lib/logger';
 import { isEmailConfigured } from '@/lib/email';
@@ -31,13 +31,17 @@ export async function sendVendorOTP(input: {
         const _headers = await headers();
         const clientIP = extractClientIP(_headers);
 
-        const rateLimit = await checkOTPRateLimit(clientIP);
-        if (!rateLimit.allowed) {
+        const [rateLimit, linkLimit] = await Promise.all([
+            checkOTPRateLimit(clientIP),
+            checkLinkRateLimit(token),
+        ]);
+        if (!rateLimit.allowed || !linkLimit.allowed) {
+            const limited = !rateLimit.allowed ? rateLimit : linkLimit;
             return {
                 success: false,
-                error: formatRateLimitError(rateLimit),
+                error: formatRateLimitError(limited),
                 errorType: 'DENIED',
-                retryAfterSeconds: rateLimit.retryAfter,
+                retryAfterSeconds: limited.retryAfter,
             };
         }
 

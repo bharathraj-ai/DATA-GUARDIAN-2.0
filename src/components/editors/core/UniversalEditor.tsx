@@ -10,6 +10,7 @@ import { Page } from "../layout/Page";
 import { TableActions } from "../elements/TableElement";
 import { SpreadsheetApp } from "../elements/SpreadsheetApp";
 import { secureFetch } from "@/lib/security/secure-fetch";
+import { useCollaborationStore } from "@/store/useCollaborationStore";
 
 interface UniversalEditorProps {
   token?: string;
@@ -17,6 +18,7 @@ interface UniversalEditorProps {
   initialFileProp?: File | null;
   currentUserLevel: number;
   highestAuthorityLevel: number;
+  forceReadOnly?: boolean;
   onClose?: () => void;
   onSave?: (file: File) => Promise<void>;
   onSubmit?: (file: File) => Promise<void>;
@@ -30,25 +32,28 @@ export default function UniversalEditor({
   initialFileProp,
   currentUserLevel,
   highestAuthorityLevel,
+  forceReadOnly,
   onClose,
   onSave,
   onSubmit,
   forceAutoSave,
   onAutoSaveComplete
 }: UniversalEditorProps) {
-  const isReadOnly = currentUserLevel > highestAuthorityLevel;
+  const isReadOnly = forceReadOnly ?? (currentUserLevel > highestAuthorityLevel);
+  const myUserId = useCollaborationStore((s) => s.myUserId);
   const [view, setView] = useState("editor");
-  const { doc, setDoc, activePage, setActivePage, selectedId, setSelectedId, historyIdx, undo, redo, pushHistory, updatePage, deleteElement, updateSelected } = useEditorState(null);
+  const { doc, setDoc, activePage, setActivePage, selectedId, setSelectedId, undo, redo, pushHistory, updatePage, deleteElement, updateSelected } = useEditorState(null);
   
   const [draggedPageIdx, setDraggedPageIdx] = useState<number | null>(null);
   const [initialPdfFile, setInitialPdfFile] = useState<File | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [loadingMsg, setLoadingMsg] = useState("");
+  const [loading, setLoading] = useState(Boolean(initialFileProp));
+  const [loadingMsg, setLoadingMsg] = useState(initialFileProp ? `Loading ${initialFileProp.name}...` : "");
   const [scale, setScale] = useState(1.0);
   const [showBg, setShowBg] = useState(true);
   
   const [chatOpen, setChatOpen] = useState(false);
   const [chatTab, setChatTab] = useState('group');
+  const [privateTarget, setPrivateTarget] = useState<{ email: string; name: string } | null>(null);
   const [messages, setMessages] = useState<any[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -57,10 +62,14 @@ export default function UniversalEditor({
   const [pageModalError, setPageModalError] = useState("");
   const [pageToRenameIdx, setPageToRenameIdx] = useState<number | null>(null);
   const docRef = useRef(doc);
+  const selectedIdRef = useRef(selectedId);
+  const activePageRef = useRef(activePage);
   const onSaveRef = useRef(onSave);
   const onSubmitRef = useRef(onSubmit);
   const isSavingRef = useRef(false);
   const isDirtyRef = useRef(false);
+  const hydratedDocRef = useRef(false);
+  const lastSavedDocRef = useRef<DocumentData | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   // Table tools state
@@ -69,10 +78,11 @@ export default function UniversalEditor({
     setTableActions(actions);
   }, []);
 
-  // Chat Polling
+  // Chat Polling (per-file DocumentChat — distinct from share-link SSE chat)
   useEffect(() => {
     if (!chatOpen || !token || !fileId) return;
     const fetchChat = async () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
       try {
         const res = await secureFetch(`/api/documents/${fileId}/chat?token=${token}`);
         if (res.ok) {
@@ -84,13 +94,32 @@ export default function UniversalEditor({
       } catch (e) { }
     };
     fetchChat();
-    const inv = setInterval(fetchChat, 3000);
+    const inv = setInterval(fetchChat, 10_000);
     return () => clearInterval(inv);
   }, [chatOpen, token, fileId]);
 
   useEffect(() => {
     if (chatOpen) chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, chatOpen]);
+
+  useEffect(() => {
+    const onOpen = (ev: Event) => {
+      const detail = (ev as CustomEvent).detail as { fileId?: string; targetUserId?: string; targetName?: string } | undefined;
+      if (detail?.fileId && fileId && detail.fileId !== fileId) return;
+      if (detail?.targetUserId) {
+        setPrivateTarget({
+          email: detail.targetUserId,
+          name: detail.targetName || detail.targetUserId.split('@')[0],
+        });
+        setChatTab('private');
+      } else {
+        setChatTab('group');
+      }
+      setChatOpen(true);
+    };
+    window.addEventListener('dg:open-chat', onOpen as EventListener);
+    return () => window.removeEventListener('dg:open-chat', onOpen as EventListener);
+  }, [fileId]);
 
   const handleSendMessage = async () => {
     if (!newMessage.trim() || !token || !fileId) return;
@@ -104,7 +133,7 @@ export default function UniversalEditor({
           token,
           message: msg,
           isPrivate: chatTab === 'private',
-          targetUser: chatTab === 'private' ? "Leader" : null
+          targetUser: chatTab === 'private' ? (privateTarget?.email || null) : null
         })
       });
     } catch (e) {
@@ -116,7 +145,7 @@ export default function UniversalEditor({
     const file = e.target.files?.[0];
     if (!file || !onSave) return;
 
-    const allowed = ['.pdf', '.txt', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.csv', '.xlsx', '.xls', '.zip'];
+    const allowed = ['.pdf', '.txt', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.csv', '.xlsx', '.xls', '.zip', '.doc', '.docx', '.odt'];
     const ex = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
 
     if (!allowed.includes(ex)) {
@@ -142,11 +171,7 @@ export default function UniversalEditor({
   }, [initialFileProp]);
 
   const handleFile = async (file: File) => {
-    if (isReadOnly) return;
-    if (file.name.toLowerCase().endsWith(".pdf") || file.type === "application/pdf") {
-      alert("PDF files are view-only and cannot be edited. Please use the secure viewer.");
-      return;
-    }
+    // Always parse — read-only only blocks edits, not opening the existing document.
     setLoading(true); 
     setLoadingMsg(`Parsing ${file.name}...`);
     try { 
@@ -288,7 +313,9 @@ export default function UniversalEditor({
     try {
       let savedFile: File;
 
-      if (!isSubmit) {
+      const spreadsheetDraft =
+        currentDoc.type === "xlsx" || currentDoc.type === "xls" || currentDoc.type === "csv";
+      if (!isSubmit && !spreadsheetDraft) {
         savedFile = new File(
           [JSON.stringify(currentDoc)],
           currentDoc.name || "workspace.dg",
@@ -299,10 +326,14 @@ export default function UniversalEditor({
       }
 
       await actionFn(savedFile);
+      lastSavedDocRef.current = currentDoc;
       isDirtyRef.current = false;
 
       // After final commit, always return to the secure view page
       if (isSubmit && token) {
+        try {
+          sessionStorage.setItem('dg:internal-nav', '1');
+        } catch { /* ignore */ }
         window.location.assign(`/view/${token}`);
         return;
       }
@@ -321,8 +352,17 @@ export default function UniversalEditor({
 
   useEffect(() => {
     docRef.current = doc;
-    if (doc) isDirtyRef.current = true;
-  }, [doc]);
+    selectedIdRef.current = selectedId;
+    activePageRef.current = activePage;
+    if (!doc) return;
+    if (!hydratedDocRef.current) {
+      hydratedDocRef.current = true;
+      lastSavedDocRef.current = doc;
+      isDirtyRef.current = false;
+      return;
+    }
+    isDirtyRef.current = doc !== lastSavedDocRef.current;
+  }, [doc, selectedId, activePage]);
 
   useEffect(() => {
     onSaveRef.current = onSave;
@@ -340,6 +380,17 @@ export default function UniversalEditor({
   }, [isReadOnly, handleSaveToLink]);
 
   useEffect(() => {
+    const onForce = (ev: Event) => {
+      const detail = (ev as CustomEvent).detail as { fileId?: string } | undefined;
+      if (detail?.fileId && fileId && detail.fileId !== fileId) return;
+      if (!docRef.current || !isDirtyRef.current) return;
+      handleSaveToLink(false, docRef.current, true).catch(err => console.error("Priority autosave error:", err));
+    };
+    window.addEventListener('dg:force-autosave', onForce as EventListener);
+    return () => window.removeEventListener('dg:force-autosave', onForce as EventListener);
+  }, [fileId, handleSaveToLink]);
+
+  useEffect(() => {
     if (forceAutoSave && doc && !isReadOnly && !loading) {
       handleSaveToLink().then(() => {
         if (onAutoSaveComplete) onAutoSaveComplete();
@@ -352,9 +403,10 @@ export default function UniversalEditor({
       if ((e.ctrlKey || e.metaKey) && e.key === "z") { e.preventDefault(); undo(); }
       if ((e.ctrlKey || e.metaKey) && e.key === "y") { e.preventDefault(); redo(); }
       if ((e.ctrlKey || e.metaKey) && (e.key === "c" || e.key === "C" || e.key === "x" || e.key === "X")) { e.preventDefault(); }
-      if ((e.key === "Delete" || e.key === "Backspace") && selectedId && document.activeElement?.tagName === "BODY" && !isReadOnly) { 
-        const p = doc?.pages[activePage]; 
-        if (p) deleteElement(p.id, selectedId); 
+      const currentSelectedId = selectedIdRef.current;
+      if ((e.key === "Delete" || e.key === "Backspace") && currentSelectedId && document.activeElement?.tagName === "BODY" && !isReadOnly) { 
+        const p = docRef.current?.pages[activePageRef.current]; 
+        if (p) deleteElement(p.id, currentSelectedId); 
       }
     };
     const preventCopy = (e: ClipboardEvent) => e.preventDefault();
@@ -366,7 +418,7 @@ export default function UniversalEditor({
       window.removeEventListener("copy", preventCopy);
       window.removeEventListener("cut", preventCopy);
     };
-  }, [selectedId, activePage, doc, historyIdx]);
+  }, [isReadOnly, undo, redo, deleteElement]);
 
   return (
     <div className="editor-container" onContextMenu={e => e.preventDefault()} onCopy={e => e.preventDefault()}>
@@ -374,11 +426,11 @@ export default function UniversalEditor({
       {showConfirmModal && (
         <div className="confirm-overlay">
           <div className="confirm-card">
-            <div style={{ width: 56, height: 56, borderRadius: 12, background: "#27272a", margin: "0 auto 20px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fafafa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /></svg>
+            <div style={{ width: 56, height: 56, borderRadius: 12, background: "#e0f2fe", margin: "0 auto 20px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#0284c7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /></svg>
             </div>
-            <h2 style={{ fontFamily: "'Inter', sans-serif", fontSize: 22, fontWeight: 600, color: "#fafafa", marginBottom: 12 }}>Commit Changes?</h2>
-            <p style={{ fontSize: 14, color: "#71717a", lineHeight: 1.7, marginBottom: 32 }}>
+            <h2 style={{ fontFamily: "'Inter', sans-serif", fontSize: 22, fontWeight: 600, color: "#0f172a", marginBottom: 12 }}>Commit Changes?</h2>
+            <p style={{ fontSize: 14, color: "#64748b", lineHeight: 1.7, marginBottom: 32 }}>
               This will save and commit your final edits to the document.<br />Your access will remain active and no notifications will be sent.
             </p>
             <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
@@ -392,7 +444,7 @@ export default function UniversalEditor({
       {pageModalOpen && (
         <div className="confirm-overlay">
           <div className="confirm-card">
-            <h2 style={{ fontFamily: "'Inter', sans-serif", fontSize: 20, fontWeight: 600, color: "#fafafa", marginBottom: 16 }}>
+            <h2 style={{ fontFamily: "'Inter', sans-serif", fontSize: 20, fontWeight: 600, color: "#0f172a", marginBottom: 16 }}>
               {pageModalOpen === 'add' ? 'New Page' : 'Rename Page'}
             </h2>
             {pageModalError && <div style={{ color: "#ef4444", fontSize: 13, marginBottom: 12 }}>{pageModalError}</div>}
@@ -401,7 +453,7 @@ export default function UniversalEditor({
               value={pageModalTitle} 
               onChange={e => { setPageModalTitle(e.target.value); setPageModalError(""); }}
               placeholder="Page Title"
-              style={{ width: "100%", padding: "10px 14px", borderRadius: 8, background: "#18181b", border: "1px solid #3f3f46", color: "#fafafa", fontSize: 14, marginBottom: 24 }}
+              style={{ width: "100%", padding: "10px 14px", borderRadius: 8, background: "#fff", border: "1px solid #e5e7eb", color: "#0f172a", fontSize: 14, marginBottom: 24 }}
               autoFocus
               onKeyDown={e => {
                 if (e.key === 'Enter') { e.preventDefault(); handlePageModalSubmit(); }
@@ -422,16 +474,16 @@ export default function UniversalEditor({
       <div className="glass-bar" style={{ height: 56, display: "flex", alignItems: "center", padding: "0 20px", flexShrink: 0, zIndex: 100, position: "relative" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
           {onClose && (
-            <button className="btn btn-ghost" onClick={onClose} style={{ padding: "6px 12px", fontSize: 13, border: "1px solid #27272a", borderRadius: 6, gap: 6 }}>
+            <button className="btn btn-ghost" onClick={onClose} style={{ padding: "6px 12px", fontSize: 13, border: "1px solid #e5e7eb", borderRadius: 8, gap: 6 }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5" /><polyline points="12 19 5 12 12 5" /></svg>
               Back
             </button>
           )}
           <div style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }} onClick={() => { setDoc(null); setInitialPdfFile(null); setView("editor"); }}>
-            <div style={{ width: 28, height: 28, borderRadius: 6, background: "#18181b", display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid #27272a" }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fafafa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
+            <div style={{ width: 28, height: 28, borderRadius: 8, background: "#e0f2fe", display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid #bae6fd" }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0284c7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
             </div>
-            <span style={{ fontFamily: "'Inter', sans-serif", fontWeight: 600, fontSize: 15, color: "#fafafa", letterSpacing: "-0.019em" }}>Data Guardian</span>
+            <span style={{ fontFamily: "'Inter', sans-serif", fontWeight: 700, fontSize: 15, color: "#0f172a", letterSpacing: "-0.019em" }}>Data Guardian</span>
           </div>
         </div>
 
@@ -440,18 +492,18 @@ export default function UniversalEditor({
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginLeft: "auto" }}>
           {doc && view === "editor" && (
             <>
-              <div style={{ display: "flex", alignItems: "center", gap: 1, padding: "2px", background: "#18181b", borderRadius: 6, border: "1px solid #27272a" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 1, padding: "2px", background: "#fff", borderRadius: 8, border: "1px solid #e5e7eb" }}>
                 <button className="btn btn-ghost" style={{ padding: 6, borderRadius: 4, height: 28, width: 28, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setScale(s => Math.max(0.4, +(s - 0.1).toFixed(2)))} title="Zoom Out">
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="5" y1="12" x2="19" y2="12" /></svg>
                 </button>
-                <span style={{ fontSize: 11, color: "#a1a1aa", minWidth: 38, textAlign: "center", fontVariantNumeric: "tabular-nums", fontWeight: 600 }}>{Math.round(scale * 100)}%</span>
+                <span style={{ fontSize: 11, color: "#64748b", minWidth: 38, textAlign: "center", fontVariantNumeric: "tabular-nums", fontWeight: 600 }}>{Math.round(scale * 100)}%</span>
                 <button className="btn btn-ghost" style={{ padding: 6, borderRadius: 4, height: 28, width: 28, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setScale(s => Math.min(2.5, +(s + 0.1).toFixed(2)))} title="Zoom In">
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
                 </button>
               </div>
 
               {token && fileId && (
-                <button className={`btn ${chatOpen ? "btn-primary" : "btn-outline"}`} onClick={() => setChatOpen(!chatOpen)} style={{ padding: "6px 12px", borderRadius: 6, border: chatOpen ? "none" : "1px solid #3f3f46" }}>
+                <button className={`btn ${chatOpen ? "btn-primary" : "btn-outline"}`} onClick={() => setChatOpen(!chatOpen)} style={{ padding: "6px 12px", borderRadius: 8, border: chatOpen ? "none" : "1px solid #e5e7eb" }}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
                   Chat
                 </button>
@@ -478,17 +530,21 @@ export default function UniversalEditor({
       {/* ═══ Main Editor Content ═══ */}
       <div style={{ flex: 1, position: "relative", display: "flex", flexDirection: "column", overflow: "hidden" }}>
         {loading ? (
-          <div className="fup" style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "#ffffff", zIndex: 1000 }}>
-            <svg className="spin" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#111827" strokeWidth="2" strokeLinecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
-            <div style={{ marginTop: 24, fontSize: 16, fontWeight: 500, color: "#374151", letterSpacing: "-0.01em" }}>{loadingMsg}</div>
+          <div className="fup" style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "#f4f7fb", zIndex: 1000 }}>
+            <svg className="spin" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#0284c7" strokeWidth="2" strokeLinecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+            <div style={{ marginTop: 24, fontSize: 16, fontWeight: 500, color: "#334155", letterSpacing: "-0.01em" }}>{loadingMsg}</div>
           </div>
         ) : !doc ? (
           <div className="fup" style={{ margin: "auto", maxWidth: 440, width: "100%", padding: 24 }}>
-            {!isReadOnly && (
+            {initialFileProp ? (
+              <div style={{ textAlign: "center", color: "#64748b", fontSize: 14 }}>
+                Preparing document…
+              </div>
+            ) : !isReadOnly && (
               <label className="dz" style={{ display: "block" }}>
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#a1a1aa" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ margin: "0 auto 20px" }}><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" /><polyline points="14 2 14 8 20 8" /><line x1="12" y1="18" x2="12" y2="12" /><line x1="9" y1="15" x2="15" y2="15" /></svg>
-                <div style={{ fontSize: 18, fontWeight: 600, color: "#fafafa", marginBottom: 8, letterSpacing: "-0.01em" }}>Upload File</div>
-                <div style={{ fontSize: 13, color: "#71717a", lineHeight: 1.6 }}>Supports TXT, CSV, Excel, Images & ZIP<br />PDFs will open in viewer</div>
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#0284c7" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ margin: "0 auto 20px" }}><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" /><polyline points="14 2 14 8 20 8" /><line x1="12" y1="18" x2="12" y2="12" /><line x1="9" y1="15" x2="15" y2="15" /></svg>
+                <div style={{ fontSize: 18, fontWeight: 600, color: "#0f172a", marginBottom: 8, letterSpacing: "-0.01em" }}>Upload File</div>
+                <div style={{ fontSize: 13, color: "#64748b", lineHeight: 1.6 }}>Supports TXT, CSV, Excel, Images & ZIP<br />PDFs will open in viewer</div>
                 <input type="file" style={{ display: "none" }} onChange={e => e.target.files?.[0] && handleFile(e.target.files[0])} />
               </label>
             )}
@@ -633,7 +689,7 @@ export default function UniversalEditor({
             )}
 
             {/* ═══ Canvas Area (full width) ═══ */}
-            <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", background: "#ffffff", position: "relative" }} onClick={() => setSelectedId(null)}>
+            <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", background: "#f4f7fb", position: "relative" }} onClick={() => setSelectedId(null)}>
               {(doc.type === "xlsx" || doc.type === "csv") ? (
                 <SpreadsheetApp
                   doc={doc}
@@ -664,22 +720,27 @@ export default function UniversalEditor({
 
             {/* Chat Drawer */}
             {chatOpen && (
-              <div style={{ width: 320, background: "#18181b", borderLeft: "1px solid #27272a", display: "flex", flexDirection: "column", flexShrink: 0, position: "absolute", right: 0, top: 0, bottom: 0, zIndex: 200 }}>
-                <div style={{ padding: 16, borderBottom: "1px solid #27272a", display: "flex", gap: 8 }}>
-                  <button className="btn btn-ghost" style={{ flex: 1, background: chatTab === 'group' ? "#27272a" : "transparent", color: chatTab === 'group' ? "#fff" : "#a1a1aa" }} onClick={() => setChatTab('group')}>Team</button>
-                  <button className="btn btn-ghost" style={{ flex: 1, background: chatTab === 'private' ? "#27272a" : "transparent", color: chatTab === 'private' ? "#fff" : "#a1a1aa" }} onClick={() => setChatTab('private')}>Private</button>
+              <div style={{ width: 320, background: "#ffffff", borderLeft: "1px solid #bae6fd", display: "flex", flexDirection: "column", flexShrink: 0, position: "absolute", right: 0, top: 0, bottom: 0, zIndex: 400, boxShadow: "-12px 0 32px rgba(2, 132, 199, 0.08)" }}>
+                <div style={{ padding: 14, background: "linear-gradient(135deg, #0284c7, #0369a1)", display: "flex", gap: 8 }}>
+                  <button className="btn btn-ghost" style={{ flex: 1, background: chatTab === 'group' ? "rgba(255,255,255,0.2)" : "transparent", color: "#fff" }} onClick={() => setChatTab('group')}>Team</button>
+                  <button className="btn btn-ghost" style={{ flex: 1, background: chatTab === 'private' ? "rgba(255,255,255,0.2)" : "transparent", color: "#fff" }} onClick={() => setChatTab('private')}>Private</button>
                 </div>
                 <div style={{ flex: 1, overflowY: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
-                  {messages.filter(m => chatTab === 'private' ? m.isPrivate : !m.isPrivate).map((m, i) => (
-                    <div key={i} style={{ background: m.userId === "you" ? "#27272a" : "transparent", border: "1px solid #3f3f46", padding: "10px 14px", borderRadius: 8, alignSelf: m.userId === "you" ? "flex-end" : "flex-start", maxWidth: "85%" }}>
-                      <div style={{ fontSize: 10, color: "#71717a", marginBottom: 4, fontWeight: 600 }}>{m.userId === "you" ? "You" : "Reviewer"}</div>
-                      <div style={{ fontSize: 13, lineHeight: 1.5, color: "#d4d4d8" }}>{m.message}</div>
+                  {messages.filter(m => !m.isSystem && (chatTab === 'private' ? m.isPrivate : !m.isPrivate)).map((m, i) => {
+                    const sender = String(m.sender || m.userId || "");
+                    const mine = Boolean(myUserId && sender && sender.toLowerCase() === myUserId.toLowerCase());
+                    const label = mine ? "You" : (sender.split("@")[0] || "Collaborator");
+                    return (
+                    <div key={m.id || i} style={{ background: mine ? "#e0f2fe" : "#f8fafc", border: "1px solid #e2e8f0", padding: "10px 14px", borderRadius: 12, alignSelf: mine ? "flex-end" : "flex-start", maxWidth: "85%" }}>
+                      <div style={{ fontSize: 10, color: "#64748b", marginBottom: 4, fontWeight: 600 }}>{label}</div>
+                      <div style={{ fontSize: 13, lineHeight: 1.5, color: "#0f172a", whiteSpace: "pre-wrap" }}>{m.message}</div>
                     </div>
-                  ))}
+                    );
+                  })}
                   <div ref={chatEndRef} />
                 </div>
-                <div style={{ padding: 16, borderTop: "1px solid #27272a" }}>
-                  <textarea className="pinput" style={{ resize: "none", height: 80, marginBottom: 8, fontSize: 13 }} placeholder={`Message ${chatTab === 'private' ? "Leader directly..." : "Team..."}`} value={newMessage} onChange={e => setNewMessage(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} />
+                <div style={{ padding: 16, borderTop: "1px solid #e0f2fe", background: "#f8fafc" }}>
+                  <textarea className="pinput" style={{ resize: "none", height: 80, marginBottom: 8, fontSize: 13 }} placeholder={`Message ${chatTab === 'private' ? (privateTarget?.name || "collaborator") + " directly..." : "Team..."}`} value={newMessage} onChange={e => setNewMessage(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} />
                   <button className="btn btn-primary" style={{ width: "100%", justifyContent: "center" }} onClick={handleSendMessage}>Send</button>
                 </div>
               </div>

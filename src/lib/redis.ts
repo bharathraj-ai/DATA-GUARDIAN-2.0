@@ -127,36 +127,57 @@ export async function createSession(
  * superseded  = this session was ended (break / re-login / revoke / legacy singleton)
  * valid       = this session exists in Redis (collaborators may have other sessions too)
  */
+function isRedisTruthy(value: unknown): boolean {
+    return value === 1 || value === true || value === '1';
+}
+
 export async function validateSession(
     token: string,
     sessionId: string
 ): Promise<RedisSessionCheck> {
-    const isRevoked = await redis.exists(`${REVOKED_PREFIX}${token}`);
-    if (isRevoked) {
+    const sessionKey = `${SESSION_PREFIX}${token}:${sessionId}`;
+    const pipeline = redis.pipeline();
+    pipeline.exists(`${REVOKED_PREFIX}${token}`);
+    pipeline.exists(sessionKey);
+    pipeline.sismember(`${SESSIONS_SET_PREFIX}${token}`, sessionId);
+    pipeline.get(`${ACTIVE_SESSION_PREFIX}${token}`);
+    const [revoked, exists, inSet, legacyActive] = await pipeline.exec();
+
+    if (isRedisTruthy(revoked)) {
         return 'superseded';
     }
-
-    const sessionKey = `${SESSION_PREFIX}${token}:${sessionId}`;
-    const exists = await redis.exists(sessionKey);
-    if (exists === 1) {
+    if (isRedisTruthy(exists)) {
         return 'valid';
     }
-
-    const [inSet, legacyActive] = await Promise.all([
-        redis.sismember(`${SESSIONS_SET_PREFIX}${token}`, sessionId),
-        redis.get<string>(`${ACTIVE_SESSION_PREFIX}${token}`),
-    ]);
-
-    // Indexed but key gone → TTL expired or this vendor's session was replaced/ended
-    if (inSet) {
+    if (isRedisTruthy(inSet)) {
         return 'superseded';
     }
-
-    // Migration: old single-session pointer
     if (legacyActive) {
         return legacyActive === sessionId ? 'valid' : 'superseded';
     }
+    return 'unknown';
+}
 
+export type SseAccessCheck = 'revoked' | 'invalid' | 'ok' | 'unknown';
+
+/**
+ * Single Redis round-trip for SSE kill-switch + session validity.
+ * Distinguishes revoke vs session-invalid so clients can show the right event.
+ */
+export async function checkSseAccess(token: string, sessionId: string): Promise<SseAccessCheck> {
+    const sessionKey = `${SESSION_PREFIX}${token}:${sessionId}`;
+    const pipeline = redis.pipeline();
+    pipeline.exists(`${REVOKED_PREFIX}${token}`);
+    pipeline.exists(sessionKey);
+    pipeline.scard(`${SESSIONS_SET_PREFIX}${token}`);
+    pipeline.get(`${ACTIVE_SESSION_PREFIX}${token}`);
+    const [revoked, exists, sessionCount, legacyActive] = await pipeline.exec();
+
+    if (isRedisTruthy(revoked)) return 'revoked';
+    if (isRedisTruthy(exists)) return 'ok';
+    const count = typeof sessionCount === 'number' ? sessionCount : Number(sessionCount || 0);
+    if (count > 0 || (legacyActive && legacyActive !== sessionId)) return 'invalid';
+    if (legacyActive === sessionId) return 'ok';
     return 'unknown';
 }
 
@@ -309,16 +330,16 @@ export async function extendSession(
     const sessionKey = `${SESSION_PREFIX}${token}:${sessionId}`;
     const sessionsSetKey = `${SESSIONS_SET_PREFIX}${token}`;
 
-    // Get current TTL
     const currentTTL = await redis.ttl(sessionKey);
     if (currentTTL <= 0) {
         return false;
     }
 
     const newTTL = currentTTL + additionalSeconds;
-
-    await redis.expire(sessionKey, newTTL);
-    await redis.expire(sessionsSetKey, newTTL);
+    const pipeline = redis.pipeline();
+    pipeline.expire(sessionKey, newTTL);
+    pipeline.expire(sessionsSetKey, newTTL);
+    await pipeline.exec();
 
     return true;
 }

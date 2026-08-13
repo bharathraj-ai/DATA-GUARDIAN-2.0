@@ -53,9 +53,9 @@ export default function VendorDashboardClient({
         };
     }, [fetchLinks]);
 
+    const hasActiveCooldown = Object.values(resendCooldown).some((s) => s > 0);
     useEffect(() => {
-        const hasActive = Object.values(resendCooldown).some((s) => s > 0);
-        if (!hasActive) return;
+        if (!hasActiveCooldown) return;
         const timer = setInterval(() => {
             setResendCooldown((prev) => {
                 const next: Record<string, number> = {};
@@ -66,7 +66,7 @@ export default function VendorDashboardClient({
             });
         }, 1000);
         return () => clearInterval(timer);
-    }, [resendCooldown]);
+    }, [hasActiveCooldown]);
 
     const handleResendOTP = async (token: string) => {
         if (resendingToken || (resendCooldown[token] ?? 0) > 0) return;

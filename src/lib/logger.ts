@@ -68,11 +68,15 @@ export function redactSessionId(sessionId: string | null | undefined): string {
 
 const formatMessage = (level: string, message: string, meta?: any) => {
     const timestamp = new Date().toISOString();
-    let out = `[${timestamp}] [${level}] ${message}`;
-    if (meta) {
-        // Simple serialization for metadata (fallback to prevent circular reference throws)
+    const requestId = typeof meta?.requestId === 'string' ? meta.requestId : undefined;
+    const rest = meta && typeof meta === 'object' ? { ...meta } : meta;
+    if (rest && typeof rest === 'object' && 'requestId' in rest) {
+        delete (rest as { requestId?: string }).requestId;
+    }
+    let out = `[${timestamp}] [${level}]${requestId ? ` [${requestId}]` : ''} ${message}`;
+    if (rest && !(typeof rest === 'object' && Object.keys(rest).length === 0)) {
         try {
-            out += ` | ${JSON.stringify(meta)}`;
+            out += ` | ${JSON.stringify(rest)}`;
         } catch {
             out += ` | [Unserializable Metadata]`;
         }

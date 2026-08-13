@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback, memo, useEffect } from 'react';
+import React, { useState, useCallback, memo, useEffect, useRef } from 'react';
 import { useCollaborationStore } from '@/store/useCollaborationStore';
 import { PermissionGuard } from '@/components/view/PermissionGuard';
 import { getFilePreview, FilePreviewResult } from '@/actions/get-file-preview';
@@ -8,6 +8,7 @@ import type { FileMetadata } from '@/actions/get-user';
 import { useRouter } from 'next/navigation';
 import { Download, Eye, FileText, Lock, Pencil, ShieldOff } from 'lucide-react';
 import styles from './FileList.module.css';
+import { markInternalNavigation } from './sudden-exit-client';
 
 /** Convert a data: URI to a blob: URL for reliable PDF iframe embedding. */
 function dataUriToBlobUrl(dataUri: string): string | null {
@@ -31,6 +32,17 @@ function formatSize(bytes: number) {
     return `${(bytes / 1024).toFixed(1)} KB`;
 }
 
+function formatPreviewCell(cell: unknown): string {
+    if (cell === null || cell === undefined) return '';
+    if (typeof cell === 'object') {
+        const value = (cell as { value?: unknown }).value;
+        if (value === null || value === undefined) return '';
+        if (typeof value === 'object') return '';
+        return String(value);
+    }
+    return String(cell);
+}
+
 interface FileListProps {
     token: string;
     files: FileMetadata[];
@@ -46,10 +58,20 @@ export const FileList = memo(function FileList({ token, files, isOwner }: FileLi
     const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
     const [isPreviewLoading, setIsPreviewLoading] = useState(false);
     const [isDownloadLoading, setIsDownloadLoading] = useState<string | null>(null);
+    const pdfBlobUrlRef = useRef<string | null>(null);
+    useEffect(() => {
+        pdfBlobUrlRef.current = pdfBlobUrl;
+    }, [pdfBlobUrl]);
+
+    useEffect(() => () => {
+        const url = pdfBlobUrlRef.current;
+        if (url?.startsWith('blob:')) URL.revokeObjectURL(url);
+    }, []);
 
     const handleEdit = useCallback(async (fileId: string) => {
         if (!capabilities.canEdit) return;
         setIsEditLoading(fileId);
+        markInternalNavigation();
         router.push(`/editor/${token}/${fileId}`);
     }, [token, capabilities.canEdit, router]);
 
@@ -276,6 +298,18 @@ export const FileList = memo(function FileList({ token, files, isOwner }: FileLi
                             {previewData.type === 'text' && (
                                 <pre>{previewData.content as string}</pre>
                             )}
+                            {previewData.type === 'word' && typeof previewData.content === 'string' && (
+                                <iframe
+                                    className={styles.wordFrame}
+                                    title="Word preview"
+                                    sandbox=""
+                                    srcDoc={`<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+                                      body{font-family:Calibri,'Segoe UI',Inter,sans-serif;font-size:15px;line-height:1.55;color:#0f172a;margin:24px;background:#fff}
+                                      p{margin:0 0 10px} h1,h2,h3{margin:16px 0 8px} table{border-collapse:collapse;width:100%}
+                                      td,th{border:1px solid #cbd5e1;padding:6px 8px} img{max-width:100%;height:auto}
+                                    </style></head><body>${previewData.content}</body></html>`}
+                                />
+                            )}
                             {previewData.type === 'spreadsheet' && Array.isArray(previewData.content) && (
                                 <div className={styles.tableWrap}>
                                     <table>
@@ -284,7 +318,7 @@ export const FileList = memo(function FileList({ token, files, isOwner }: FileLi
                                                 <tr key={i} style={{ fontWeight: i === 0 ? 700 : 400 }}>
                                                     {row.map((cell: unknown, j: number) => (
                                                         <td key={j}>
-                                                            {cell !== null && cell !== undefined ? String(cell) : ''}
+                                                            {formatPreviewCell(cell)}
                                                         </td>
                                                     ))}
                                                 </tr>

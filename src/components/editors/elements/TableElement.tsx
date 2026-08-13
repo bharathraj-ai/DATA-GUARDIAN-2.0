@@ -202,8 +202,8 @@ export const TableElement = React.memo(({ el, scale, onUpdate, selected, onSelec
     const isActive = activeCell?.r === r && activeCell?.c === c;
     const isEditing = editingCell?.r === r && editingCell?.c === c;
 
-    const bg = cell.bgColor || (isHeader ? "#18181b" : "#09090b");
-    const color = cell.textColor || (isHeader ? "#fafafa" : "#d4d4d8");
+    const bg = cell.bgColor || (isHeader ? "#e0f2fe" : "#ffffff");
+    const color = cell.textColor || (isHeader ? "#0f172a" : "#334155");
     const bold = cell.bold ?? isHeader;
     const italic = cell.italic ?? false;
     const align = cell.align || "left";
@@ -234,7 +234,7 @@ export const TableElement = React.memo(({ el, scale, onUpdate, selected, onSelec
           setEditingCell({ r, c });
         }}
         style={{
-          border: isActive ? "2px solid #3b82f6" : "1px solid #27272a",
+          border: isActive ? "2px solid #0284c7" : "1px solid #e2e8f0",
           background: bg,
           padding: 0,
           minWidth: currentWidth * scale,
@@ -310,7 +310,7 @@ export const TableElement = React.memo(({ el, scale, onUpdate, selected, onSelec
               width: 6,
               cursor: 'col-resize',
               zIndex: 10,
-              backgroundColor: isResizingThis ? '#3b82f6' : 'transparent',
+              backgroundColor: isResizingThis ? '#0284c7' : 'transparent',
             }}
           />
         )}
@@ -328,7 +328,7 @@ export const TableElement = React.memo(({ el, scale, onUpdate, selected, onSelec
         position: "relative",
         width: el.width * scale,
         height: el.height * scale,
-        border: selected ? "2px solid #fff" : "1px solid transparent",
+        border: selected ? "2px solid #0284c7" : "1px solid transparent",
         cursor: "pointer",
         zIndex: selected ? 100 : 1,
       }}

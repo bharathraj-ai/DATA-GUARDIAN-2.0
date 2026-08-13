@@ -19,6 +19,7 @@ import { requireOwnerRole } from '@/lib/security/roles';
 import { checkUploadRateLimit, extractClientIP, formatRateLimitError } from '@/lib/rate-limit';
 import { headers } from 'next/headers';
 import path from 'path';
+import { after } from 'next/server';
 import { logger, redactToken, redactEmail } from '@/lib/logger';
 import { isEmailConfigured } from '@/lib/email';
 
@@ -41,6 +42,10 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
         if (!(await requireOwnerRole(session.user.id))) {
             return { success: false, error: 'You do not have permission to create secure links.' };
         }
+
+        void import('@/lib/mongo/client').then(({ isMongoConfigured, warmMongoConnection }) => {
+            if (isMongoConfigured()) return warmMongoConnection();
+        }).catch(() => {});
 
         // SECURITY: Rate limit uploads to prevent storage exhaustion
         const _headers = await headers();
@@ -183,7 +188,7 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
             if (!ALLOWED_EXTENSIONS.has(ext)) {
                 return {
                     success: false,
-                    error: `File "${file.name}": type "${ext}" is not allowed. Permitted: PDF, Excel, CSV, Images, Text.`,
+                    error: `File "${file.name}": type "${ext}" is not allowed. Permitted: Word, PDF, Excel, CSV, Images, Text.`,
                 };
             }
         }
@@ -305,8 +310,10 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
                 },
             });
 
-            // Create SecureLink with Files (V2.1 Enhanced)
             const secureLink = await tx.secureLink.create({
+                include: {
+                    VendorAccess: { select: { id: true, currentOtpHash: true } },
+                },
                 data: {
                     token,
                     ownerToken,
@@ -364,11 +371,7 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
                 },
             });
 
-            // Create initial OtpHistory entries for forensic audit
-            const createdVendors = await tx.vendorAccess.findMany({
-                where: { secureLinkId: secureLink.id },
-                select: { id: true, currentOtpHash: true },
-            });
+            const createdVendors = secureLink.VendorAccess;
             if (createdVendors.length > 0) {
                 await tx.otpHistory.createMany({
                     data: createdVendors
@@ -389,40 +392,45 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
             timeout: 15000,
         });
 
-        // Audit log AFTER transaction
-        await prisma.auditLog.create({
-            data: {
-                action: 'CREATED',
-                linkId: result.id,
-                metadata: JSON.stringify({
-                    fileCount: files.length,
-                    purpose: purpose || undefined,
-                    hasNotifications: !!notificationEmail,
-                    allowDownload,
-                }),
-            },
-        }).catch(err => logger.warn('Failed to log audit event:', err.message));
-
         const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
         const shareUrl = `${baseUrl}/share/${token}`;
         const ownerUrl = `${baseUrl}/revoke/${ownerToken}`;
 
         logger.info(`Link created with ${files.length} files. ID: ${redactToken(result.id)}`);
 
-        // 📧 Send OTP email to all vendors (await — Vercel kills fire-and-forget SMTP)
-        if (vendorAccessData.length > 0) {
+        const finishAfterResponse = async () => {
+            await prisma.auditLog.create({
+                data: {
+                    action: 'CREATED',
+                    linkId: result.id,
+                    metadata: JSON.stringify({
+                        fileCount: files.length,
+                        purpose: purpose || undefined,
+                        hasNotifications: !!notificationEmail,
+                        allowDownload,
+                    }),
+                },
+            }).catch(err => logger.warn('Failed to log audit event:', err.message));
+
+            if (vendorAccessData.length === 0) return;
             if (!isEmailConfigured()) {
                 logger.error('[EMAIL] Not configured — OTP emails were not sent');
-            } else {
-                const { sendOTPEmail } = await import('@/lib/email');
-                await Promise.allSettled(
-                    vendorAccessData.map((v) =>
-                        sendOTPEmail(v.email, token, v.otp, validityMinutes).then(() =>
-                            logger.info(`OTP sent to ${redactEmail(v.email)}`),
-                        ),
-                    ),
-                );
+                return;
             }
+            const { sendOTPEmail } = await import('@/lib/email');
+            await Promise.allSettled(
+                vendorAccessData.map((v) =>
+                    sendOTPEmail(v.email, token, v.otp, validityMinutes).then(() =>
+                        logger.info(`OTP sent to ${redactEmail(v.email)}`),
+                    ),
+                ),
+            );
+        };
+
+        try {
+            after(finishAfterResponse);
+        } catch {
+            void finishAfterResponse();
         }
 
         return {
@@ -431,7 +439,7 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
             ownerUrl,
             // SECURITY: OTP is NEVER returned in API response — delivered via email only
             expiresAt,
-            purpose: purpose || undefined,  // V2.1: Return for UI confirmation
+            purpose: purpose || undefined,
         };
 
     } catch (error) {

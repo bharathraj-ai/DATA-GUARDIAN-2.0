@@ -10,14 +10,23 @@ import OwnerDashboardClient from './OwnerDashboardClient';
  * session → server-action waterfall on first paint.
  * Role gate uses Postgres, never JWT alone.
  */
-export default async function OwnerDashboardPage() {
+export default async function OwnerDashboardPage({
+    searchParams,
+}: {
+    searchParams: Promise<{ created?: string }>;
+}) {
     const session = await auth();
 
     if (!session?.user?.id) {
         redirect('/auth/signin?callbackUrl=/dashboard/owner');
     }
 
-    const dbUser = await getDbUserRole(session.user.id);
+    const [dbUser, dash, sp] = await Promise.all([
+        getDbUserRole(session.user.id),
+        getOwnerDashboardData(session.user.id),
+        searchParams,
+    ]);
+
     if (!dbUser) {
         redirect('/auth/signin?callbackUrl=/dashboard/owner');
     }
@@ -30,16 +39,13 @@ export default async function OwnerDashboardPage() {
         redirect('/dashboard/vendor');
     }
 
-    const { links: initialLinks, history: initialHistory } = await getOwnerDashboardData(
-        session.user.id,
-    );
-
     return (
         <OwnerDashboardClient
-            initialLinks={initialLinks}
-            initialHistory={initialHistory}
+            initialLinks={dash.links}
+            initialHistory={dash.history}
             userId={session.user.id}
             userLabel={session.user.name || session.user.email || 'Owner'}
+            justCreated={sp.created === '1'}
         />
     );
 }

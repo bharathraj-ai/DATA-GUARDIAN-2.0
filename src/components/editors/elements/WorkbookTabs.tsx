@@ -9,7 +9,7 @@ interface WorkbookTabsProps {
 
 export function WorkbookTabs({ sheets, activeSheet, onTabChange, onTabDoubleClick }: WorkbookTabsProps) {
   return (
-    <div style={{ display: "flex", borderBottom: "1px solid #333", background: "#1a1a1a", overflowX: "auto", flexShrink: 0 }}>
+    <div style={{ display: "flex", borderBottom: "1px solid #e5e7eb", background: "#f8fafc", overflowX: "auto", flexShrink: 0 }}>
       {sheets.map((sheet, idx) => (
         <div
           key={idx}
@@ -19,11 +19,13 @@ export function WorkbookTabs({ sheets, activeSheet, onTabChange, onTabDoubleClic
             padding: "8px 16px",
             fontSize: "13px",
             cursor: "pointer",
-            color: activeSheet === idx ? "#fff" : "#888",
-            borderBottom: activeSheet === idx ? "2px solid #3b82f6" : "2px solid transparent",
-            backgroundColor: activeSheet === idx ? "#2a2a2a" : "transparent",
+            color: activeSheet === idx ? "#0284c7" : "#64748b",
+            borderBottom: activeSheet === idx ? "2px solid #0284c7" : "2px solid transparent",
+            backgroundColor: activeSheet === idx ? "#ffffff" : "transparent",
+            fontWeight: activeSheet === idx ? 700 : 500,
             whiteSpace: "nowrap",
-            userSelect: "none"
+            userSelect: "none",
+            fontFamily: "Inter, system-ui, sans-serif",
           }}
         >
           {sheet}

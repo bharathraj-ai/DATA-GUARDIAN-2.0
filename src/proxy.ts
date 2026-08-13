@@ -2,28 +2,43 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { validateCSRF } from '@/lib/security/csrf';
 
+function resolveRequestId(request: NextRequest): string {
+    const incoming = request.headers.get('x-request-id');
+    if (incoming && /^[\w\-:]{8,128}$/.test(incoming)) return incoming;
+    return crypto.randomUUID();
+}
+
 /**
- * CSRF only on mutating custom APIs.
- * Auth + GET requests are excluded so session/page traffic stays fast.
+ * CSRF on mutating custom APIs + request correlation IDs.
+ * Auth + GET requests skip CSRF so session/page traffic stays fast.
  */
 export function proxy(request: NextRequest) {
+    const requestId = resolveRequestId(request);
+    const requestHeaders = new Headers(request.headers);
+    requestHeaders.set('x-request-id', requestId);
+
     const method = request.method.toUpperCase();
     if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
-        return NextResponse.next();
+        const res = NextResponse.next({ request: { headers: requestHeaders } });
+        res.headers.set('x-request-id', requestId);
+        return res;
     }
 
     const csrfResult = validateCSRF(request);
     if (!csrfResult.allowed) {
-        return NextResponse.json(
+        const res = NextResponse.json(
             { error: csrfResult.reason },
-            { status: csrfResult.status }
+            { status: csrfResult.status },
         );
+        res.headers.set('x-request-id', requestId);
+        return res;
     }
 
-    return NextResponse.next();
+    const res = NextResponse.next({ request: { headers: requestHeaders } });
+    res.headers.set('x-request-id', requestId);
+    return res;
 }
 
 export const config = {
-    // Skip NextAuth + static-ish noise; only custom API mutations
     matcher: ['/api/((?!auth).*)'],
 };

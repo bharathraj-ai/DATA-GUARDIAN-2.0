@@ -581,21 +581,6 @@ export const SecurityShield = memo(function SecurityShield({
     }, [sessionTerminated]);
 
     // ═══════════════════════════════════════════════════════════════
-    // CONTEXT MENU
-    // ═══════════════════════════════════════════════════════════════
-    useEffect(() => {
-        if (sessionTerminated) return;
-        const handleContextMenu = (e: MouseEvent) => {
-            e.preventDefault();
-            flashWarningRef.current('Right-click is disabled for security', 'info');
-            logSecurityEventRef.current('CONTEXT_MENU_ATTEMPT');
-        };
-        document.addEventListener('contextmenu', handleContextMenu, { capture: true });
-        return () =>
-            document.removeEventListener('contextmenu', handleContextMenu, { capture: true });
-    }, [sessionTerminated]);
-
-    // ═══════════════════════════════════════════════════════════════
     // BLUR / VISIBILITY — primary privacy path for OS screenshot UIs
     // Cover immediately; audit + verify-access are throttled (not every blur).
     // ═══════════════════════════════════════════════════════════════

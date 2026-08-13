@@ -41,10 +41,13 @@ export async function POST(
     }
 
     // Auth (Zero-Trust Session + API Security)
-    const authResult = await authorizeApiRequest(fileId, token, { httpMethod: req.method, action: 'edit' });
+    const authResult = await authorizeApiRequest(fileId, token, { httpMethod: req.method, action: 'edit', includeContent: true });
     if (authResult.errorResponse) {
       return authResult.errorResponse;
     }
+    const { requireHeldEditLock } = await import('@/lib/collaboration/edit-lock-http');
+    const lockGate = await requireHeldEditLock(authResult, (body as { clientInstanceId?: string }).clientInstanceId);
+    if ('errorResponse' in lockGate) return lockGate.errorResponse;
     const { file } = authResult;
 
     // ── Rate Limit check ─────────────────────────────────────────

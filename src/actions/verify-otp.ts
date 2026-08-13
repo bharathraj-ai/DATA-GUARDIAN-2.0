@@ -1,13 +1,14 @@
 'use server';
 
 import { prisma } from '@/lib/prisma';
-import { verifyOTPHash, encryptData, hashOTP } from '@/lib/crypto';
+import { verifyOTPHash, encryptData } from '@/lib/crypto';
 import { otpVerifySchema, OTPVerifyInput } from '@/lib/validations';
 import { cookies, headers } from 'next/headers';
 import { generateDeviceHash, isActiveSessionFresh } from '@/lib/fingerprint';
 import { DEVICE_MISMATCH_ERROR, isSessionDeviceMismatch } from '@/lib/session-device';
 import { notifyLinkAccessed } from '@/lib/notifications';
-import { checkOTPRateLimit, extractClientIP, formatRateLimitError } from '@/lib/rate-limit';
+import { checkOTPRateLimit, checkLinkRateLimit, extractClientIP, formatRateLimitError } from '@/lib/rate-limit';
+import { logger } from '@/lib/logger';
 import { auth } from '@/lib/auth';
 
 // NOTE: OTP verification window is intentionally disabled (infinite reuse allowed per product design).
@@ -58,8 +59,9 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
 
         // PERFORMANCE: Run independent async operations in parallel
         // Rate limit, Redis revoke check, auth session, and DB query are all independent
-        const [rateLimit, revokedInRedis, session, secureLink] = await Promise.all([
+        const [rateLimit, linkRateLimit, revokedInRedis, session, secureLink] = await Promise.all([
             checkOTPRateLimit(clientIP),
+            checkLinkRateLimit(token),
             tryCheckRevoked(token),
             auth(),
             prisma.secureLink.findUnique({
@@ -125,7 +127,8 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
         ]);
 
         // ANTI-PHISHING: Rate limiting check
-        if (!rateLimit.allowed) {
+        if (!rateLimit.allowed || !linkRateLimit.allowed) {
+            const limited = !rateLimit.allowed ? rateLimit : linkRateLimit;
             prisma.auditLog.create({
                 data: {
                     action: 'DENIED',
@@ -133,14 +136,14 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
                     metadata: JSON.stringify({
                         ip: clientIP.substring(0, 6) + '***',
                         type: 'rate_limit',
-                        retryAfter: rateLimit.retryAfter
+                        retryAfter: limited.retryAfter
                     })
                 }
             }).catch(() => { }); // fire-and-forget audit
 
             return {
                 success: false,
-                error: formatRateLimitError(rateLimit),
+                error: formatRateLimitError(limited),
                 errorType: 'DENIED'
             };
         }
@@ -215,25 +218,18 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
                 };
             }
         } else if (secureLink.VendorAccess && secureLink.VendorAccess.length > 0) {
-            // Break-Based OTP Rotation: Try currentOtpHash first (active OTP only)
-            const hmacHash = await hashOTP(otp);
-
-            // Priority 1: Match against currentOtpHash (the only valid OTP after rotation)
-            vendor = secureLink.VendorAccess.find(
-                v => v.currentOtpHash && v.currentOtpHash === hmacHash
-            ) || null;
-
-            // Priority 2: Fallback to legacy otpHash for vendors created before OTP rotation migration
-            if (!vendor) {
-                vendor = secureLink.VendorAccess.find(
-                    v => !v.currentOtpHash && v.otpHash && !v.otpHash.startsWith('$2') && v.otpHash === hmacHash
-                ) || null;
+            // Break-Based OTP Rotation: timing-safe verify against currentOtpHash first
+            for (const v of secureLink.VendorAccess) {
+                if (v.currentOtpHash && await verifyOTPHash(otp, v.currentOtpHash)) {
+                    vendor = v;
+                    break;
+                }
             }
 
-            // Priority 3: Legacy bcrypt hashes (old OTPs from pre-HMAC era)
+            // Fallback to legacy otpHash (HMAC or bcrypt) when no rotated hash exists
             if (!vendor) {
                 for (const v of secureLink.VendorAccess) {
-                    if (!v.currentOtpHash && v.otpHash?.startsWith('$2') && await verifyOTPHash(otp, v.otpHash)) {
+                    if (!v.currentOtpHash && v.otpHash && await verifyOTPHash(otp, v.otpHash)) {
                         vendor = v;
                         break;
                     }
@@ -698,23 +694,10 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
             // It's already set as an httpOnly cookie — the only safe channel
         };
     } catch (error) {
-        const message = error instanceof Error ? error.message : 'Unknown';
-        console.error('Error verifying OTP:', message);
-
-        let userMessage = 'Verification failed. Please try again.';
-        if (/OTP_HMAC_SECRET|ENCRYPTION_KEY is required for OTP/i.test(message)) {
-            userMessage = 'Server OTP secret is missing or different in production.';
-        } else if (/ENCRYPTION_KEY not configured|ENCRYPTION_KEY must be 64 hex/i.test(message)) {
-            userMessage = 'Server encryption key is missing or invalid in production.';
-        } else if (/SESSION_HMAC_SECRET|NEXTAUTH_SECRET.*share sessions/i.test(message)) {
-            userMessage = 'Server session secret is missing or different in production.';
-        } else if (/P1001|P2024|Can't reach database|Timed out fetching a new connection/i.test(message)) {
-            userMessage = 'Production database is unreachable or overloaded.';
-        }
-
+        logger.error('Error verifying OTP', error);
         return {
             success: false,
-            error: userMessage,
+            error: 'Verification failed. Please try again.',
         };
     }
 }

@@ -39,7 +39,33 @@ const USER_FILE_CONTENT_SELECT = {
   encryptedDek: true,
   mongoFileId: true,
   editingLocked: true,
+  mongoFile: {
+    select: {
+      gridFSId: true,
+      mimeType: true,
+      status: true,
+      isDeleted: true,
+    },
+  },
 } as const;
+
+export type UserFileContentRow = {
+  mongoFileId?: string | null;
+  fileSize?: number | null;
+  mongoFile?: {
+    gridFSId: string;
+    mimeType?: string | null;
+    status?: string | null;
+    isDeleted: boolean;
+  } | null;
+};
+
+/** GridFS id from the UserFile join — skips a second Prisma lookup. */
+export function gridFsIdForFile(file: UserFileContentRow): string | null {
+  const mongo = file.mongoFile;
+  if (!mongo || mongo.isDeleted || !mongo.gridFSId) return null;
+  return mongo.gridFSId;
+}
 
 /**
  * Load a single file's ciphertext only after ACL has already bound fileId → link.

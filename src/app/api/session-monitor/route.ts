@@ -5,6 +5,7 @@ import { prisma } from '@/lib/prisma';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 /**
  * GET /api/session-monitor?token=
@@ -30,7 +31,7 @@ export async function GET(req: NextRequest) {
     return new Response('Missing token', { status: 400 });
   }
 
-  const authResult = await authorizeSecureLink(token, 'view');
+  const authResult = await authorizeSecureLink(token, 'view', undefined, { includeDraft: false });
   if (!authResult.success) {
     // Uniform deny — avoid token existence oracle via distinct audit side-channels in response
     return new Response('Forbidden', { status: 403 });
@@ -135,43 +136,41 @@ export async function GET(req: NextRequest) {
             return;
           }
 
-          // Presence check (who is currently active within last 15s)
           const threshold = new Date(Date.now() - 15000);
-          const activeSessions = await prisma.documentSession.findMany({
-            where: {
-              token,
-              lastSeenAt: { gte: threshold }
-            },
-            select: {
-              userId: true,
-              displayName: true,
-              level: true,
-              color: true
-            }
-          });
+          const [activeSessions, recentChats] = await Promise.all([
+            prisma.documentSession.findMany({
+              where: {
+                token,
+                lastSeenAt: { gte: threshold }
+              },
+              select: {
+                userId: true,
+                displayName: true,
+                level: true,
+                color: true
+              }
+            }),
+            prisma.chatMessage.findMany({
+              where: {
+                secureLinkId: link.id,
+                ...(lastChatTimestamp ? { timestamp: { gt: lastChatTimestamp } } : {}),
+                OR: viewerEmail
+                  ? [
+                      { receiverEmail: null },
+                      { senderEmail: viewerEmail },
+                      { receiverEmail: viewerEmail },
+                    ]
+                  : [{ receiverEmail: null }],
+              },
+              orderBy: { timestamp: 'asc' },
+              take: lastChatTimestamp ? 50 : 100,
+              select: { id: true, senderEmail: true, receiverEmail: true, content: true, timestamp: true }
+            }),
+          ]);
 
-          // Compute highest authority (lowest level number)
           let highestActiveLevel = 99;
           activeSessions.forEach(session => {
              if (session.level < highestActiveLevel) highestActiveLevel = session.level;
-          });
-
-          // Incremental chat: full snapshot once, then only newer rows
-          const recentChats = await prisma.chatMessage.findMany({
-            where: {
-              secureLinkId: link.id,
-              ...(lastChatTimestamp ? { timestamp: { gt: lastChatTimestamp } } : {}),
-              OR: viewerEmail
-                ? [
-                    { receiverEmail: null },
-                    { senderEmail: viewerEmail },
-                    { receiverEmail: viewerEmail },
-                  ]
-                : [{ receiverEmail: null }],
-            },
-            orderBy: { timestamp: 'asc' },
-            take: lastChatTimestamp ? 50 : 100,
-            select: { id: true, senderEmail: true, receiverEmail: true, content: true, timestamp: true }
           });
           if (recentChats.length > 0) {
             lastChatTimestamp = recentChats[recentChats.length - 1].timestamp;

@@ -1,4 +1,4 @@
-import { getGridFSBucket } from './client';
+import { getGridFSBucket, GRIDFS_CHUNK_SIZE } from './client';
 import { ObjectId } from 'mongodb';
 import { Readable, Transform } from 'stream';
 import crypto from 'crypto';
@@ -38,24 +38,37 @@ export function computeChecksum(buffer: Buffer): string {
   return crypto.createHash('sha256').update(buffer).digest('hex');
 }
 
+function uploadMetadata(params: {
+  mimeType: string;
+  fileExtension: string;
+  folder: string;
+  projectId?: string;
+  vendorId?: string;
+  uploadedBy: string;
+  classification?: string;
+  checksum?: string;
+}) {
+  return {
+    mimeType: params.mimeType,
+    fileExtension: params.fileExtension,
+    folder: params.folder,
+    projectId: params.projectId,
+    vendorId: params.vendorId,
+    uploadedBy: params.uploadedBy,
+    classification: params.classification || 'INTERNAL',
+    ...(params.checksum ? { checksum: params.checksum } : {}),
+  };
+}
+
 export async function uploadToMongo(params: MongoUploadParams): Promise<MongoUploadResult> {
   const bucket = await getGridFSBucket();
   const checksum = computeChecksum(params.buffer);
-
   const readableStream = Readable.from(params.buffer);
-  
+
   return new Promise((resolve, reject) => {
     const uploadStream = bucket.openUploadStream(params.originalFileName, {
-      metadata: {
-        mimeType: params.mimeType,
-        fileExtension: params.fileExtension,
-        folder: params.folder,
-        projectId: params.projectId,
-        vendorId: params.vendorId,
-        uploadedBy: params.uploadedBy,
-        classification: params.classification || 'INTERNAL',
-        checksum,
-      }
+      chunkSizeBytes: GRIDFS_CHUNK_SIZE,
+      metadata: uploadMetadata({ ...params, checksum }),
     });
 
     readableStream.pipe(uploadStream)
@@ -65,7 +78,7 @@ export async function uploadToMongo(params: MongoUploadParams): Promise<MongoUpl
           gridFSId: uploadStream.id.toString(),
           checksum,
           fileSize: params.buffer.length,
-          mimeType: params.mimeType
+          mimeType: params.mimeType,
         });
       });
   });
@@ -73,69 +86,51 @@ export async function uploadToMongo(params: MongoUploadParams): Promise<MongoUpl
 
 export async function uploadStreamToMongo(params: MongoStreamUploadParams): Promise<MongoUploadResult> {
   const bucket = await getGridFSBucket();
-  
-  return new Promise((resolve, reject) => {
-    // We cannot compute checksum on the fly without consuming the stream, 
-    // so we skip the custom checksum or use a passthrough stream to compute it.
-    const hash = crypto.createHash('sha256');
-    let checksum = '';
-    let fileSize = 0;
+  const hash = crypto.createHash('sha256');
+  let fileSize = 0;
 
+  const hasher = new Transform({
+    transform(chunk, _enc, cb) {
+      hash.update(chunk);
+      fileSize += chunk.length;
+      cb(null, chunk);
+    },
+  });
+
+  return new Promise((resolve, reject) => {
     const uploadStream = bucket.openUploadStream(params.originalFileName, {
-      metadata: {
-        mimeType: params.mimeType,
-        fileExtension: params.fileExtension,
-        folder: params.folder,
-        projectId: params.projectId,
-        vendorId: params.vendorId,
-        uploadedBy: params.uploadedBy,
-        classification: params.classification || 'INTERNAL',
-      }
+      chunkSizeBytes: GRIDFS_CHUNK_SIZE,
+      metadata: uploadMetadata(params),
     });
 
     params.stream
-      .on('data', (chunk) => {
-        hash.update(chunk);
-        fileSize += chunk.length;
-      })
+      .pipe(hasher)
       .pipe(uploadStream)
       .on('error', reject)
-      .on('finish', async () => {
-        checksum = hash.digest('hex');
-        
-        try {
-          // Update the metadata with the checksum after upload
-          const { getMongoClient } = await import('./client');
-          const client = await getMongoClient();
-          const db = client.db(process.env.MONGODB_DB_NAME || 'data-guardian');
-          await db.collection('fs.files').updateOne(
-            { _id: uploadStream.id },
-            { $set: { 'metadata.checksum': checksum } }
-          );
-
-          resolve({
-            gridFSId: uploadStream.id.toString(),
-            checksum,
-            fileSize,
-            mimeType: params.mimeType
-          });
-        } catch (e) {
-          reject(e);
-        }
+      .on('finish', () => {
+        resolve({
+          gridFSId: uploadStream.id.toString(),
+          checksum: hash.digest('hex'),
+          fileSize,
+          mimeType: params.mimeType,
+        });
       });
   });
 }
 
-export async function downloadFromMongo(gridFSId: string): Promise<Buffer> {
+export async function downloadFromMongo(gridFSId: string, _expectedSize?: number): Promise<Buffer> {
   const bucket = await getGridFSBucket();
-  
+  const downloadStream = bucket.openDownloadStream(new ObjectId(gridFSId));
+  const chunks: Buffer[] = [];
+  let total = 0;
   return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    const downloadStream = bucket.openDownloadStream(new ObjectId(gridFSId));
-    
-    downloadStream.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+    downloadStream.on('data', (chunk: Buffer) => {
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      chunks.push(bytes);
+      total += bytes.length;
+    });
     downloadStream.on('error', reject);
-    downloadStream.on('end', () => resolve(Buffer.concat(chunks)));
+    downloadStream.on('end', () => resolve(Buffer.concat(chunks, total)));
   });
 }
 
@@ -148,7 +143,6 @@ export async function deleteFromMongo(gridFSId: string): Promise<void> {
     const bucket = await getGridFSBucket();
     await bucket.delete(new ObjectId(gridFSId));
   } catch (err: any) {
-    // FileNotFound is expected if already cleaned up — ignore it
     if (err?.message?.includes('FileNotFound') || err?.code === 'FileNotFound' || /file not found/i.test(err?.message)) {
       return;
     }

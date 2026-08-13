@@ -16,7 +16,10 @@ export default async function VendorDashboardPage() {
         redirect('/auth/signin?callbackUrl=/dashboard/vendor');
     }
 
-    const dbUser = await getDbUserRole(session.user.id);
+    const [dbUser, initialLinks] = await Promise.all([
+        getDbUserRole(session.user.id),
+        getReceivedLinks(session.user.email),
+    ]);
     if (!dbUser) {
         redirect('/auth/signin?callbackUrl=/dashboard/vendor');
     }
@@ -28,8 +31,6 @@ export default async function VendorDashboardPage() {
     if (dbUser.role === 'OWNER') {
         redirect('/dashboard/owner');
     }
-
-    const initialLinks = await getReceivedLinks(session.user.email);
 
     return (
         <VendorDashboardClient

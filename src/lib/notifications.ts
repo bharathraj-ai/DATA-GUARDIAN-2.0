@@ -388,18 +388,6 @@ export async function notifyVendorSubmitted(
 /**
  * Check if notifications are enabled for a link
  */
-export async function isNotificationEnabled(tokenId: string): Promise<boolean> {
-    const link = await prisma.secureLink.findUnique({
-        where: { id: tokenId },
-        select: { notificationEmail: true }
-    });
-
-    return !!link?.notificationEmail;
-}
-
-/**
- * Get notification email for a link
- */
 export async function getNotificationEmail(tokenId: string): Promise<string | null> {
     const link = await prisma.secureLink.findUnique({
         where: { id: tokenId },
@@ -407,4 +395,8 @@ export async function getNotificationEmail(tokenId: string): Promise<string | nu
     });
 
     return link?.notificationEmail || null;
+}
+
+export async function isNotificationEnabled(tokenId: string): Promise<boolean> {
+    return !!(await getNotificationEmail(tokenId));
 }

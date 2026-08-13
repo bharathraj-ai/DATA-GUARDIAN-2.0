@@ -46,12 +46,14 @@ interface OwnerDashboardClientProps {
     initialHistory: SendHistoryRecord[];
     userId: string;
     userLabel: string;
+    justCreated?: boolean;
 }
 
 export default function OwnerDashboardClient({
     initialLinks,
     initialHistory,
     userLabel,
+    justCreated = false,
 }: OwnerDashboardClientProps) {
     const [links, setLinks] = useState<DashboardLink[]>(initialLinks);
     const [sendHistory] = useState<SendHistoryRecord[]>(initialHistory);
@@ -60,7 +62,11 @@ export default function OwnerDashboardClient({
     const [confirmRevokeId, setConfirmRevokeId] = useState<string | null>(null);
     const [expandedId, setExpandedId] = useState<string | null>(null);
     const [detailsLoadingId, setDetailsLoadingId] = useState<string | null>(null);
-    const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+    const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(
+        justCreated
+            ? { message: 'Secure link created. OTP has been emailed to the vendor.', type: 'success' }
+            : null,
+    );
     const [activeTab, setActiveTab] = useState<'links' | 'history' | 'audit'>('links');
     const [liveActivityLink, setLiveActivityLink] = useState<{token: string, topic: string} | null>(null);
     const [auditLogs, setAuditLogs] = useState<UnifiedAuditLog[]>([]);
@@ -86,6 +92,15 @@ export default function OwnerDashboardClient({
             });
         return () => { cancelled = true; };
     }, [activeTab, auditLoaded]);
+
+    useEffect(() => {
+        if (!justCreated || typeof window === 'undefined') return;
+        const url = new URL(window.location.href);
+        if (url.searchParams.has('created')) {
+            url.searchParams.delete('created');
+            window.history.replaceState({}, '', `${url.pathname}${url.search}`);
+        }
+    }, [justCreated]);
 
     // Auto-dismiss notification
     useEffect(() => {

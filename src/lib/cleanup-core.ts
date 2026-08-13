@@ -199,14 +199,15 @@ export async function executeCleanup(options?: { ownerId?: string }): Promise<Cl
             await new Promise(resolve => setTimeout(resolve, 50));
         }
 
-        // SECURITY: Log only counts, never data content
-        console.log(
-            `[CLEANUP] Purged ${totalDeletedLinks} links, ` +
-            `${totalDeletedUserData} encrypted records, ` +
-            `${totalDeletedFiles} files, ` +
-            `${totalDeletedMongoFiles} GridFS objects, ` +
-            `${totalDeletedAuditLogs} audit logs`
-        );
+        if (totalDeletedLinks > 0) {
+            console.log(
+                `[CLEANUP] Purged ${totalDeletedLinks} links, ` +
+                `${totalDeletedUserData} encrypted records, ` +
+                `${totalDeletedFiles} files, ` +
+                `${totalDeletedMongoFiles} GridFS objects, ` +
+                `${totalDeletedAuditLogs} audit logs`
+            );
+        }
 
         return {
             success: true,

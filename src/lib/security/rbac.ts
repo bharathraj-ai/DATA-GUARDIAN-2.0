@@ -40,10 +40,18 @@ export async function checkDocumentPermission(
   action: DocumentAction,
   loaded?: { ownerId: string; isDeleted: boolean },
 ): Promise<DocumentAccessResult> {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { role: true },
-  });
+  const [user, document] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: { role: true },
+    }),
+    loaded
+      ? Promise.resolve(loaded)
+      : prisma.document.findUnique({
+          where: { id: documentId },
+          select: { ownerId: true, isDeleted: true },
+        }),
+  ]);
 
   if (!user) {
     return { allowed: false, reason: 'User not found' };
@@ -55,11 +63,6 @@ export async function checkDocumentPermission(
       reason: `Role '${normalizeRole(user.role)}' cannot perform '${action}'`,
     };
   }
-
-  const document = loaded ?? await prisma.document.findUnique({
-    where: { id: documentId },
-    select: { ownerId: true, isDeleted: true },
-  });
 
   if (!document) {
     return { allowed: false, reason: 'Document not found' };

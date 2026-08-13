@@ -154,6 +154,30 @@ export async function tryInvalidateOneSession(
  * Read device fingerprint bound to a specific Redis session (if any).
  * null = Redis unavailable / no session fingerprint stored.
  */
+/**
+ * SSE heartbeat Redis check — one round-trip.
+ * Redis error → 'revoked' (fail closed kill-switch).
+ * Cache miss / unknown → 'ok' (signed cookie + DB remain authoritative).
+ */
+export async function trySseAccessCheck(
+    token: string,
+    sessionId: string,
+): Promise<'revoked' | 'invalid' | 'ok'> {
+    if (!isRedisConfigured()) {
+        return 'ok';
+    }
+
+    try {
+        const { checkSseAccess } = await getRedisModule();
+        const result = await checkSseAccess(token, sessionId);
+        if (result === 'unknown') return 'ok';
+        return result;
+    } catch (err) {
+        logger.error('Redis trySseAccessCheck FAIL CLOSED — treating as revoked', err);
+        return 'revoked';
+    }
+}
+
 export async function tryGetSessionDeviceFingerprint(
     token: string,
     sessionId?: string,

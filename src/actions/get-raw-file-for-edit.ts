@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { decryptBuffer, decryptDek } from '@/lib/crypto';
 import { authorizeSecureLink } from '@/lib/linkAuthorization';
 import { downloadFromMongo } from '@/lib/mongo/operations';
+import { gridFsIdForFile } from '@/lib/security/resource-ownership';
 
 export type RawFileData = {
     success: boolean;
@@ -11,6 +12,9 @@ export type RawFileData = {
     mimeType?: string;
     fileName?: string;
     version?: number;
+    myAssignedLevel?: number;
+    capabilities?: { canEdit: boolean; canPreview: boolean; canComment: boolean; canDownload: boolean };
+    remainingSeconds?: number;
     error?: string;
 };
 
@@ -64,16 +68,12 @@ export async function getRawFileForEdit(token: string, fileId: string): Promise<
         } else if ((fileRecord as any).mongoFileId) {
             // ── Mongo fallback: download file from Mongo ─────────
             try {
-                const mongoFileRecord = await prisma.mongoFile.findUnique({
-                    where: { id: (fileRecord as any).mongoFileId, isDeleted: false },
-                    select: { gridFSId: true, mimeType: true },
-                });
-
-                if (!mongoFileRecord) {
+                const gridFSId = gridFsIdForFile(fileRecord);
+                if (!gridFSId) {
                     return { success: false, error: 'Mongo file record not found' };
                 }
 
-                const downloadedBuffer = await downloadFromMongo(mongoFileRecord.gridFSId);
+                const downloadedBuffer = await downloadFromMongo(gridFSId, fileRecord.fileSize);
 
                 // If iv/authTag are present, the file was encrypted at upload — decrypt it.
                 // If they're null, submitFinal stored the file raw in GridFS — use as-is.
@@ -96,12 +96,22 @@ export async function getRawFileForEdit(token: string, fileId: string): Promise<
             return { success: false, error: 'File has no content available' };
         }
 
+        const myAssignedLevel = authResult.context.isOwner
+            ? 1
+            : (authResult.context.vendorAccess?.level ?? 2);
+
         return {
             success: true,
             mimeType: fileRecord.fileType,
             fileName: fileRecord.fileName,
             version: fileRecord.version,
             base64Content: buffer.toString('base64'),
+            myAssignedLevel,
+            capabilities: authResult.context.capabilities,
+            remainingSeconds: Math.max(
+                0,
+                Math.floor((secureLink.expiresAt.getTime() - Date.now()) / 1000),
+            ),
         };
 
     } catch (error) {

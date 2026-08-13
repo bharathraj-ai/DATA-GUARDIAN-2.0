@@ -1,42 +1,68 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { DocumentData, EditorElement } from "../types";
 
 export function useEditorState(initialDoc: DocumentData | null) {
   const [doc, setDoc] = useState<DocumentData | null>(initialDoc);
-  const [history, setHistory] = useState<DocumentData[]>([]);
   const [historyIdx, setHistoryIdx] = useState(-1);
+  const [historyLength, setHistoryLength] = useState(0);
   const [activePage, setActivePage] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  // Use refs to avoid stale closures in callbacks
-  const historyRef = useRef(history);
-  const historyIdxRef = useRef(historyIdx);
-  historyRef.current = history;
-  historyIdxRef.current = historyIdx;
+  const historyRef = useRef<DocumentData[]>([]);
+  const historyIdxRef = useRef(-1);
+  const pendingHistoryRef = useRef<DocumentData | null>(null);
+  const historyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const pushHistory = useCallback((nd: DocumentData) => {
+  const flushHistory = useCallback(() => {
+    if (historyTimerRef.current) {
+      clearTimeout(historyTimerRef.current);
+      historyTimerRef.current = null;
+    }
+    const nd = pendingHistoryRef.current;
+    if (!nd) return;
+    pendingHistoryRef.current = null;
     const idx = historyIdxRef.current;
     const newHistory = [...historyRef.current.slice(0, idx + 1), structuredClone(nd)].slice(-50);
-    setHistory(newHistory);
+    historyRef.current = newHistory;
+    historyIdxRef.current = newHistory.length - 1;
     setHistoryIdx(newHistory.length - 1);
+    setHistoryLength(newHistory.length);
   }, []);
 
+  useEffect(() => () => {
+    if (historyTimerRef.current) clearTimeout(historyTimerRef.current);
+  }, []);
+
+  const pushHistory = useCallback((nd: DocumentData, immediate = false) => {
+    pendingHistoryRef.current = nd;
+    if (immediate) {
+      flushHistory();
+      return;
+    }
+    if (historyTimerRef.current) clearTimeout(historyTimerRef.current);
+    historyTimerRef.current = setTimeout(flushHistory, 400);
+  }, [flushHistory]);
+
   const undo = useCallback(() => {
+    flushHistory();
     const idx = historyIdxRef.current;
     if (idx > 0) {
       setDoc(structuredClone(historyRef.current[idx - 1]));
+      historyIdxRef.current = idx - 1;
       setHistoryIdx(idx - 1);
     }
-  }, []);
+  }, [flushHistory]);
 
   const redo = useCallback(() => {
+    flushHistory();
     const idx = historyIdxRef.current;
     const h = historyRef.current;
     if (idx < h.length - 1) {
       setDoc(structuredClone(h[idx + 1]));
+      historyIdxRef.current = idx + 1;
       setHistoryIdx(idx + 1);
     }
-  }, []);
+  }, [flushHistory]);
 
   const updatePage = useCallback((pageId: string, elements: EditorElement[]) => {
     setDoc(d => {
@@ -51,7 +77,7 @@ export function useEditorState(initialDoc: DocumentData | null) {
     setDoc(d => {
       if (!d) return d;
       const nd = { ...d, pages: d.pages.map(p => ({ ...p, elements: p.elements.filter(e => e.id !== elId) })) };
-      pushHistory(nd);
+      pushHistory(nd, true);
       return nd;
     });
     setSelectedId(null);
@@ -63,7 +89,7 @@ export function useEditorState(initialDoc: DocumentData | null) {
       setDoc(d => {
         if (!d) return d;
         const nd = { ...d, pages: d.pages.map(p => ({ ...p, elements: p.elements.map(e => e.id === currentSelectedId ? { ...e, ...patch } : e) as EditorElement[] })) };
-        pushHistory(nd);
+        pushHistory(nd, true);
         return nd;
       });
       return currentSelectedId;
@@ -74,7 +100,7 @@ export function useEditorState(initialDoc: DocumentData | null) {
     doc, setDoc,
     activePage, setActivePage,
     selectedId, setSelectedId,
-    historyIdx, historyLength: history.length,
+    historyIdx, historyLength,
     undo, redo, pushHistory,
     updatePage, deleteElement, updateSelected
   };

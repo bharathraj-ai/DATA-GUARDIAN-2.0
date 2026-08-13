@@ -41,10 +41,16 @@ export default function LiveActivityModal({ token, topic, onClose }: LiveActivit
     useEffect(() => {
         let eventSource: EventSource | null = null;
         let isComponentMounted = true;
+        let reconnectTimeout: ReturnType<typeof setTimeout> | undefined;
 
         const connect = () => {
+            if (!isComponentMounted) return;
             setStatus('connecting');
             setErrorMsg(null);
+            if (eventSource) {
+                eventSource.close();
+                eventSource = null;
+            }
 
             eventSource = new EventSource(`/api/session-monitor?token=${token}`);
 
@@ -87,9 +93,9 @@ export default function LiveActivityModal({ token, topic, onClose }: LiveActivit
                     setStatus('error');
                     setErrorMsg('Lost connection to server. Automatically retrying...');
                     eventSource?.close();
-                    
-                    // Attempt reconnect after 5s
-                    setTimeout(() => {
+                    eventSource = null;
+                    if (reconnectTimeout) clearTimeout(reconnectTimeout);
+                    reconnectTimeout = setTimeout(() => {
                         if (isComponentMounted) connect();
                     }, 5000);
                 }
@@ -100,6 +106,7 @@ export default function LiveActivityModal({ token, topic, onClose }: LiveActivit
 
         return () => {
             isComponentMounted = false;
+            if (reconnectTimeout) clearTimeout(reconnectTimeout);
             if (eventSource) {
                 eventSource.close();
             }

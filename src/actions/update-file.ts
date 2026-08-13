@@ -10,6 +10,8 @@ export type UpdateFileResult = {
     success: boolean;
     error?: string;
     newVersion?: number;
+    currentVersion?: number;
+    conflict?: boolean;
 };
 
 const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB
@@ -75,6 +77,52 @@ export async function updateFile(
             return { success: false, error: 'Editing is locked for this file.' };
         }
 
+        // 6b. Distributed editing lock — Redis is source of truth (never trust client priority).
+        const { resolveLockActor } = await import('@/lib/collaboration/resolve-lock-actor');
+        const { assertActorHoldsEditLock, requestEditLock } = await import('@/lib/collaboration/edit-lock-service');
+        const { logEditLockAudit } = await import('@/lib/collaboration/edit-lock-audit');
+
+        const actor = resolveLockActor({
+            sessionId: authResult.context.sessionId,
+            effectiveEmail: authResult.context.effectiveEmail,
+            level: authResult.context.isOwner ? 1 : (authResult.context.vendorAccess?.level ?? 2),
+            isOwner: authResult.context.isOwner,
+            token,
+            ownerId: secureLink.ownerId,
+            vendors: secureLink.VendorAccess,
+            clientInstanceId: formData.get('editClientInstanceId')?.toString(),
+        });
+        if (!actor) {
+            return { success: false, error: 'Identity required for editing.' };
+        }
+
+        let lockCheck = await assertActorHoldsEditLock({ documentId: fileId, actor });
+        if (!lockCheck.ok && (lockCheck.reason === 'no_lock' || lockCheck.reason === 'lock_expired')) {
+            const acquired = await requestEditLock({ documentId: fileId, linkId: secureLink.id, actor });
+            if (acquired.status === 'acquired' || acquired.status === 'already_holder') {
+                lockCheck = { ok: true, lock: acquired.lock };
+            }
+        }
+        if (!lockCheck.ok) {
+            await logEditLockAudit('STALE_SESSION_WRITE_DENIED', secureLink.id, {
+                actorUserId: actor.userId,
+                targetUserId: lockCheck.lock?.userId,
+                documentId: fileId,
+                teamId: actor.teamId,
+                previousPriority: lockCheck.lock?.priority,
+                requesterPriority: actor.priority,
+                sessionId: actor.sessionId,
+                reason: lockCheck.reason,
+            });
+            const message =
+                lockCheck.reason === 'not_holder'
+                    ? 'Your editing session is no longer active. A higher-priority collaborator may have taken control.'
+                    : lockCheck.reason === 'lock_unavailable'
+                        ? 'Editing lock service unavailable. Try again shortly.'
+                        : 'You do not hold the editing lock for this document.';
+            return { success: false, error: message };
+        }
+
         // 7. Snapshot current version for rollback support (only if inline content exists)
         if (fileRecord.encryptedContent) {
             try {
@@ -103,42 +151,76 @@ export async function updateFile(
         const encryptedDek = encryptDek(dek);
         const newETag = crypto.randomUUID();
 
-        // 9. Atomic update with OCC — rejects stale writes
-        const result = await prisma.userFile.updateMany({
-            where: {
-                id: fileId,
-                version: expectedVersion, // Will be 0 rows if another user already saved
-            },
-            data: {
-                fileName: fileRecord.fileName, // Preserve original filename — do not trust client
-                fileType: trustedMimeType,
-                fileSize: uploadedFile.size,
-                encryptedContent,
-                iv,
-                authTag,
-                encryptedDek,
-                eTag: newETag,
-                version: { increment: 1 },
-            },
-        });
+        // 9. Atomic update with OCC.
+        // Redis edit lock is the writer gate. Client expectedVersion can lag behind
+        // our own autosave / access-request snapshot — use the server version, then
+        // retry once if a concurrent save from this same holder raced us.
+        const persist = async (occVersion: number) =>
+            prisma.userFile.updateMany({
+                where: { id: fileId, version: occVersion },
+                data: {
+                    fileName: fileRecord.fileName, // Preserve original filename — do not trust client
+                    fileType: trustedMimeType,
+                    fileSize: uploadedFile.size,
+                    encryptedContent,
+                    iv,
+                    authTag,
+                    encryptedDek,
+                    eTag: newETag,
+                    version: { increment: 1 },
+                },
+            });
+
+        let matchedVersion = fileRecord.version;
+        let result = await persist(matchedVersion);
 
         if (result.count === 0) {
+            const stillHeld = await assertActorHoldsEditLock({ documentId: fileId, actor });
+            if (!stillHeld.ok) {
+                return {
+                    success: false,
+                    error: stillHeld.reason === 'not_holder'
+                        ? 'Your editing session is no longer active. A higher-priority collaborator may have taken control.'
+                        : 'You do not hold the editing lock for this document.',
+                };
+            }
+            const fresh = await prisma.userFile.findUnique({
+                where: { id: fileId },
+                select: { version: true },
+            });
+            if (fresh && fresh.version !== matchedVersion) {
+                matchedVersion = fresh.version;
+                result = await persist(matchedVersion);
+            }
+        }
+
+        if (result.count === 0) {
+            const actual = await prisma.userFile.findUnique({
+                where: { id: fileId },
+                select: { version: true },
+            });
             return {
                 success: false,
+                conflict: true,
+                currentVersion: actual?.version,
                 error: 'Conflict: this file was modified by another user. Reload and try again.',
             };
         }
+
+        const newVersion = matchedVersion + 1;
 
         // 10. Immutable audit log
         await prisma.auditLog.create({
             data: {
                 action: 'VENDOR_EDITED_FILE',
                 linkId: secureLink.id,
+                ownerId: secureLink.ownerId,
                 reason: `File updated: ${fileRecord.fileName}`,
                 metadata: JSON.stringify({
                     fileId,
-                    previousVersion: fileRecord.version,
-                    newVersion: fileRecord.version + 1,
+                    previousVersion: matchedVersion,
+                    newVersion,
+                    clientExpectedVersion: expectedVersion,
                     oldSize: fileRecord.fileSize,
                     newSize: uploadedFile.size,
                     trustedMimeType,
@@ -147,9 +229,9 @@ export async function updateFile(
             },
         });
 
-        return { success: true, newVersion: fileRecord.version + 1 };
+        return { success: true, newVersion, currentVersion: newVersion };
     } catch (error) {
         console.error('updateFile error:', error);
-        return { success: false, error: error instanceof Error ? error.message : 'An unexpected error occurred while saving.' };
+        return { success: false, error: 'An unexpected error occurred while saving.' };
     }
 }

@@ -2,7 +2,7 @@
 
 import { prisma } from '@/lib/prisma';
 import { authorizeSecureLink } from '@/lib/linkAuthorization';
-import { loadUserFilesContentForLink } from '@/lib/security/resource-ownership';
+import { loadUserFilesContentForLink, gridFsIdForFile } from '@/lib/security/resource-ownership';
 import { decryptBuffer, decryptDek } from '@/lib/crypto';
 import { downloadFromMongo } from '@/lib/mongo/operations';
 import { sendCompletedWorkEmail, type FileAttachment } from '@/lib/email';
@@ -16,7 +16,7 @@ export type CompleteWorkResult = {
 export async function completeWork(token: string): Promise<CompleteWorkResult> {
     try {
         // 1. Authorize (Must have view capability at least)
-        const authResult = await authorizeSecureLink(token, 'view');
+        const authResult = await authorizeSecureLink(token, 'view', undefined, { includeDraft: false });
         if (!authResult.success) {
             return { success: false, error: authResult.error };
         }
@@ -27,7 +27,7 @@ export async function completeWork(token: string): Promise<CompleteWorkResult> {
         // Check if editing was enabled — only send files via email if editing was allowed
         const isEditingEnabled = (secureLink as any).allowEditing === true;
 
-        let attachments: FileAttachment[] = [];
+        const attachments: FileAttachment[] = [];
         let ownerEmail: string | null = null;
 
         if (isEditingEnabled) {
@@ -53,6 +53,7 @@ export async function completeWork(token: string): Promise<CompleteWorkResult> {
                     let buffer: Buffer | null = null;
 
                     const hasEncryption = file.iv && file.authTag;
+                    const gridFSId = gridFsIdForFile(file);
 
                     if (file.encryptedContent) {
                         // Inline encrypted content (latest draft) — decrypt it
@@ -66,33 +67,23 @@ export async function completeWork(token: string): Promise<CompleteWorkResult> {
                             dek
                         );
                         logger.info(`Decrypted inline file ${file.fileName}: ${buffer.length} bytes`);
-                    } else if ((file as any).mongoFileId) {
-                        // Mongo-backed file — download from GridFS
-                        const mongoFile = await prisma.mongoFile.findUnique({
-                            where: { id: (file as any).mongoFileId },
-                            select: { gridFSId: true, status: true },
-                        });
+                    } else if (gridFSId) {
+                        const downloadedBuffer = await downloadFromMongo(gridFSId, file.fileSize);
+                        logger.info(`Downloaded GridFS file ${file.fileName}: ${downloadedBuffer.length} bytes, hasEncryption=${!!hasEncryption}`);
 
-                        if (mongoFile) {
-                            const downloadedBuffer = await downloadFromMongo(mongoFile.gridFSId);
-                            logger.info(`Downloaded GridFS file ${file.fileName}: ${downloadedBuffer.length} bytes, hasEncryption=${!!hasEncryption}, status=${mongoFile.status}`);
-
-                            if (hasEncryption) {
-                                // Original upload was encrypted — decrypt it
-                                const dek = (file as any).encryptedDek ? decryptDek((file as any).encryptedDek) : undefined;
-                                buffer = decryptBuffer(
-                                    downloadedBuffer,
-                                    file.iv!,
-                                    file.authTag!,
-                                    dek
-                                );
-                            } else {
-                                // submitFinal uploads raw unencrypted to GridFS — use as-is
-                                buffer = downloadedBuffer;
-                            }
+                        if (hasEncryption) {
+                            const dek = (file as any).encryptedDek ? decryptDek((file as any).encryptedDek) : undefined;
+                            buffer = decryptBuffer(
+                                downloadedBuffer,
+                                file.iv!,
+                                file.authTag!,
+                                dek
+                            );
                         } else {
-                            logger.warn(`MongoFile record not found for ${file.fileName} (mongoFileId: ${(file as any).mongoFileId})`);
+                            buffer = downloadedBuffer;
                         }
+                    } else if ((file as any).mongoFileId) {
+                        logger.warn(`MongoFile record not found for ${file.fileName} (mongoFileId: ${(file as any).mongoFileId})`);
                     } else {
                         logger.warn(`File ${file.fileName} has no content (no encryptedContent, no mongoFileId)`);
                     }

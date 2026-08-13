@@ -4,13 +4,65 @@ import { prisma } from '@/lib/prisma';
 import { decryptBuffer, decryptDek } from '@/lib/crypto';
 import * as XLSX from 'xlsx';
 import { authorizeSecureLink } from '@/lib/linkAuthorization';
-import { checkUploadRateLimit, extractClientIP, formatRateLimitError } from '@/lib/rate-limit';
+import { checkDownloadRateLimit, extractClientIP, formatRateLimitError } from '@/lib/rate-limit';
 import { headers } from 'next/headers';
 import { downloadFromMongo } from '@/lib/mongo/operations';
+import { gridFsIdForFile } from '@/lib/security/resource-ownership';
+
+const PREVIEW_ROW_LIMIT = 10;
+
+function tryParseEditorWorkspace(buffer: Buffer): {
+    type?: string;
+    name?: string;
+    pages?: Array<{ elements?: Array<{ type?: string; rows?: unknown[][] }> }>;
+} | null {
+    try {
+        const text = buffer.toString('utf8').trim();
+        if (!text.startsWith('{')) return null;
+        const parsed = JSON.parse(text) as {
+            type?: string;
+            name?: string;
+            pages?: Array<{ elements?: Array<{ type?: string; rows?: unknown[][] }> }>;
+        };
+        if (parsed && typeof parsed === 'object' && Array.isArray(parsed.pages)) {
+            return parsed;
+        }
+    } catch {
+        /* not JSON workspace */
+    }
+    return null;
+}
+
+function cellPreviewValue(cell: unknown): string | number | boolean | '' {
+    if (cell === null || cell === undefined) return '';
+    if (typeof cell === 'object') {
+        const value = (cell as { value?: unknown }).value;
+        if (value === null || value === undefined) return '';
+        if (typeof value === 'object') return '';
+        return value as string | number | boolean;
+    }
+    return cell as string | number | boolean;
+}
+
+function rowsFromWorkspace(
+    workspace: NonNullable<ReturnType<typeof tryParseEditorWorkspace>>,
+    limit: number,
+): { rows: Array<Array<string | number | boolean | ''>>; total: number } {
+    const all: Array<Array<string | number | boolean | ''>> = [];
+    for (const page of workspace.pages || []) {
+        for (const el of page.elements || []) {
+            if (el.type !== 'table' || !Array.isArray(el.rows)) continue;
+            for (const row of el.rows) {
+                all.push((Array.isArray(row) ? row : []).map(cellPreviewValue));
+            }
+        }
+    }
+    return { rows: all.slice(0, limit), total: all.length };
+}
 
 export type FilePreviewResult = {
     success: boolean;
-    type?: 'image' | 'pdf' | 'spreadsheet' | 'text';
+    type?: 'image' | 'pdf' | 'spreadsheet' | 'text' | 'word';
     content?: any; // Base64 string or JSON array
     error?: string;
     // V2.1 Additions
@@ -39,7 +91,7 @@ export async function getFilePreview(token: string, fileId: string): Promise<Fil
 
         const requestHeaders = await headers();
         const clientIP = extractClientIP(requestHeaders);
-        const rateLimit = await checkUploadRateLimit(clientIP);
+        const rateLimit = await checkDownloadRateLimit(clientIP);
         if (!rateLimit.allowed) {
             return { success: false, error: formatRateLimitError(rateLimit) };
         }
@@ -69,18 +121,13 @@ export async function getFilePreview(token: string, fileId: string): Promise<Fil
                 return { success: false, error: 'Decryption failed' };
             }
         } else if ((fileRecord as any).mongoFileId) {
-            // FIX: Mongo GridFS fallback for files stored via streaming upload
             try {
-                const mongoFileRecord = await prisma.mongoFile.findUnique({
-                    where: { id: (fileRecord as any).mongoFileId, isDeleted: false },
-                    select: { gridFSId: true },
-                });
-
-                if (!mongoFileRecord) {
+                const gridFSId = gridFsIdForFile(fileRecord);
+                if (!gridFSId) {
                     return { success: false, error: 'File storage record not found' };
                 }
 
-                const rawBuffer = await downloadFromMongo(mongoFileRecord.gridFSId);
+                const rawBuffer = await downloadFromMongo(gridFSId, fileRecord.fileSize);
                 
                 if (fileRecord.iv && fileRecord.authTag) {
                     const dek = (fileRecord as any).encryptedDek ? decryptDek((fileRecord as any).encryptedDek) : undefined;
@@ -147,14 +194,56 @@ export async function getFilePreview(token: string, fileId: string): Promise<Fil
             };
         }
 
-        // C. Spreadsheet (Excel/CSV) -> V2.1: Limited to 10 rows
-        if (mime.includes('spreadsheet') || mime.includes('excel') || mime.includes('csv')) {
+        // C. Spreadsheet (Excel/CSV) — real xlsx OR editor JSON workspace drafts
+        const fileNameLower = (fileRecord.fileName || '').toLowerCase();
+        const mimeLowerEarly = (mime || '').toLowerCase();
+        const looksSpreadsheet =
+            mimeLowerEarly.includes('spreadsheet') ||
+            mimeLowerEarly.includes('excel') ||
+            mimeLowerEarly.includes('csv') ||
+            fileNameLower.endsWith('.xlsx') ||
+            fileNameLower.endsWith('.xls') ||
+            fileNameLower.endsWith('.csv');
+
+        const workspace = tryParseEditorWorkspace(buffer);
+        if (
+            workspace &&
+            (looksSpreadsheet ||
+                workspace.type === 'xlsx' ||
+                workspace.type === 'xls' ||
+                workspace.type === 'csv')
+        ) {
+            const { rows, total } = rowsFromWorkspace(workspace, PREVIEW_ROW_LIMIT);
+            const restricted = total > PREVIEW_ROW_LIMIT;
+            if (restricted) await logRestriction('excel_rows', total);
+            return {
+                success: true,
+                type: 'spreadsheet',
+                content: rows,
+                restricted,
+                restrictionType: restricted
+                    ? `Showing first ${PREVIEW_ROW_LIMIT} of ${total} rows`
+                    : undefined,
+                totalSize: total,
+            };
+        }
+
+        if (looksSpreadsheet) {
             const workbook = XLSX.read(buffer, { type: 'buffer' });
             const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-            const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1 }) as any[];
-
-            const PREVIEW_ROW_LIMIT = 10;  // V2.1: Reduced from 20 to 10
-            const totalRows = rows.length;
+            if (!firstSheet) {
+                return { success: false, error: 'Spreadsheet has no readable sheets' };
+            }
+            const decoded = firstSheet['!ref'] ? XLSX.utils.decode_range(firstSheet['!ref']) : null;
+            const totalRows = decoded ? decoded.e.r - decoded.s.r + 1 : 0;
+            if (decoded && totalRows > PREVIEW_ROW_LIMIT) {
+                firstSheet['!ref'] = XLSX.utils.encode_range({
+                    s: decoded.s,
+                    e: { r: decoded.s.r + PREVIEW_ROW_LIMIT - 1, c: decoded.e.c },
+                });
+            }
+            const rawRows = (XLSX.utils.sheet_to_json(firstSheet, { header: 1 }) as unknown[][]) || [];
+            const rows = rawRows.map((row) => (Array.isArray(row) ? row.map(cellPreviewValue) : []));
             const restricted = totalRows > PREVIEW_ROW_LIMIT;
             const previewRows = rows.slice(0, PREVIEW_ROW_LIMIT);
 
@@ -172,7 +261,41 @@ export async function getFilePreview(token: string, fileId: string): Promise<Fil
             };
         }
 
-        // D. Text -> V2.1: Limited to 500 chars
+        // D. Word / ODT -> HTML preview (read-only)
+        const fileName = fileNameLower;
+        const mimeLower = mimeLowerEarly || (mime || '').toLowerCase();
+        const isWord =
+            mimeLower.includes('wordprocessingml') ||
+            mimeLower.includes('msword') ||
+            mimeLower.includes('opendocument.text') ||
+            fileName.endsWith('.docx') ||
+            fileName.endsWith('.doc') ||
+            fileName.endsWith('.odt');
+
+        if (isWord) {
+            try {
+                const mammoth = await import('mammoth');
+                const result = await mammoth.convertToHtml({ buffer });
+                const html = (result.value || '').trim();
+                if (!html) {
+                    return { success: false, error: 'This Word file has no previewable text. Use Edit to open it.' };
+                }
+                return {
+                    success: true,
+                    type: 'word',
+                    content: html,
+                    restricted: false,
+                };
+            } catch (err) {
+                console.error('[PREVIEW] Word convert failed:', err);
+                return {
+                    success: false,
+                    error: 'Could not preview this Word document. Use Edit to open it.',
+                };
+            }
+        }
+
+        // E. Text -> V2.1: Limited to 500 chars
         if (mime.startsWith('text/')) {
             const fullText = buffer.toString('utf-8');
             const PREVIEW_CHAR_LIMIT = 500;  // V2.1: Reduced from 1000 to 500
@@ -197,7 +320,6 @@ export async function getFilePreview(token: string, fileId: string): Promise<Fil
 
     } catch (error) {
         console.error('Preview Error:', error);
-        const message = error instanceof Error ? error.message : 'Failed to open preview';
-        return { success: false, error: message };
+        return { success: false, error: 'Failed to open preview' };
     }
 }

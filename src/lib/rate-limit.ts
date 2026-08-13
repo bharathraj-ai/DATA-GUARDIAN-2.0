@@ -5,7 +5,9 @@
  * but still blocks unbounded abuse per instance). Pair with edge/WAF rate limits in production.
  */
 
+import crypto from 'crypto';
 import { logger } from '@/lib/logger';
+import { isRedisConfigured } from '@/lib/redis-helpers';
 
 const RATE_LIMITS = {
   OTP_VERIFY: {
@@ -21,8 +23,12 @@ const RATE_LIMITS = {
     WINDOW_SECONDS: 60,
   },
   UPLOAD_IP: {
-    MAX_ATTEMPTS: 20, // Strict limit on file uploads per IP
-    WINDOW_SECONDS: 3600, // Per hour
+    MAX_ATTEMPTS: 20,
+    WINDOW_SECONDS: 3600,
+  },
+  DOWNLOAD_IP: {
+    MAX_ATTEMPTS: 20,
+    WINDOW_SECONDS: 3600,
   },
   CHAT_IP: {
     MAX_ATTEMPTS: 60,
@@ -31,6 +37,10 @@ const RATE_LIMITS = {
   CHAT_TOKEN: {
     MAX_ATTEMPTS: 40,
     WINDOW_SECONDS: 60,
+  },
+  LOGIN_IP: {
+    MAX_ATTEMPTS: 20,
+    WINDOW_SECONDS: 15 * 60,
   },
 };
 
@@ -43,34 +53,30 @@ export interface RateLimitResult {
   usedMemoryFallback?: boolean;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let redisClient: any = null;
+const RATE_LIMIT_LUA = `
+local n = redis.call('INCR', KEYS[1])
+if n == 1 then
+  redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+local ttl = redis.call('TTL', KEYS[1])
+return {n, ttl}
+`;
+
+let redisClient: Awaited<typeof import('@/lib/redis')>['default'] | null = null;
 
 async function getRedis() {
   if (redisClient) return redisClient;
-
-  if (
-    !process.env.UPSTASH_REDIS_REST_URL ||
-    !process.env.UPSTASH_REDIS_REST_TOKEN ||
-    process.env.UPSTASH_REDIS_REST_URL.includes('your-redis')
-  ) {
-    return null;
-  }
+  if (!isRedisConfigured()) return null;
 
   try {
-    const { Redis } = await import('@upstash/redis');
-    redisClient = new Redis({
-      url: process.env.UPSTASH_REDIS_REST_URL,
-      token: process.env.UPSTASH_REDIS_REST_TOKEN,
-    });
+    const { default: redis } = await import('@/lib/redis');
+    redisClient = redis;
     return redisClient;
   } catch (error) {
     logger.error('Redis connection failed:', error);
     return null;
   }
 }
-
-// ─── In-memory fixed-window counter (per Node process) ─────────────────────
 
 type MemEntry = { count: number; windowStartMs: number };
 const memoryBuckets = new Map<string, MemEntry>();
@@ -109,6 +115,10 @@ function checkRateLimitMemory(key: string, limit: number, windowSeconds: number)
   };
 }
 
+function tokenBucketSuffix(token: string): string {
+  return crypto.createHash('sha256').update(token).digest('hex').slice(0, 24);
+}
+
 async function checkRateLimit(key: string, limit: number, windowSeconds: number): Promise<RateLimitResult> {
   const redis = await getRedis();
 
@@ -117,11 +127,17 @@ async function checkRateLimit(key: string, limit: number, windowSeconds: number)
   }
 
   try {
-    const current = await redis.incr(key);
-    if (current === 1) {
-      await redis.expire(key, windowSeconds);
+    const raw = await redis.eval(RATE_LIMIT_LUA, [key], [windowSeconds]) as unknown;
+    const pair = Array.isArray(raw) ? raw : [raw, windowSeconds];
+    const current = Number(pair[0]);
+    let ttl = Number(pair[1]);
+    if (!Number.isFinite(current)) {
+      return checkRateLimitMemory(`fb:${key}`, limit, windowSeconds);
     }
-    const ttl = await redis.ttl(key);
+    if (!Number.isFinite(ttl) || ttl < 0) {
+      ttl = windowSeconds;
+      await redis.expire(key, windowSeconds).catch(() => undefined);
+    }
     const resetAt = Date.now() + Math.max(0, ttl) * 1000;
     const remaining = Math.max(0, limit - current);
     const allowed = current <= limit;
@@ -149,7 +165,7 @@ export async function checkOTPRateLimit(ip: string): Promise<RateLimitResult> {
 
 export async function checkLinkRateLimit(token: string): Promise<RateLimitResult> {
   return checkRateLimit(
-    `ratelimit:link:${token.substring(0, 16)}`,
+    `ratelimit:link:${tokenBucketSuffix(token)}`,
     RATE_LIMITS.LINK_ACCESS.MAX_ATTEMPTS,
     RATE_LIMITS.LINK_ACCESS.WINDOW_SECONDS,
   );
@@ -173,6 +189,24 @@ export async function checkUploadRateLimit(ip: string): Promise<RateLimitResult>
   );
 }
 
+export async function checkLoginRateLimit(ip: string): Promise<RateLimitResult> {
+  const sanitizedIP = sanitizeIP(ip);
+  return checkRateLimit(
+    `ratelimit:login:${sanitizedIP}`,
+    RATE_LIMITS.LOGIN_IP.MAX_ATTEMPTS,
+    RATE_LIMITS.LOGIN_IP.WINDOW_SECONDS,
+  );
+}
+
+export async function checkDownloadRateLimit(ip: string): Promise<RateLimitResult> {
+  const sanitizedIP = sanitizeIP(ip);
+  return checkRateLimit(
+    `ratelimit:download:${sanitizedIP}`,
+    RATE_LIMITS.DOWNLOAD_IP.MAX_ATTEMPTS,
+    RATE_LIMITS.DOWNLOAD_IP.WINDOW_SECONDS,
+  );
+}
+
 /** Secure-link chat: per-IP + per-token throttles (fail-closed). */
 export async function checkSecureChatRateLimits(ip: string, token: string): Promise<RateLimitResult> {
   const ipRes = await checkRateLimit(
@@ -182,7 +216,7 @@ export async function checkSecureChatRateLimits(ip: string, token: string): Prom
   );
   if (!ipRes.allowed) return ipRes;
   return checkRateLimit(
-    `ratelimit:chat:tok:${token.substring(0, 24)}`,
+    `ratelimit:chat:tok:${tokenBucketSuffix(token)}`,
     RATE_LIMITS.CHAT_TOKEN.MAX_ATTEMPTS,
     RATE_LIMITS.CHAT_TOKEN.WINDOW_SECONDS,
   );

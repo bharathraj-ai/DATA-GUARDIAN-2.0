@@ -6,6 +6,8 @@ import { downloadFromMongo } from '@/lib/mongo/operations';
 import { extractRequestInfo } from '@/lib/security/auditLog';
 import { logger } from '@/lib/logger';
 import { incrementAndCheckLimit } from '@/lib/limits';
+import { checkDownloadRateLimit, checkLinkRateLimit, extractClientIP } from '@/lib/rate-limit';
+import { gridFsIdForFile } from '@/lib/security/resource-ownership';
 
 export async function GET(
     request: NextRequest,
@@ -13,6 +15,15 @@ export async function GET(
 ) {
     try {
         const { token, fileId } = await params;
+
+        const ip = extractClientIP(request.headers);
+        const [downloadLimit, linkLimit] = await Promise.all([
+            checkDownloadRateLimit(ip),
+            checkLinkRateLimit(token),
+        ]);
+        if (!downloadLimit.allowed || !linkLimit.allowed) {
+            return NextResponse.json({ error: 'Too many requests' }, { status: 429 });
+        }
 
         // ── 1. Authorization Check ─────────────────────────────────
         const authResult = await authorizeSecureLink(token, 'download', fileId);
@@ -79,19 +90,15 @@ export async function GET(
             }
         } else if (fileRecord.mongoFileId) {
             try {
-                const mongoFileRecord = await prisma.mongoFile.findUnique({
-                    where: { id: fileRecord.mongoFileId, isDeleted: false },
-                    select: { gridFSId: true, mimeType: true },
-                });
-
-                if (!mongoFileRecord) {
+                const gridFSId = gridFsIdForFile(fileRecord);
+                if (!gridFSId) {
                     return NextResponse.json(
                         { error: 'Storage record not found' },
                         { status: 404 }
                     );
                 }
 
-                const downloadedBuffer = await downloadFromMongo(mongoFileRecord.gridFSId);
+                const downloadedBuffer = await downloadFromMongo(gridFSId, fileRecord.fileSize);
 
                 if (fileRecord.iv && fileRecord.authTag) {
                     const dek = fileRecord.encryptedDek ? decryptDek(fileRecord.encryptedDek) : undefined;

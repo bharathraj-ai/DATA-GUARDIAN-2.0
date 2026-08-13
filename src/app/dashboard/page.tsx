@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { auth } from '@/lib/auth';
-import { prisma } from '@/lib/prisma';
+import { getDbUserRole } from '@/lib/security/roles';
 import { dashboardPathForRole, getOnboardingStep } from '@/lib/onboarding';
 
 /**
@@ -14,10 +14,7 @@ export default async function DashboardPage() {
         redirect('/auth/signin?callbackUrl=/dashboard');
     }
 
-    const dbUser = await prisma.user.findUnique({
-        where: { id: session.user.id },
-        select: { role: true, roleSelected: true },
-    });
+    const dbUser = await getDbUserRole(session.user.id);
 
     if (!dbUser) {
         redirect('/auth/signin?callbackUrl=/dashboard');

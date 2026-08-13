@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, memo } from 'react';
+import React, { useEffect, memo } from 'react';
 import { useCollaborationStore } from '@/store/useCollaborationStore';
 
 /**
@@ -10,22 +10,17 @@ import { useCollaborationStore } from '@/store/useCollaborationStore';
  */
 export const SessionTimer = memo(function SessionTimer() {
     const remainingSeconds = useCollaborationStore((s) => s.remainingSeconds);
-    const updateRemainingSeconds = useCollaborationStore((s) => s.updateRemainingSeconds);
-    const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const hasTime = remainingSeconds > 0;
 
-    // Local countdown: ticks down every second between server heartbeats
     useEffect(() => {
-        if (tickRef.current) clearInterval(tickRef.current);
-        if (remainingSeconds <= 0) return;
-
-        tickRef.current = setInterval(() => {
-            updateRemainingSeconds(Math.max(0, remainingSeconds - 1));
+        if (!hasTime) return;
+        const id = setInterval(() => {
+            const current = useCollaborationStore.getState().remainingSeconds;
+            if (current <= 0) return;
+            useCollaborationStore.getState().updateRemainingSeconds(Math.max(0, current - 1));
         }, 1000);
-
-        return () => {
-            if (tickRef.current) clearInterval(tickRef.current);
-        };
-    }, [remainingSeconds]); // eslint-disable-line react-hooks/exhaustive-deps
+        return () => clearInterval(id);
+    }, [hasTime]);
 
     const mins = Math.floor(remainingSeconds / 60);
     const secs = remainingSeconds % 60;

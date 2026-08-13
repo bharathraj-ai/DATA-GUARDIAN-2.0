@@ -1,7 +1,7 @@
 import { cookies } from 'next/headers';
 import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
-import { tryCheckRevoked, tryValidateSession } from '@/lib/redis-helpers';
+import { trySseAccessCheck } from '@/lib/redis-helpers';
 import { decryptData } from '@/lib/crypto';
 import { Prisma } from '@prisma/client';
 import { verifyShareSession } from '@/lib/share-session';
@@ -44,6 +44,7 @@ export type SecureLinkWithRelations = Prisma.SecureLinkGetPayload<{
     maxDownloads: true,
     ownerId: true,
     User: { select: { id: true, email: true, name: true } },
+    UserData: { select: { encryptedData: true } },
     VendorAccess: {
       select: {
         id: true,
@@ -121,13 +122,15 @@ export async function authorizeSecureLink(
   token: string,
   action: 'view' | 'preview' | 'edit' | 'download' | 'comment' = 'view',
   fileId?: string,
-  options?: { lite?: boolean },
+  options?: { lite?: boolean; includeDraft?: boolean; includeUserData?: boolean },
 ): Promise<AuthorizationResult> {
   if (!token) {
     return { success: false, status: 400, error: 'Missing access token' };
   }
 
   const lite = Boolean(options?.lite);
+  const includeDraft = options?.includeDraft ?? (action === 'view' && !lite);
+  const includeUserData = Boolean(options?.includeUserData);
   // File metadata for view/edit/download; skip on lite (break) paths
   const needsFiles =
     !lite &&
@@ -147,16 +150,12 @@ export async function authorizeSecureLink(
   const signedVendorEmail = normalizeEmail(verified.vendorEmail);
 
   try {
-    // Optional Redis kill-switch cache (null = use DB below)
-    const revoked = await tryCheckRevoked(token);
-    if (revoked === true) {
+    const access = await trySseAccessCheck(token, sessionId);
+    if (access === 'revoked') {
       console.warn('[SECURITY] Access blocked: token confirmed revoked in Redis cache');
       return { success: false, status: 403, error: 'Forbidden: Access revoked' };
     }
-
-    // Optional Redis session cache (null = signed cookie is enough)
-    const validSession = await tryValidateSession(token, sessionId);
-    if (validSession === false) {
+    if (access === 'invalid') {
       console.warn('[SECURITY] Access blocked: session explicitly invalid in Redis cache');
       return { success: false, status: 401, error: 'Unauthorized: Session invalid or expired' };
     }
@@ -196,6 +195,9 @@ export async function authorizeSecureLink(
             maxViews: true,
             maxDownloads: true,
             User: { select: { id: true, email: true, name: true } },
+            ...(includeUserData
+              ? { UserData: { select: { encryptedData: true } } }
+              : {}),
           }),
       VendorAccess: {
         select: {
@@ -209,7 +211,7 @@ export async function authorizeSecureLink(
           breaksUsed: true,
           allowedBreaks: true,
           draftVersion: true,
-          ...(action === 'view' && !lite
+          ...(includeDraft
             ? { lastSavedWork: true, resumePoint: true }
             : {}),
         },
