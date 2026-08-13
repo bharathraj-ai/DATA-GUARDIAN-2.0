@@ -24,7 +24,8 @@ import {
     FileText,
     X,
     ChevronDown,
-    ChevronUp
+    ChevronUp,
+    Search
 } from 'lucide-react';
 
 type ExpiryMode = 'time' | 'days' | 'months';
@@ -80,9 +81,25 @@ export default function CreateLinkClient({ initialVendors, hasActiveLink }: Crea
     const [sharingMode, setSharingMode] = useState<'individual' | 'group'>('individual');
     const [selectedVendors, setSelectedVendors] = useState<{email: string, level: number}[]>([]);
     const [isVendorDropdownOpen, setIsVendorDropdownOpen] = useState(false);
+    const [vendorSearch, setVendorSearch] = useState('');
     
     // Drag and Drop state
     const [isDragging, setIsDragging] = useState(false);
+
+    const filteredVendors = vendors.filter((vendor) => {
+        const q = vendorSearch.trim().toLowerCase();
+        if (!q) return true;
+        const name = (vendor.name || '').toLowerCase();
+        const email = vendor.email.toLowerCase();
+        return name.includes(q) || email.includes(q);
+    });
+
+    const toggleVendorDropdown = () => {
+        setIsVendorDropdownOpen((open) => {
+            if (open) setVendorSearch('');
+            return !open;
+        });
+    };
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
         const value = e.target.type === 'checkbox' ? (e.target as HTMLInputElement).checked : e.target.value;
@@ -425,7 +442,10 @@ export default function CreateLinkClient({ initialVendors, hasActiveLink }: Crea
                             <div className={styles.modeSelection}>
                                 <div 
                                     className={`${styles.modeCard} ${sharingMode === 'individual' ? styles.modeCardActive : ''}`}
-                                    onClick={() => setSharingMode('individual')}
+                                    onClick={() => {
+                                        setSharingMode('individual');
+                                        setVendorSearch('');
+                                    }}
                                 >
                                     <div className={styles.radioCircle}>
                                         <div className={styles.radioInner}></div>
@@ -438,7 +458,10 @@ export default function CreateLinkClient({ initialVendors, hasActiveLink }: Crea
                                 </div>
                                 <div 
                                     className={`${styles.modeCard} ${sharingMode === 'group' ? styles.modeCardActive : ''}`}
-                                    onClick={() => setSharingMode('group')}
+                                    onClick={() => {
+                                        setSharingMode('group');
+                                        setVendorSearch('');
+                                    }}
                                 >
                                     <div className={styles.radioCircle}>
                                         <div className={styles.radioInner}></div>
@@ -458,7 +481,7 @@ export default function CreateLinkClient({ initialVendors, hasActiveLink }: Crea
                             </label>
 
                             <div 
-                                onClick={() => setIsVendorDropdownOpen(!isVendorDropdownOpen)}
+                                onClick={toggleVendorDropdown}
                                 style={{ 
                                     padding: '12px 16px', 
                                     border: '1px solid #d1d5db', 
@@ -479,10 +502,28 @@ export default function CreateLinkClient({ initialVendors, hasActiveLink }: Crea
                             </div>
 
                             {isVendorDropdownOpen && (
-                                <div className={styles.vendorList} style={{ marginTop: '8px', border: '1px solid #e5e7eb', borderRadius: '6px', maxHeight: '250px', overflowY: 'auto' }}>
+                                <div className={styles.vendorList} style={{ marginTop: '8px', border: '1px solid #e5e7eb', borderRadius: '6px', maxHeight: '280px', overflowY: 'auto' }}>
+                                    <div
+                                        className={styles.vendorSearch}
+                                        onClick={(e) => e.stopPropagation()}
+                                    >
+                                        <Search size={16} color="#6b7280" aria-hidden="true" />
+                                        <input
+                                            type="search"
+                                            value={vendorSearch}
+                                            onChange={(e) => setVendorSearch(e.target.value)}
+                                            placeholder="Search by name or email..."
+                                            aria-label="Search vendors"
+                                            autoFocus
+                                        />
+                                    </div>
                                     {vendors.length === 0 ? (
                                         <p style={{ color: '#6b7280', textAlign: 'center', margin: '20px 0' }}>No vendors available</p>
-                                    ) : vendors.map((vendor) => {
+                                    ) : filteredVendors.length === 0 ? (
+                                        <p style={{ color: '#6b7280', textAlign: 'center', margin: '20px 0', fontSize: '0.875rem' }}>
+                                            No vendors match “{vendorSearch.trim()}”
+                                        </p>
+                                    ) : filteredVendors.map((vendor) => {
                                         const isSelected = sharingMode === 'individual' 
                                             ? formData.vendorEmail === vendor.email 
                                             : selectedVendors.some(v => v.email === vendor.email);
@@ -496,7 +537,8 @@ export default function CreateLinkClient({ initialVendors, hasActiveLink }: Crea
                                                         onChange={(e) => {
                                                             if (sharingMode === 'individual') {
                                                                 setFormData({ ...formData, vendorEmail: vendor.email, vendorName: vendor.name ?? undefined });
-                                                                setIsVendorDropdownOpen(false); // Close on individual select
+                                                                setIsVendorDropdownOpen(false);
+                                                                setVendorSearch('');
                                                             } else {
                                                                 if (e.target.checked) {
                                                                     setSelectedVendors([...selectedVendors, { email: vendor.email, level: 2 }]);

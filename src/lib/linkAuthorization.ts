@@ -56,6 +56,8 @@ export type SecureLinkWithRelations = Prisma.SecureLinkGetPayload<{
         breaksUsed: true,
         allowedBreaks: true,
         draftVersion: true,
+        lastSavedWork: true,
+        resumePoint: true,
       },
     },
     LinkAccess: {
@@ -207,6 +209,9 @@ export async function authorizeSecureLink(
           breaksUsed: true,
           allowedBreaks: true,
           draftVersion: true,
+          ...(action === 'view' && !lite
+            ? { lastSavedWork: true, resumePoint: true }
+            : {}),
         },
       },
       LinkAccess: {

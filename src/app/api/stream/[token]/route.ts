@@ -249,8 +249,8 @@ export async function GET(
                 }
             };
 
-            // Heartbeat interval - 3 seconds for near-instant kill switch (<100ms after revocation)
-            // This frequent polling ensures revocation is detected within 3 seconds maximum
+            // Heartbeat: Redis every 3s (kill-switch). Postgres every 5 ticks (~15s)
+            // so the stream does not exhaust the Neon pool during OTP / page loads.
             const heartbeatInterval = setInterval(async () => {
                 if (isStreamClosed) {
                     clearInterval(heartbeatInterval);
@@ -275,10 +275,8 @@ export async function GET(
                         await logSessionEnd('session_invalidated');
                         return;
                     }
-                    // Authoritative DB revoke/expiry EVERY heartbeat (≤3s) so kill-switch
-                    // works within 3s even when Redis is absent or stale.
                     heartbeatTick += 1;
-                    const mustReconcileDb = true;
+                    const mustReconcileDb = heartbeatTick === 1 || heartbeatTick % 5 === 0;
                     let link: { id: string; isRevoked: boolean; expiresAt: Date } | null = {
                         id: cachedLinkId,
                         isRevoked: false,
@@ -314,6 +312,15 @@ export async function GET(
                         safeClose();
                         await logSessionEnd('expired');
                         executeSingleLinkCleanup(token).catch(() => { });
+                        return;
+                    }
+
+                    if (!mustReconcileDb) {
+                        safeEnqueue(encoder.encode(`data: ${JSON.stringify({
+                            type: 'heartbeat',
+                            remainingSeconds: Math.min(ttl, dbRemainingSeconds),
+                            timestamp: Date.now(),
+                        })}\n\n`));
                         return;
                     }
 

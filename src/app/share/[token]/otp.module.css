@@ -12,6 +12,519 @@
     #f8fafc;
 }
 
+.pageSignin {
+  align-items: center;
+  background:
+    radial-gradient(680px 300px at 50% 0%, rgba(14, 165, 233, 0.08), transparent 65%),
+    #f4f7fb;
+}
+
+.signinCard {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 420px;
+  min-height: 540px;
+  padding: 52px 36px 44px;
+  border-radius: 28px;
+  background: linear-gradient(180deg, #eef7fd 0%, #dceefb 100%);
+  border: 1px solid #7dd3fc;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 24px 48px rgba(2, 132, 199, 0.2);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  animation: rise 0.45s ease both;
+}
+
+.signinTitle {
+  margin: 0 0 12px;
+  font-size: clamp(26px, 5vw, 32px);
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  line-height: 1.1;
+  color: #0f172a;
+}
+
+.signinSub {
+  margin: 0 0 36px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: #64748b;
+}
+
+/* ── Denied / expired gate ── */
+.gateCard {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 420px;
+  min-height: 540px;
+  padding: 48px 36px 40px;
+  border-radius: 28px;
+  background: linear-gradient(180deg, #eef7fd 0%, #dceefb 100%);
+  border: 1px solid #7dd3fc;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 24px 48px rgba(2, 132, 199, 0.2);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  animation: rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+  overflow: hidden;
+}
+
+.gate_ash {
+  background: linear-gradient(180deg, #eef7fd 0%, #dceefb 100%);
+  border-color: #7dd3fc;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 24px 48px rgba(2, 132, 199, 0.2);
+}
+
+.gate_ash .kicker { color: #0284c7; }
+
+.gate_ash .deadCore {
+  background: radial-gradient(circle at 35% 30%, #ffffff, #e0f2fe 55%, #bae6fd);
+  border-color: #38bdf8;
+  color: #0284c7;
+  box-shadow: 0 10px 24px rgba(2, 132, 199, 0.22);
+}
+
+.gate_ash .deadRing { border-color: #38bdf8; }
+
+.gate_ash .deadCrack {
+  border-top-color: #0284c7;
+  border-right-color: #0ea5e9;
+}
+
+.gate_ash .deadRipple { border-color: rgba(14, 165, 233, 0.4); }
+
+.gate_ash .deadAsh { background: #38bdf8; }
+
+.gate_hot {
+  background: linear-gradient(180deg, #fff5f5 0%, #fee2e2 100%);
+  border-color: #fca5a5;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 24px 48px rgba(220, 38, 38, 0.14);
+}
+
+.gate_hot .kicker { color: #dc2626; }
+
+.gate_cool {
+  /* default blue from .gateCard */
+}
+
+.deadSeal {
+  position: relative;
+  width: 112px;
+  height: 112px;
+  margin: 8px auto 28px;
+  display: grid;
+  place-items: center;
+}
+
+.deadCore {
+  position: relative;
+  z-index: 3;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(circle at 35% 30%, #ffffff, #e2e8f0 60%, #cbd5e1);
+  border: 1.5px solid #94a3b8;
+  color: #475569;
+  box-shadow: 0 10px 24px rgba(71, 85, 105, 0.2);
+  animation: deadBreath 2.4s ease-in-out infinite;
+}
+
+.gate_hot .deadCore {
+  background: radial-gradient(circle at 35% 30%, #ffffff, #fecaca 55%, #fca5a5);
+  border-color: #f87171;
+  color: #dc2626;
+  box-shadow: 0 10px 24px rgba(220, 38, 38, 0.2);
+}
+
+.gate_cool .deadCore {
+  background: radial-gradient(circle at 35% 30%, #ffffff, #e0f2fe 55%, #bae6fd);
+  border-color: #38bdf8;
+  color: #0284c7;
+  box-shadow: 0 10px 24px rgba(2, 132, 199, 0.22);
+}
+
+.deadRing {
+  position: absolute;
+  inset: 8px;
+  border-radius: 50%;
+  border: 2px dashed #94a3b8;
+  opacity: 0.7;
+  animation: deadSpin 14s linear infinite;
+}
+
+.gate_hot .deadRing { border-color: #f87171; }
+.gate_cool .deadRing { border-color: #38bdf8; }
+
+.deadCrack {
+  position: absolute;
+  z-index: 2;
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: #64748b;
+  border-right-color: #64748b;
+  clip-path: polygon(0 0, 100% 0, 100% 55%, 48% 48%, 0 100%);
+  opacity: 0.85;
+  animation: crackIn 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.gate_hot .deadCrack {
+  border-top-color: #dc2626;
+  border-right-color: #ef4444;
+}
+
+.gate_cool .deadCrack {
+  border-top-color: #0284c7;
+  border-right-color: #0ea5e9;
+}
+
+.deadRipple {
+  position: absolute;
+  inset: 4px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(100, 116, 139, 0.35);
+  opacity: 0;
+  animation: deadPulse 2.2s ease-out infinite;
+}
+
+.deadRipple:nth-child(2) {
+  animation-delay: 1.1s;
+}
+
+.gate_hot .deadRipple { border-color: rgba(239, 68, 68, 0.4); }
+.gate_cool .deadRipple { border-color: rgba(14, 165, 233, 0.4); }
+
+.deadAsh {
+  --i: 0;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  margin: -2px 0 0 -2px;
+  border-radius: 50%;
+  background: #94a3b8;
+  opacity: 0;
+  animation: ashFall 2.6s ease-in infinite;
+  animation-delay: calc(var(--i) * 0.22s);
+}
+
+.gate_hot .deadAsh { background: #f87171; }
+.gate_cool .deadAsh { background: #38bdf8; }
+
+.gateWarn {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: -12px 0 24px;
+  padding: 14px 16px;
+  text-align: left;
+  border-radius: 14px;
+  background: rgba(254, 226, 226, 0.75);
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+}
+
+.gateWarn svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.gateWarn strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+
+.gateWarn p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #dc2626;
+}
+
+.gateHome {
+  appearance: none;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px 18px;
+  border-radius: 14px;
+  border: 0;
+  background: #0284c7;
+  color: #ffffff;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    transform 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.28s ease,
+    background 0.2s ease;
+}
+
+.gateHome:hover {
+  transform: translateY(-4px);
+  background: #0369a1;
+  box-shadow:
+    0 18px 36px rgba(2, 132, 199, 0.22),
+    0 8px 20px rgba(14, 165, 233, 0.28);
+}
+
+.gate_hot .gateHome {
+  background: #dc2626;
+}
+
+.gate_hot .gateHome:hover {
+  background: #b91c1c;
+  box-shadow:
+    0 18px 36px rgba(220, 38, 38, 0.22),
+    0 8px 20px rgba(239, 68, 68, 0.28);
+}
+
+.gateCard .trust {
+  width: 100%;
+  margin-top: 28px;
+}
+
+.gateCard .signinSub {
+  margin-bottom: 28px;
+  max-width: 32ch;
+}
+
+.gate_open {
+  background: linear-gradient(180deg, #eef7fd 0%, #dceefb 100%);
+  border-color: #7dd3fc;
+}
+
+.openSeal {
+  position: relative;
+  width: 128px;
+  height: 128px;
+  margin: 8px auto 28px;
+  display: grid;
+  place-items: center;
+}
+
+.openCore {
+  position: relative;
+  z-index: 4;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #ffffff;
+  background:
+    radial-gradient(circle at 35% 28%, #7dd3fc, #0284c7 58%, #0369a1);
+  border: 2px solid #bae6fd;
+  box-shadow:
+    0 0 0 6px rgba(14, 165, 233, 0.14),
+    0 14px 32px rgba(2, 132, 199, 0.35);
+  animation: openCoreIn 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.openCore svg {
+  width: 28px;
+  height: 28px;
+}
+
+.openCheck {
+  stroke-dasharray: 28;
+  stroke-dashoffset: 28;
+  animation: openDraw 0.55s ease 0.35s forwards;
+}
+
+.openHalo {
+  position: absolute;
+  inset: 18px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(56, 189, 248, 0.35), transparent 70%);
+  animation: openHaloPulse 1.6s ease-in-out infinite;
+}
+
+.openRing {
+  position: absolute;
+  inset: 6px;
+  border-radius: 50%;
+  border: 2px dashed #38bdf8;
+  animation: deadSpin 10s linear infinite;
+}
+
+.openRipple {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1.5px solid rgba(14, 165, 233, 0.45);
+  opacity: 0;
+  animation: openRippleOut 1.8s ease-out infinite;
+}
+
+.openRipple:nth-child(2) { animation-delay: 0.55s; }
+.openRipple:nth-child(3) { animation-delay: 1.1s; }
+
+.openSat {
+  --i: 0;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  border-radius: 50%;
+  background: #0ea5e9;
+  border: 1.5px solid #0284c7;
+  box-shadow: 0 0 12px rgba(14, 165, 233, 0.8);
+  transform: rotate(calc(var(--i) * 60deg)) translateY(-42px) scale(0);
+  animation: openSatIn 0.5s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation-delay: calc(0.15s + var(--i) * 70ms);
+}
+
+.openSpark {
+  --i: 0;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 50%;
+  background: #38bdf8;
+  opacity: 0;
+  animation: openSparkFly 1.1s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(0.4s + var(--i) * 45ms);
+}
+
+.openBar {
+  width: 100%;
+  height: 4px;
+  margin: 4px 0 8px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+
+.openBarFill {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #38bdf8, #0284c7);
+  box-shadow: 0 0 12px rgba(14, 165, 233, 0.55);
+  animation: openBarRun 1.5s cubic-bezier(0.22, 1, 0.36, 1) 0.2s forwards;
+}
+
+.gate_open .signinSub {
+  margin-bottom: 20px;
+}
+
+.google {
+  appearance: none;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 16px 18px;
+  border-radius: 14px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #0f172a;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+  transition:
+    transform 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.28s ease,
+    border-color 0.28s ease;
+}
+
+.google:hover {
+  transform: translateY(-4px);
+  border-color: #38bdf8;
+  box-shadow:
+    0 18px 36px rgba(2, 132, 199, 0.18),
+    0 8px 20px rgba(14, 165, 233, 0.2);
+}
+
+.trust {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 32px;
+  padding-top: 28px;
+  border-top: 1px solid rgba(2, 132, 199, 0.18);
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.trust svg {
+  color: #0284c7;
+  flex-shrink: 0;
+}
+
+.signinFoot {
+  margin-top: 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  transition:
+    transform 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.28s ease,
+    border-color 0.28s ease;
+}
+
+.back:hover {
+  transform: translateY(-3px);
+  border-color: #38bdf8;
+  box-shadow: 0 12px 24px rgba(2, 132, 199, 0.14);
+}
+
+.policy {
+  margin: 0;
+  font-size: 11px;
+  color: #94a3b8;
+  line-height: 1.4;
+}
+
 .wash {
   position: absolute;
   inset: 0;
@@ -113,7 +626,7 @@
 }
 
 .sent {
-  margin: 0 0 12px;
+  margin: 0 0 16px;
   font-size: 13px;
   color: #475569;
   text-align: center;
@@ -125,62 +638,325 @@
   word-break: break-all;
 }
 
-.track {
+/* ── Vault OTP entry ── */
+.vault {
   position: relative;
-  display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  gap: 0;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 16px;
+  padding: 18px 14px 14px;
+  border-radius: 22px;
+  background:
+    radial-gradient(120% 80% at 50% 0%, rgba(14, 165, 233, 0.1), transparent 55%),
+    #f8fbff;
+  border: 1px solid #bae6fd;
   overflow: hidden;
 }
 
-.track.checking .scan {
-  animation: scanRun 1.05s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+.sealOrb {
+  --filled: 0;
+  position: relative;
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 18px;
+  display: grid;
+  place-items: center;
 }
 
-.track.bad {
+.sealOrb::after {
+  content: '';
+  position: absolute;
+  inset: 2px;
+  border-radius: 50%;
+  border: 1.5px dashed transparent;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+
+.vaultChecking .sealOrb::after {
+  opacity: 1;
+  border-color: #38bdf8;
+  animation: orbitSpin 1.2s linear infinite;
+}
+
+.orbCore {
+  position: relative;
+  z-index: 2;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: grid;
+  place-content: center;
+  grid-auto-flow: column;
+  align-items: baseline;
+  gap: 1px;
+  background:
+    radial-gradient(circle at 35% 30%, #ffffff, #e0f2fe 55%, #bae6fd);
+  border: 1.5px solid #7dd3fc;
+  box-shadow:
+    0 0 0 4px rgba(14, 165, 233, 0.08),
+    0 8px 20px rgba(2, 132, 199, 0.18);
+  transition:
+    transform 0.35s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.35s ease,
+    border-color 0.25s ease;
+}
+
+.orbCount {
+  font-size: 15px;
+  font-weight: 800;
+  color: #0369a1;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.orbOf {
+  font-size: 10px;
+  font-weight: 700;
+  color: #64748b;
+  line-height: 1;
+}
+
+.orbRipple {
+  position: absolute;
+  inset: 8px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(14, 165, 233, 0.35);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.orbRipple:nth-child(2) {
+  animation-delay: 0.75s;
+}
+
+.vaultReady .orbRipple,
+.vaultChecking .orbRipple {
+  animation: orbPulse 1.5s ease-out infinite;
+}
+
+.vaultReady .orbCore {
+  border-color: #0ea5e9;
+  box-shadow:
+    0 0 0 5px rgba(14, 165, 233, 0.14),
+    0 10px 24px rgba(2, 132, 199, 0.28);
+  animation: orbBreath 1.4s ease-in-out infinite;
+}
+
+.vaultChecking .orbCore {
+  border-color: #0284c7;
+  box-shadow:
+    0 0 0 5px rgba(14, 165, 233, 0.18),
+    0 10px 24px rgba(2, 132, 199, 0.3);
+  animation: orbBreath 0.9s ease-in-out infinite;
+}
+
+.vaultBad .orbCore {
   border-color: #fca5a5;
-  animation: kick 0.42s ease;
+  background: radial-gradient(circle at 35% 30%, #ffffff, #fee2e2 60%, #fecaca);
+  box-shadow: 0 0 0 4px rgba(248, 113, 113, 0.12);
 }
 
-.slot {
-  appearance: none;
+.orbSat {
+  --i: 0;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  margin: -4px 0 0 -4px;
+  border-radius: 50%;
+  background: #cbd5e1;
+  border: 1.5px solid #e2e8f0;
+  transform: rotate(calc(var(--i) * 60deg)) translateY(-30px);
+  transition:
+    background 0.25s ease,
+    border-color 0.25s ease,
+    box-shadow 0.25s ease,
+    transform 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.orbSatOn {
+  background: #0ea5e9;
+  border-color: #0284c7;
+  box-shadow: 0 0 10px rgba(14, 165, 233, 0.7);
+  transform: rotate(calc(var(--i) * 60deg)) translateY(-30px) scale(1.15);
+  animation: satPop 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.vaultChecking .orbSatOn {
+  animation: satOrbit 1.2s linear infinite;
+  animation-delay: calc(var(--i) * -0.2s);
+}
+
+.cells {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+  transition:
+    opacity 0.35s ease,
+    max-height 0.35s ease,
+    margin 0.35s ease,
+    transform 0.35s ease;
+  max-height: 120px;
+  opacity: 1;
+}
+
+.cellsHidden {
+  opacity: 0;
+  max-height: 0;
+  margin: 0;
+  transform: translateY(-6px) scale(0.98);
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.cell {
+  --i: 0;
+  position: relative;
+  aspect-ratio: 1;
+  min-height: 52px;
+  border-radius: 16px;
+  background: #ffffff;
+  border: 1px solid #dbeafe;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  display: grid;
+  place-items: center;
+  cursor: text;
+  animation: cellIn 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(var(--i) * 45ms);
+  transition:
+    border-color 0.25s ease,
+    background 0.25s ease,
+    transform 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.28s ease;
+}
+
+.cellRing {
+  position: absolute;
+  inset: -3px;
+  border-radius: 18px;
+  border: 1.5px dashed transparent;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+
+.cellInput {
+  position: absolute;
+  inset: 0;
   width: 100%;
-  height: 64px;
+  height: 100%;
+  opacity: 0;
   border: 0;
-  border-right: 1px solid #e2e8f0;
-  background: transparent;
-  text-align: center;
+  margin: 0;
+  padding: 0;
+  cursor: text;
+  z-index: 2;
+}
+
+.cellGhost {
+  font-size: 22px;
+  font-weight: 700;
+  color: #cbd5e1;
+  line-height: 1;
+  user-select: none;
+}
+
+.cellDigit {
   font-size: 22px;
   font-weight: 800;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.04em;
   color: #0f172a;
-  outline: none;
-  caret-color: transparent;
+  line-height: 1;
+  animation: digitPop 0.38s cubic-bezier(0.22, 1, 0.36, 1);
+  user-select: none;
 }
 
-.slot:last-child { border-right: 0; }
+.cellActive {
+  border-color: #38bdf8;
+  background: #eff8ff;
+  transform: translateY(-4px);
+  box-shadow:
+    0 12px 24px rgba(2, 132, 199, 0.16),
+    0 0 0 3px rgba(14, 165, 233, 0.12);
+}
 
-.slot:focus {
+.cellActive .cellRing {
+  opacity: 1;
+  border-color: #0ea5e9;
+  animation: orbitSpin 2.4s linear infinite;
+}
+
+.cellActive .cellGhost {
+  color: #7dd3fc;
+  animation: ghostBlink 1.1s ease-in-out infinite;
+}
+
+.cellFilled {
+  border-color: #7dd3fc;
+  background: linear-gradient(165deg, #e0f2fe, #ffffff);
+}
+
+.cellFilled .cellDigit {
+  color: #0369a1;
+}
+
+.cellSync {
+  animation: cellWave 0.9s ease-in-out infinite;
+  animation-delay: calc(var(--i) * 80ms);
+  border-color: #38bdf8;
   background: #e0f2fe;
 }
 
-.slot:disabled {
-  opacity: 0.7;
+.vaultChecking {
+  border-color: #7dd3fc;
+  box-shadow: inset 0 0 0 1px rgba(14, 165, 233, 0.2);
 }
 
-.scan {
+.vaultChecking::before {
+  content: '';
   position: absolute;
-  bottom: 0;
-  left: 0;
-  width: calc(100% / 6);
-  height: 3px;
-  background: #0284c7;
-  box-shadow: 0 0 10px #38bdf8;
-  transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+  inset: 0;
+  background: linear-gradient(
+    110deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.55) 48%,
+    transparent 66%
+  );
+  animation: vaultShine 1.15s ease-in-out infinite;
   pointer-events: none;
+}
+
+.vaultReady .cellFilled {
+  box-shadow: 0 0 0 1px rgba(14, 165, 233, 0.35), 0 8px 18px rgba(2, 132, 199, 0.12);
+}
+
+.vaultBad {
+  animation: kick 0.45s ease;
+  border-color: #fca5a5;
+  background: #fff7f7;
+}
+
+.vaultBad .cell {
+  border-color: #fecaca;
+  animation: cellReject 0.5s ease both;
+  animation-delay: calc(var(--i) * 35ms);
+}
+
+.sealLabel {
+  margin: 14px 0 0;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #64748b;
+}
+
+.vaultChecking .sealLabel {
+  color: #0284c7;
+}
+
+.vaultBad .sealLabel {
+  color: #dc2626;
 }
 
 .error {
@@ -279,6 +1055,7 @@
 }
 
 .unlock {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -286,7 +1063,33 @@
   padding: 28px 8px 12px;
 }
 
+.burst {
+  position: absolute;
+  top: 48px;
+  left: 50%;
+  width: 12px;
+  height: 12px;
+  pointer-events: none;
+}
+
+.burstDot {
+  --i: 0;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #38bdf8;
+  box-shadow: 0 0 10px rgba(14, 165, 233, 0.65);
+  animation: burstFly 0.85s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(var(--i) * 40ms);
+  transform: rotate(calc(var(--i) * 60deg)) translateY(0);
+}
+
 .lock {
+  position: relative;
+  z-index: 1;
   width: 88px;
   height: 88px;
   margin-bottom: 18px;
@@ -350,15 +1153,100 @@
   to { opacity: 1; transform: none; }
 }
 
-@keyframes scanRun {
-  from { transform: translateX(0); }
-  to { transform: translateX(500%); }
+@keyframes cellIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes digitPop {
+  0% {
+    opacity: 0;
+    transform: scale(0.4) rotate(-12deg);
+  }
+  55% {
+    opacity: 1;
+    transform: scale(1.18) rotate(2deg);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes orbitSpin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes ghostBlink {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+
+@keyframes cellWave {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-6px) scale(1.04); }
+}
+
+@keyframes vaultShine {
+  from { transform: translateX(-120%); }
+  to { transform: translateX(120%); }
+}
+
+@keyframes orbPulse {
+  0% {
+    opacity: 0.55;
+    transform: scale(0.85);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.55);
+  }
+}
+
+@keyframes orbBreath {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.06); }
+}
+
+@keyframes satPop {
+  0% { transform: rotate(calc(var(--i) * 60deg)) translateY(-30px) scale(0.5); }
+  60% { transform: rotate(calc(var(--i) * 60deg)) translateY(-30px) scale(1.3); }
+  100% { transform: rotate(calc(var(--i) * 60deg)) translateY(-30px) scale(1.15); }
+}
+
+@keyframes satOrbit {
+  0% { transform: rotate(calc(var(--i) * 60deg)) translateY(-30px) scale(1.15); }
+  100% { transform: rotate(calc(var(--i) * 60deg + 360deg)) translateY(-30px) scale(1.15); }
+}
+
+@keyframes cellReject {
+  0% { transform: translateX(0); }
+  30% { transform: translateX(-4px) rotate(-2deg); }
+  60% { transform: translateX(4px) rotate(2deg); }
+  100% { transform: none; }
 }
 
 @keyframes kick {
   0%, 100% { transform: translateX(0); }
   25% { transform: translateX(-6px); }
   75% { transform: translateX(6px); }
+}
+
+@keyframes burstFly {
+  0% {
+    opacity: 1;
+    transform: rotate(calc(var(--i) * 60deg)) translateY(0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: rotate(calc(var(--i) * 60deg)) translateY(-52px) scale(0.35);
+  }
 }
 
 @keyframes spin {
@@ -374,19 +1262,178 @@
   to { filter: drop-shadow(0 8px 16px rgba(2, 132, 199, 0.35)); }
 }
 
+@keyframes deadBreath {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(0.96); opacity: 0.88; }
+}
+
+@keyframes deadSpin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes crackIn {
+  from {
+    opacity: 0;
+    transform: scale(0.7) rotate(-18deg);
+  }
+  to {
+    opacity: 0.85;
+    transform: none;
+  }
+}
+
+@keyframes deadPulse {
+  0% {
+    opacity: 0.5;
+    transform: scale(0.75);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.45);
+  }
+}
+
+@keyframes ashFall {
+  0% {
+    opacity: 0;
+    transform: rotate(calc(var(--i) * 45deg)) translateY(-6px) scale(0.5);
+  }
+  18% {
+    opacity: 0.95;
+  }
+  100% {
+    opacity: 0;
+    transform:
+      rotate(calc(var(--i) * 45deg))
+      translateY(46px)
+      translateX(calc((var(--i) - 3.5) * 3px))
+      scale(0.15);
+  }
+}
+
+@keyframes openCoreIn {
+  from {
+    opacity: 0;
+    transform: scale(0.55);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes openDraw {
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes openHaloPulse {
+  0%, 100% { opacity: 0.55; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.12); }
+}
+
+@keyframes openRippleOut {
+  0% {
+    opacity: 0.55;
+    transform: scale(0.7);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.35);
+  }
+}
+
+@keyframes openSatIn {
+  0% {
+    opacity: 0;
+    transform: rotate(calc(var(--i) * 60deg)) translateY(-24px) scale(0);
+  }
+  70% {
+    opacity: 1;
+    transform: rotate(calc(var(--i) * 60deg)) translateY(-44px) scale(1.2);
+  }
+  100% {
+    opacity: 1;
+    transform: rotate(calc(var(--i) * 60deg)) translateY(-42px) scale(1);
+  }
+}
+
+@keyframes openSparkFly {
+  0% {
+    opacity: 1;
+    transform: rotate(calc(var(--i) * 36deg)) translateY(0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: rotate(calc(var(--i) * 36deg)) translateY(-58px) scale(0.2);
+  }
+}
+
+@keyframes openBarRun {
+  from { width: 0; }
+  to { width: 100%; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .card,
-  .scan,
+  .signinCard,
+  .gateCard,
   .shackle,
   .body,
-  .track.checking .scan {
-    animation: none;
+  .cell,
+  .cellDigit,
+  .cellRing,
+  .cellGhost,
+  .cellSync,
+  .orbRipple,
+  .orbCore,
+  .orbSatOn,
+  .sealOrb::after,
+  .vaultChecking::before,
+  .vaultBad,
+  .burstDot,
+  .deadCore,
+  .deadRing,
+  .deadCrack,
+  .deadRipple,
+  .deadAsh,
+  .openCore,
+  .openCheck,
+  .openHalo,
+  .openRing,
+  .openRipple,
+  .openSat,
+  .openSpark,
+  .openBarFill {
+    animation: none !important;
   }
-  .go:hover:not(:disabled) { transform: none; }
+  .go:hover:not(:disabled),
+  .google:hover,
+  .back:hover,
+  .gateHome:hover,
+  .cellActive {
+    transform: none;
+  }
 }
 
 @media (max-width: 520px) {
   .page { padding: 96px 14px 36px; }
   .card { padding: 24px 18px 22px; }
-  .slot { height: 56px; font-size: 18px; }
+  .signinCard,
+  .gateCard {
+    min-height: 500px;
+    padding: 40px 24px 36px;
+  }
+  .deadSeal {
+    width: 96px;
+    height: 96px;
+    margin-bottom: 22px;
+  }
+  .vault { padding: 14px 10px 12px; }
+  .cells { gap: 6px; }
+  .cell {
+    min-height: 46px;
+    border-radius: 14px;
+  }
+  .cellDigit,
+  .cellGhost { font-size: 18px; }
 }

@@ -1,10 +1,7 @@
 import React from 'react';
 import { redirect } from 'next/navigation';
 import { getUserData } from '@/actions/get-user';
-import { auth } from '@/lib/auth';
-import { getDbUserRole } from '@/lib/security/roles';
-import { dashboardPathForRole, getOnboardingStep } from '@/lib/onboarding';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, Shield } from 'lucide-react';
 import { CollaborationProvider } from '@/components/view/CollaborationProvider';
 import { SessionTimer } from '@/components/view/SessionTimer';
 import { ChatPanel } from '@/components/view/ChatPanel';
@@ -29,26 +26,15 @@ export default async function ViewPage({ params }: { params: Promise<{ token: st
 
     if (!result.success || !result.data) {
         // Redirect unverified users to the OTP page — server-side, no client JS needed
-        if (result.errorType === 'NOT_VERIFIED') {
-            redirect(`/share/${cleanToken}`);
-        }
-
-        // After break / lost share session: send logged-in vendors to their dashboard
-        // instead of a dead-end Access Denied card on /view.
+        // Lost share session after OTP: back to the OTP gate (not dashboard).
         const isSessionGone =
+            result.errorType === 'NOT_VERIFIED' ||
             result.errorType === 'SESSION_INVALID' ||
             (typeof result.error === 'string' &&
-                /missing or invalid session|unauthorized/i.test(result.error));
+                /missing or invalid session|unauthorized|otp verification required/i.test(result.error));
 
         if (isSessionGone) {
-            const session = await auth();
-            if (session?.user?.id) {
-                const dbUser = await getDbUserRole(session.user.id);
-                if (dbUser && getOnboardingStep(dbUser.roleSelected) === 'COMPLETE') {
-                    redirect(dashboardPathForRole(dbUser.role));
-                }
-                redirect('/dashboard');
-            }
+            redirect(`/share/${cleanToken}`);
         }
 
         const title =
@@ -58,16 +44,15 @@ export default async function ViewPage({ params }: { params: Promise<{ token: st
 
         return (
             <main className={styles.desk}>
-                <div className={styles.denied}>
-                    <div style={{
-                        width: 56, height: 56, borderRadius: '50%', background: '#FEE2E2',
-                        color: '#EF4444', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        margin: '0 auto 16px',
-                    }}>
-                        <AlertTriangle size={28} />
+                <div className={styles.wash} />
+                <div className={styles.deniedWrap}>
+                    <div className={styles.denied}>
+                        <div className={styles.deniedIcon}>
+                            <AlertTriangle size={28} />
+                        </div>
+                        <h2>{title}</h2>
+                        <p>{result.error}</p>
                     </div>
-                    <h2>{title}</h2>
-                    <p>{result.error}</p>
                 </div>
             </main>
         );
@@ -87,24 +72,31 @@ export default async function ViewPage({ params }: { params: Promise<{ token: st
         >
           <SecureViewWrapper token={cleanToken} viewerEmail={data.maskedEmail}>
             <main className={styles.desk}>
-                <header className={styles.top}>
+                <div className={styles.wash} />
+
+                <header className={styles.hud}>
                     <div>
                         <p className={styles.kicker}>Live session</p>
-                        <h1 className={styles.title}>Shared vault</h1>
+                        <h1>Shared vault</h1>
+                        <p className={styles.lede}>
+                            {sharedBy
+                                ? `Sealed drop from ${sharedBy}. Work stays inside this session.`
+                                : 'Sealed drop for the named vendor. Work stays inside this session.'}
+                        </p>
                     </div>
-                    <div className={styles.meta}>
+                    <div className={styles.hudMeta}>
                         <span className={styles.live}>
                             <span className={styles.dot} />
                             LIVE
                         </span>
-                        <div className={styles.chip}>
+                        <div className={styles.timer}>
                             <SessionTimer />
                         </div>
                     </div>
                 </header>
 
-                <div className={styles.grid}>
-                    <aside className={styles.brief}>
+                <div className={styles.console}>
+                    <aside className={styles.spine}>
                         {sharedBy ? (
                             <div className={styles.who}>
                                 <span className={styles.avatar}>{initial}</span>
@@ -124,45 +116,50 @@ export default async function ViewPage({ params }: { params: Promise<{ token: st
                         )}
 
                         {data.purpose ? (
-                            <div className={styles.field}>
+                            <div className={styles.metaBlock}>
                                 <small>Title</small>
                                 <p>{data.purpose}</p>
                             </div>
                         ) : null}
 
                         {data.purposeDetail ? (
-                            <div className={styles.field}>
+                            <div className={styles.metaBlock}>
                                 <small>Note</small>
                                 <p>{data.purposeDetail}</p>
                             </div>
                         ) : null}
+
+                        <p className={styles.policy}>
+                            <Shield size={16} strokeWidth={2} />
+                            <span>
+                                Preview and edits stay in-session. Download follows the owner’s lock.
+                            </span>
+                        </p>
                     </aside>
 
-                    <section className={styles.work}>
-                        <div className={styles.files}>
-                            <FileList
-                                token={cleanToken}
-                                files={data.files.map((f: any) => ({
-                                    id: f.id,
-                                    fileName: f.fileName,
-                                    fileSize: f.fileSize,
-                                    fileType: f.fileType,
-                                    status: f.status
-                                }))}
-                                isOwner={data.isOwner}
-                            />
-                        </div>
-
-                        {!data.isOwner && (
-                            <div className={styles.actions}>
-                                <DraftHydrator lastSavedWork={data.lastSavedWork} resumePoint={data.resumePoint} />
-                                <CompleteWorkButton token={cleanToken} />
-                                <BreakButton token={cleanToken} />
-                                <VendorAutoSave token={cleanToken} />
-                            </div>
-                        )}
+                    <section className={styles.surface}>
+                        <FileList
+                            token={cleanToken}
+                            files={data.files.map((f: any) => ({
+                                id: f.id,
+                                fileName: f.fileName,
+                                fileSize: f.fileSize,
+                                fileType: f.fileType,
+                                status: f.status
+                            }))}
+                            isOwner={data.isOwner}
+                        />
                     </section>
                 </div>
+
+                {!data.isOwner && (
+                    <div className={styles.dock}>
+                        <DraftHydrator lastSavedWork={data.lastSavedWork} resumePoint={data.resumePoint} />
+                        <CompleteWorkButton token={cleanToken} />
+                        <BreakButton token={cleanToken} />
+                        <VendorAutoSave token={cleanToken} />
+                    </div>
+                )}
 
                 <ChatPanel />
             </main>

@@ -56,9 +56,13 @@ export async function tryCheckRevoked(token: string): Promise<boolean | null> {
 
 /**
  * Fast session cache lookup.
- * null  = no Redis → verify signed cookie (+ optional VendorAccess.activeSessionId)
- * true  = Redis confirms active session
- * false = Redis says invalid (or Redis errored — fail closed)
+ * null  = no Redis / cache miss → verify signed cookie + VendorAccess.activeSessionId
+ * true  = Redis confirms this is the active session
+ * false = Redis has a different active session (superseded)
+ *
+ * A Redis miss must NOT fail closed — OTP sets a signed cookie even when
+ * the Redis write is slow or skipped. Treating miss as invalid kicked users
+ * out of /view right after a successful OTP.
  */
 export async function tryValidateSession(token: string, sessionId: string): Promise<boolean | null> {
     if (!isRedisConfigured()) {
@@ -67,10 +71,13 @@ export async function tryValidateSession(token: string, sessionId: string): Prom
 
     try {
         const { validateSession } = await getRedisModule();
-        return (await validateSession(token, sessionId)) === true;
+        const result = await validateSession(token, sessionId);
+        if (result === 'valid') return true;
+        if (result === 'superseded') return false;
+        return null;
     } catch (err) {
-        logger.error('Redis tryValidateSession FAIL CLOSED — treating as invalid', err);
-        return false;
+        logger.error('Redis tryValidateSession error — falling back to signed cookie', err);
+        return null;
     }
 }
 

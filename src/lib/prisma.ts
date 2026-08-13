@@ -5,28 +5,42 @@ const globalForPrisma = globalThis as unknown as {
   _prismaShutdownRegistered?: boolean;
 };
 
+function resolveRawUrl(): string {
+  // Dev: prefer DIRECT_URL so interactive $transaction works (no PgBouncer).
+  if (process.env.NODE_ENV !== 'production' && process.env.DIRECT_URL) {
+    return process.env.DIRECT_URL;
+  }
+  return process.env.DATABASE_URL || process.env.DIRECT_URL || '';
+}
+
+function isPoolerHost(url: string): boolean {
+  try {
+    return new URL(url).hostname.includes('-pooler');
+  } catch {
+    return /pooler|pgbouncer/i.test(url);
+  }
+}
+
 function buildDatasourceUrl(): string {
-  let url = process.env.DATABASE_URL || '';
+  const url = resolveRawUrl();
   if (!url) return url;
 
   try {
     const parsed = new URL(url);
-    // Long-lived Next.js process (dev/standalone): small pool is fine with PgBouncer,
-    // but 5 is too tight when dashboard fires multiple queries + cleanup.
-    // Neon serverless: prefer pooled host + pgbouncer=true.
-    // Small client pool (PgBouncer multiplexes). High limits + 60s waits
-    // queue every request behind exhausted SSE/txn slots (P2024).
-    const defaultLimit = process.env.NODE_ENV === 'development' ? '15' : '12';
+    const usingPooler = isPoolerHost(url) || parsed.searchParams.get('pgbouncer') === 'true';
+    const defaultLimit = usingPooler
+      ? (process.env.NODE_ENV === 'development' ? '8' : '10')
+      : (process.env.NODE_ENV === 'development' ? '8' : '12');
+
     parsed.searchParams.set(
       'connection_limit',
       process.env.PRISMA_CONNECTION_LIMIT || defaultLimit,
     );
-    parsed.searchParams.set('pool_timeout', process.env.PRISMA_POOL_TIMEOUT || '10');
+    parsed.searchParams.set('pool_timeout', process.env.PRISMA_POOL_TIMEOUT || '15');
     if (!parsed.searchParams.has('connect_timeout')) {
-      parsed.searchParams.set('connect_timeout', '20');
+      parsed.searchParams.set('connect_timeout', '15');
     }
-    // Required when using the Neon *-pooler* host
-    if (!parsed.searchParams.has('pgbouncer')) {
+    if (usingPooler && !parsed.searchParams.has('pgbouncer')) {
       parsed.searchParams.set('pgbouncer', 'true');
     }
     return parsed.toString();
@@ -38,8 +52,6 @@ function buildDatasourceUrl(): string {
 function isTransientPrismaError(error: unknown): boolean {
   const msg = error instanceof Error ? error.message : String(error);
   const code = (error as { code?: string })?.code;
-  // Do NOT retry P2024 (pool timeout). Retrying re-queues waiters and
-  // makes create-link / dashboard starve for another full pool_timeout.
   return (
     code === 'P1017' ||
     code === 'P1001' ||
@@ -69,8 +81,6 @@ function createPrismaClient(): PrismaClient {
     ...(datasourceUrl ? { datasourceUrl } : {}),
   });
 
-  // Retry transient Neon/pool errors WITHOUT $disconnect().
-  // Disconnecting mid-flight starves parallel queries and causes P2024 pool timeouts.
   const extended = client.$extends({
     query: {
       async $allOperations({ model, operation, args, query }) {
@@ -93,7 +103,7 @@ function createPrismaClient(): PrismaClient {
           if (!isTransientPrismaError(error)) throw error;
 
           console.warn('[Prisma] Transient DB error — retrying once…');
-          await sleep(250);
+          await sleep(300);
           return query(args);
         }
       },
@@ -109,7 +119,6 @@ if (process.env.NODE_ENV !== 'production') {
   globalForPrisma.prisma = prisma;
 }
 
-// Only disconnect on real process shutdown in production (avoids HMR Closed errors in dev)
 if (process.env.NODE_ENV === 'production' && !globalForPrisma._prismaShutdownRegistered) {
   globalForPrisma._prismaShutdownRegistered = true;
   process.on('SIGTERM', async () => {

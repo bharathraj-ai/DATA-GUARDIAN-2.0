@@ -128,18 +128,13 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
 
         if (authResult.context.effectiveEmail && !authResult.context.isOwner) {
             const email = authResult.context.effectiveEmail.toLowerCase();
-            const draftRow = await prisma.vendorAccess.findFirst({
-                where: {
-                    secureLinkId: secureLink.id,
-                    email: { equals: email, mode: 'insensitive' },
-                },
-                select: {
-                    status: true,
-                    lastSavedWork: true,
-                    resumePoint: true,
-                },
-            });
-            vendorAccess = draftRow;
+            const vendors = (secureLink as { VendorAccess?: Array<{
+                email: string;
+                status?: string;
+                lastSavedWork?: unknown;
+                resumePoint?: unknown;
+            }> }).VendorAccess || [];
+            vendorAccess = vendors.find((v) => v.email.toLowerCase() === email) ?? null;
         }
 
         // Derive owner info from the User relation already loaded by authorizeSecureLink

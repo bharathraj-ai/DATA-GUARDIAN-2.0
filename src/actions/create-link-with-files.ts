@@ -435,10 +435,16 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
         };
 
     } catch (error) {
-        logger.error('Error creating secure link:', error instanceof Error ? error.message : 'Unknown error');
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        logger.error('Error creating secure link:', message);
+
+        const isMongoDns =
+            /querySrv|ECONNREFUSED|MongoServerSelectionError|ENOTFOUND|mongodb/i.test(message);
         return {
             success: false,
-            error: 'Failed to create secure link. Please try again.',
+            error: isMongoDns
+                ? 'Could not reach the file storage database (MongoDB). Check your network/DNS and that Atlas is online, then try again.'
+                : 'Failed to create secure link. Please try again.',
         };
     }
 }

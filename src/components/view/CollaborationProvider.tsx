@@ -73,7 +73,7 @@ export function CollaborationProvider({ children, token, initialCapabilities, in
                         }
 
                         if (data.type === 'session_invalid') {
-                            window.location.replace('/dashboard/vendor');
+                            window.location.replace(`/share/${token}`);
                             return;
                         }
 

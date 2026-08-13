@@ -50,8 +50,15 @@ export function VendorAutoSave({ token }: VendorAutoSaveProps) {
             }
         };
 
-        // 1. Auto-save every 60 seconds
-        const timer = setInterval(() => performAutosave(false), 60000);
+        // First save after 45s, then every 60s — skip empty drafts on mount
+        const timer = setInterval(() => {
+            if (!(window as any).__VENDOR_DRAFT__ && draftVersionRef.current <= 1) return;
+            performAutosave(false);
+        }, 60000);
+        const first = window.setTimeout(() => {
+            if (!(window as any).__VENDOR_DRAFT__) return;
+            performAutosave(false);
+        }, 45000);
 
         // 2. Auto-save on window close (best effort)
         const handleBeforeUnload = () => performAutosave(true);
@@ -66,6 +73,7 @@ export function VendorAutoSave({ token }: VendorAutoSaveProps) {
 
         return () => {
             clearInterval(timer);
+            window.clearTimeout(first);
             if (majorEditDebounce) clearTimeout(majorEditDebounce);
             window.removeEventListener('beforeunload', handleBeforeUnload);
             window.removeEventListener('vendor-major-edit', handleMajorEdit);

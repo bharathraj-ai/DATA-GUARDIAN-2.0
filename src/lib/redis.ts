@@ -105,34 +105,34 @@ export async function createSession(
     await pipeline.exec();
 }
 
+export type RedisSessionCheck = 'valid' | 'superseded' | 'unknown';
+
 /**
- * Validates a session
- * 
- * @param token - The share link token
- * @param sessionId - Session ID to validate
- * @returns true if session is valid and active
+ * Validates a session against Redis cache.
+ * unknown  = cache miss → caller must trust signed cookie + DB
+ * superseded = Redis has a *different* active session (break / new login)
+ * valid    = this session is the active Redis session
  */
 export async function validateSession(
     token: string,
     sessionId: string
-): Promise<boolean> {
-    // Check if link is revoked
+): Promise<RedisSessionCheck> {
     const isRevoked = await redis.exists(`${REVOKED_PREFIX}${token}`);
     if (isRevoked) {
-        return false;
+        return 'superseded';
     }
 
-    // Check if this is the active session
     const activeSessionId = await redis.get<string>(`${ACTIVE_SESSION_PREFIX}${token}`);
+    if (!activeSessionId) {
+        return 'unknown';
+    }
     if (activeSessionId !== sessionId) {
-        return false;
+        return 'superseded';
     }
 
-    // Check if session exists (not expired)
     const sessionKey = `${SESSION_PREFIX}${token}:${sessionId}`;
     const exists = await redis.exists(sessionKey);
-
-    return exists === 1;
+    return exists === 1 ? 'valid' : 'unknown';
 }
 
 /**
