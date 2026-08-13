@@ -538,8 +538,15 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
         const { mintShareSession } = await import('@/lib/share-session');
         const minted = mintShareSession(token, ttlSeconds, vendor?.email || vendorEmail || userEmail || null);
         const sessionId = minted.sessionId;
-        // Bind CURRENT recipient device to this active access session (not the link creator)
-        await tryCreateSession(token, sessionId, ttlSeconds, currentDeviceHash);
+        // Bind CURRENT recipient device to this access session (not the link creator).
+        // replaceSessionId drops only this vendor's prior Redis session — other collaborators stay online.
+        await tryCreateSession(
+            token,
+            sessionId,
+            ttlSeconds,
+            currentDeviceHash,
+            vendor?.activeSessionId ?? null,
+        );
 
         // Success: Mark link as used, bind device to ACTIVE session, create audit log
         // PERFORMANCE: otpFirstAttemptAt tracking merged into this transaction

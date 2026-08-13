@@ -102,13 +102,15 @@ export async function tryGetSessionTTL(token: string, sessionId: string, fallbac
 /**
  * Best-effort cache write. App does not depend on this succeeding.
  * Returns true if cached, false if Redis skipped/unavailable.
- * deviceFingerprint binds the active access session to the verifying device.
+ * deviceFingerprint binds the access session to the verifying device.
+ * replaceSessionId drops that vendor's prior Redis session only (not other collaborators).
  */
 export async function tryCreateSession(
     token: string,
     sessionId: string,
     ttlSeconds: number,
     deviceFingerprint?: string,
+    replaceSessionId?: string | null,
 ): Promise<boolean> {
     if (!isRedisConfigured()) {
         return false;
@@ -116,7 +118,9 @@ export async function tryCreateSession(
 
     try {
         const { createSession } = await getRedisModule();
-        await createSession(token, sessionId, ttlSeconds, deviceFingerprint);
+        await createSession(token, sessionId, ttlSeconds, deviceFingerprint, {
+            replaceSessionId,
+        });
         return true;
     } catch (err) {
         logger.error('Redis tryCreateSession cache write failed (non-fatal)', err);
@@ -125,19 +129,46 @@ export async function tryCreateSession(
 }
 
 /**
- * Read device fingerprint bound to the active Redis session (if any).
+ * Best-effort: drop one collaborator's Redis session (break / logout).
+ * Does not revoke the share or other vendors' sessions.
+ */
+export async function tryInvalidateOneSession(
+    token: string,
+    sessionId: string,
+): Promise<boolean> {
+    if (!isRedisConfigured() || !sessionId) {
+        return false;
+    }
+
+    try {
+        const { invalidateOneSession } = await getRedisModule();
+        await invalidateOneSession(token, sessionId);
+        return true;
+    } catch (err) {
+        logger.error('Redis tryInvalidateOneSession failed (non-fatal)', err);
+        return false;
+    }
+}
+
+/**
+ * Read device fingerprint bound to a specific Redis session (if any).
  * null = Redis unavailable / no session fingerprint stored.
  */
 export async function tryGetSessionDeviceFingerprint(
     token: string,
+    sessionId?: string,
 ): Promise<string | null> {
     if (!isRedisConfigured()) {
         return null;
     }
 
     try {
-        const { getActiveSession } = await getRedisModule();
-        const session = await getActiveSession(token);
+        const mod = await getRedisModule();
+        if (sessionId) {
+            const session = await mod.getSession(token, sessionId);
+            return session?.deviceFingerprint ?? null;
+        }
+        const session = await mod.getActiveSession(token);
         return session?.deviceFingerprint ?? null;
     } catch (err) {
         logger.error('Redis tryGetSessionDeviceFingerprint failed', err);

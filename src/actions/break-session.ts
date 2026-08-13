@@ -196,20 +196,19 @@ export async function takeBreak(
         }
 
         const cookieStore = await cookies();
+        const endingSessionCookie = cookieStore.get('session_id')?.value;
+        const { extractSessionId } = await import('@/lib/share-session');
+        const endingSessionId = extractSessionId(endingSessionCookie);
+
         cookieStore.delete('session_id');
         cookieStore.delete('vendor_email');
 
-        // Redis invalidate — do not block redirect
+        // Drop only this vendor's Redis session — other collaborators stay online
         void (async () => {
             try {
-                const configured = !!(
-                    process.env.UPSTASH_REDIS_REST_URL &&
-                    process.env.UPSTASH_REDIS_REST_TOKEN &&
-                    !process.env.UPSTASH_REDIS_REST_URL.includes('your-redis')
-                );
-                if (configured) {
-                    const { invalidateSession } = await import('@/lib/redis');
-                    await invalidateSession(token, false);
+                if (endingSessionId) {
+                    const { tryInvalidateOneSession } = await import('@/lib/redis-helpers');
+                    await tryInvalidateOneSession(token, endingSessionId);
                 }
             } catch (err) {
                 logger.warn(

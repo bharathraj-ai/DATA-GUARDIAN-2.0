@@ -181,10 +181,21 @@ export async function authorizeApiRequest(
             return { errorResponse: NextResponse.json({ error: 'Forbidden: Access revoked' }, { status: 403 }) };
         }
 
-        const activeSessionId = await redis.get(`active:${token}`);
-        if (activeSessionId && activeSessionId !== sessionId) {
-            await logSecurityEvent('DENIED', null, { ip, reason: 'Invalid or expired Redis Session match' });
-            return { errorResponse: NextResponse.json({ error: 'Unauthorized: Invalid or Hijacked Session' }, { status: 401 }) };
+        // Concurrent collaborators each have session:{token}:{sessionId}.
+        // Deny when Redis tracks sessions for this link but this sessionId is absent
+        // (or legacy singleton points at someone else). Empty Redis → signed cookie + DB.
+        const sessionExists = await redis.exists(`session:${token}:${sessionId}`);
+        if (!sessionExists) {
+            const [sessionCount, legacyActive] = await Promise.all([
+                redis.scard(`sessions:${token}`),
+                redis.get(`active:${token}`),
+            ]);
+            const blockedByIndex = typeof sessionCount === 'number' && sessionCount > 0;
+            const blockedByLegacy = Boolean(legacyActive && legacyActive !== sessionId);
+            if (blockedByIndex || blockedByLegacy) {
+                await logSecurityEvent('DENIED', null, { ip, reason: 'Invalid or expired Redis Session match' });
+                return { errorResponse: NextResponse.json({ error: 'Unauthorized: Invalid or Hijacked Session' }, { status: 401 }) };
+            }
         }
     }
 
@@ -416,28 +427,34 @@ export async function rotateSessionId(token: string, oldSessionId: string): Prom
     const redis = await getRedisClient();
     if (!redis) return null;
 
-    const isValid = await redis.get(`active:${token}`);
-    if (isValid !== oldSessionId) return null;
+    const oldSessionKey = `session:${token}:${oldSessionId}`;
+    const ttl = await redis.ttl(oldSessionKey);
+    if (ttl <= 0) return null;
 
     const newSessionId = crypto.randomBytes(32).toString('hex');
-    const oldSessionKey = `session:${token}:${oldSessionId}`;
     const newSessionKey = `session:${token}:${newSessionId}`;
-    const ttl = await redis.ttl(oldSessionKey);
+    const sessionsSetKey = `sessions:${token}`;
 
-    if (ttl > 0) {
-        const sessionData = await redis.get(oldSessionKey);
-        const pipeline = redis.pipeline();
+    const sessionData = await redis.get(oldSessionKey);
+    const pipeline = redis.pipeline();
 
-        if (typeof sessionData === 'string') {
-            const parsed = JSON.parse(sessionData);
-            parsed.sessionId = newSessionId;
-            pipeline.set(newSessionKey, JSON.stringify(parsed), { ex: ttl });
-        }
-
-        pipeline.del(oldSessionKey);
-        pipeline.set(`active:${token}`, newSessionId, { ex: ttl });
-        await pipeline.exec();
+    if (typeof sessionData === 'string') {
+        const parsed = JSON.parse(sessionData);
+        parsed.sessionId = newSessionId;
+        pipeline.set(newSessionKey, JSON.stringify(parsed), { ex: ttl });
+    } else if (sessionData && typeof sessionData === 'object') {
+        const parsed = { ...(sessionData as object), sessionId: newSessionId };
+        pipeline.set(newSessionKey, JSON.stringify(parsed), { ex: ttl });
+    } else {
+        return null;
     }
+
+    pipeline.del(oldSessionKey);
+    pipeline.srem(sessionsSetKey, oldSessionId);
+    pipeline.sadd(sessionsSetKey, newSessionId);
+    pipeline.expire(sessionsSetKey, ttl);
+    pipeline.del(`active:${token}`);
+    await pipeline.exec();
 
     return newSessionId;
 }
