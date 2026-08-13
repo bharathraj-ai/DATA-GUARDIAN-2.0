@@ -30,10 +30,8 @@ export default async function CreateLinkPage() {
         redirect('/dashboard/vendor');
     }
 
-    const [initialVendors, hasActiveLink] = await Promise.all([
-        listVendorOptions(),
-        ownerHasActiveLink(session.user.id),
-    ]);
+    const initialVendors = await listVendorOptions();
+    const hasActiveLink = await ownerHasActiveLink(session.user.id);
 
     return <CreateLinkClient initialVendors={initialVendors} hasActiveLink={hasActiveLink} />;
 }

@@ -1,3 +1,4 @@
+import { Resolver } from 'dns/promises';
 import { MongoClient, GridFSBucket, Db, ServerApiVersion } from 'mongodb';
 
 // ─── Environment Validation ─────────────────────────────────────────
@@ -12,33 +13,110 @@ function getRequiredEnv(key: string): string {
   return value.trim();
 }
 
+/**
+ * Windows / some local resolvers refuse Node `querySrv` for mongodb+srv
+ * (ECONNREFUSED) even when Atlas records exist. Expand SRV via public DNS
+ * into a standard mongodb:// multi-host URI so the driver never calls querySrv.
+ */
+async function expandMongoSrvUri(uri: string): Promise<string> {
+  if (!uri.startsWith('mongodb+srv://')) return uri;
+
+  const withoutScheme = uri.slice('mongodb+srv://'.length);
+  const at = withoutScheme.lastIndexOf('@');
+  const creds = at >= 0 ? withoutScheme.slice(0, at) : '';
+  const hostAndRest = at >= 0 ? withoutScheme.slice(at + 1) : withoutScheme;
+
+  const slash = hostAndRest.indexOf('/');
+  const hostPart = slash >= 0 ? hostAndRest.slice(0, slash) : hostAndRest;
+  const pathAndQuery = slash >= 0 ? hostAndRest.slice(slash) : '/';
+
+  const qInHost = hostPart.indexOf('?');
+  const hostname = (qInHost >= 0 ? hostPart.slice(0, qInHost) : hostPart).split(':')[0];
+  const hostQuery = qInHost >= 0 ? hostPart.slice(qInHost + 1) : '';
+
+  const pathOnly = pathAndQuery.split('?')[0] || '/';
+  const pathQuery = pathAndQuery.includes('?') ? pathAndQuery.split('?')[1] : '';
+  const mergedQuery = [hostQuery, pathQuery].filter(Boolean).join('&');
+
+  const resolver = new Resolver();
+  resolver.setServers(['8.8.8.8', '1.1.1.1', '8.8.4.4']);
+
+  const srv = await resolver.resolveSrv(`_mongodb._tcp.${hostname}`);
+  if (!srv.length) {
+    throw new Error(`[Mongo] No SRV records found for ${hostname}`);
+  }
+
+  const txtLists = await resolver.resolveTxt(hostname).catch(() => [] as string[][]);
+  const txt = txtLists.map((parts) => parts.join('')).join('');
+
+  const hosts = srv
+    .map((record) => `${record.name}:${record.port || 27017}`)
+    .join(',');
+
+  const params = new URLSearchParams(mergedQuery);
+  params.set('tls', 'true');
+  if (txt) {
+    for (const part of txt.split('&')) {
+      const [key, value] = part.split('=');
+      if (key && !params.has(key)) {
+        params.set(key, value ?? '');
+      }
+    }
+  }
+
+  const auth = creds ? `${creds}@` : '';
+  return `mongodb://${auth}${hosts}${pathOnly}?${params.toString()}`;
+}
+
 // ─── Lazy Singleton ─────────────────────────────────────────────────
 let _mongoClient: MongoClient | null = null;
 let _db: Db | null = null;
 let _gridFSBucket: GridFSBucket | null = null;
+let _connecting: Promise<MongoClient> | null = null;
 
 export async function getMongoClient(): Promise<MongoClient> {
   if (_mongoClient) return _mongoClient;
+  if (_connecting) return _connecting;
 
-  const uri = getRequiredEnv('MONGODB_URI');
-  _mongoClient = new MongoClient(uri, {
-    maxPoolSize: 10,
-    minPoolSize: 0,            // Don't force connections on startup (prevents cold-start hangs)
-    connectTimeoutMS: 10000,   // 10s connection timeout (was unlimited)
-    socketTimeoutMS: 30000,    // 30s socket timeout
-    serverSelectionTimeoutMS: 10000, // 10s server selection timeout
-    serverApi: {
-      version: ServerApiVersion.v1,
-      strict: true,
-      deprecationErrors: true,
-    },
-    tls: true,
-    family: 4, // Force IPv4 to prevent Windows OpenSSL alert 80 with Atlas
-  });
+  _connecting = (async () => {
+    const rawUri = getRequiredEnv('MONGODB_URI');
+    const uri = await expandMongoSrvUri(rawUri);
+    const client = new MongoClient(uri, {
+      maxPoolSize: 10,
+      minPoolSize: 0,
+      connectTimeoutMS: 15000,
+      socketTimeoutMS: 45000,
+      serverSelectionTimeoutMS: 15000,
+      serverApi: {
+        version: ServerApiVersion.v1,
+        strict: true,
+        deprecationErrors: true,
+      },
+      tls: true,
+      family: 4, // Force IPv4 to prevent Windows OpenSSL alert 80 with Atlas
+    });
 
-  await _mongoClient.connect();
-  console.log(`[Mongo] Client connected.`);
-  return _mongoClient;
+    try {
+      await client.connect();
+      _mongoClient = client;
+      console.log('[Mongo] Client connected.');
+      return client;
+    } catch (error) {
+      try {
+        await client.close();
+      } catch {
+        /* ignore */
+      }
+      _mongoClient = null;
+      _db = null;
+      _gridFSBucket = null;
+      throw error;
+    } finally {
+      _connecting = null;
+    }
+  })();
+
+  return _connecting;
 }
 
 export async function getMongoDb(): Promise<Db> {

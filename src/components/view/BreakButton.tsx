@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { takeBreak } from '@/actions/break-session';
 import { Ban, CheckCircle2, Info, Coffee, Loader2 } from 'lucide-react';
+import styles from './vaultDock.module.css';
 
 type ToastType = 'error' | 'success' | 'info';
 
@@ -67,30 +68,19 @@ export function BreakButton({ token }: { token: string }) {
     return (
         <>
             <button
-                className="btn btn-secondary"
+                className={styles.break}
                 onClick={handleBreak}
                 disabled={isLoading}
                 id="break-work-btn"
-                style={{
-                    width: '100%',
-                    padding: '16px 20px',
-                    marginTop: '12px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '10px',
-                    opacity: isLoading ? 0.8 : 1,
-                    cursor: isLoading ? 'not-allowed' : 'pointer'
-                }}
             >
                 {isLoading ? (
                     <>
-                        <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
-                        Starting break...
+                        <Loader2 size={16} className={styles.spin} />
+                        Saving session…
                     </>
                 ) : (
                     <>
-                        <Coffee size={16} /> Take a Break (Save & Logout)
+                        <Coffee size={16} /> Take a break
                     </>
                 )}
             </button>

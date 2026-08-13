@@ -7,7 +7,8 @@ import { validateShareAccess } from '@/actions/validate-share-access';
 import { sendVendorOTP } from '@/actions/send-vendor-otp';
 import { useSession, signIn } from 'next-auth/react';
 import { logger, redactToken } from '@/lib/logger';
-import { Lock } from 'lucide-react';
+import { Lock, Shield, ArrowLeft } from 'lucide-react';
+import Link from 'next/link';
 import styles from './otp.module.css';
 
 interface SharePageProps {
@@ -34,21 +35,11 @@ export default function SharePage({ params }: SharePageProps) {
     const [isResending, setIsResending] = useState(false);
     const [shake, setShake] = useState(false);
     const [activeIndex, setActiveIndex] = useState(0);
+    const [cellsVisible, setCellsVisible] = useState(true);
     const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [accessState, setAccessState] = useState<AccessState>('checking');
     const [needsFreshOtp, setNeedsFreshOtp] = useState(false);
-
-    // Force refresh on mount to clear any cached data
-    useEffect(() => {
-        // Clear any browser cache for this page
-        if (typeof window !== 'undefined') {
-            // Force reload if coming from cache
-            if (window.performance && window.performance.navigation.type === 2) {
-                window.location.reload();
-            }
-        }
-    }, []);
 
     // Auto-detect session email to auto-fill
     useEffect(() => {
@@ -132,16 +123,16 @@ export default function SharePage({ params }: SharePageProps) {
     };
 
     const handleChange = (index: number, value: string) => {
-        // Only allow digits
-        if (value && !/^\d$/.test(value)) return;
+        const digit = value.replace(/\D/g, '').slice(-1);
+        if (value && !digit) return;
 
         const newOtp = [...otp];
-        newOtp[index] = value;
+        newOtp[index] = digit;
         setOtp(newOtp);
         setError('');
+        setActiveIndex(digit && index < 5 ? index + 1 : index);
 
-        // Auto-advance to next input
-        if (value && index < 5) {
+        if (digit && index < 5) {
             inputRefs.current[index + 1]?.focus();
         }
     };
@@ -158,6 +149,7 @@ export default function SharePage({ params }: SharePageProps) {
         if (pastedData.length === 6) {
             const newOtp = pastedData.split('');
             setOtp(newOtp);
+            setActiveIndex(5);
             inputRefs.current[5]?.focus();
         }
     };
@@ -273,7 +265,7 @@ export default function SharePage({ params }: SharePageProps) {
                 setState('success');
                 window.setTimeout(() => {
                     window.location.assign(`/view/${token}?t=${Date.now()}`);
-                }, 1700);
+                }, 450);
                 return;
             } else {
                 setState('error');
@@ -305,6 +297,18 @@ export default function SharePage({ params }: SharePageProps) {
         }
     }, [otp, state, handleSubmit, accessState]);
 
+    // OTP cells: visible while entering (1s after verify starts), then hide during processing
+    useEffect(() => {
+        if (state !== 'loading' || step !== 'otp') {
+            setCellsVisible(true);
+            return;
+        }
+
+        setCellsVisible(true);
+        const timer = window.setTimeout(() => setCellsVisible(false), 1000);
+        return () => window.clearTimeout(timer);
+    }, [state, step]);
+
     // Loading state
     if (isLoading || accessState === 'checking' || status === 'loading') {
         return (
@@ -320,27 +324,45 @@ export default function SharePage({ params }: SharePageProps) {
         );
     }
 
-    // SECURITY: Requires authentication — show sign-in prompt
+    // SECURITY: Requires authentication — match /auth/signin card design
     if (accessState === 'requires_auth') {
         return (
-            <main className={styles.page}>
-                <div className={styles.wash} />
-                <div className={styles.card}>
-                    <p className={styles.kicker}>OTP gate</p>
-                    <h1 className={styles.title}>Sign in to continue</h1>
-                    <p className={styles.sub}>
-                        This share is locked to an authorized recipient. Sign in with Google to prove it.
+            <main className={`${styles.page} ${styles.pageSignin}`}>
+                <article className={styles.signinCard}>
+                    <p className={styles.kicker}>Share session</p>
+                    <h1 className={styles.signinTitle}>Welcome back</h1>
+                    <p className={styles.signinSub}>
+                        This share is locked to an authorized recipient. Sign in with Google to continue.
                     </p>
 
                     <button
+                        type="button"
                         onClick={() => signIn('google', { callbackUrl: `/share/${token}` })}
-                        className={styles.go}
-                        style={{ marginTop: 20 }}
+                        className={styles.google}
+                        suppressHydrationWarning
                     >
-                        Sign in with Google
+                        <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+                            <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                            <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+                            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+                        </svg>
+                        Continue with Google
                     </button>
-                    <p className={styles.hint}>Only the named vendor can open this link.</p>
-                </div>
+
+                    <div className={styles.trust}>
+                        <Shield size={16} strokeWidth={2} />
+                        <span>Only the named vendor can open this link.</span>
+                    </div>
+
+                    <div className={styles.signinFoot}>
+                        <Link href="/" className={styles.back}>
+                            <ArrowLeft size={14} />
+                            Back to Home
+                        </Link>
+                        <p className={styles.policy}>By signing in, you agree to our security policies.</p>
+                    </div>
+                </article>
             </main>
         );
     }
@@ -350,50 +372,71 @@ export default function SharePage({ params }: SharePageProps) {
         const isRevoked = accessError.includes('revoked');
         const isExpired = accessError.includes('expired');
         const isEmailMismatch = accessError.includes('different recipient');
-        return (
-            <main className={styles.page}>
-                <div className={styles.wash} />
-                <div className={styles.card}>
-                    <p className={styles.kicker}>OTP gate</p>
-                    <h1 className={styles.title}>
-                        {isRevoked ? 'Access revoked' : isExpired ? 'Link expired' : isEmailMismatch ? 'Wrong account' : 'Access denied'}
-                    </h1>
-                    <p className={styles.sub}>{accessError}</p>
+        const title = isRevoked
+            ? 'Access revoked'
+            : isExpired
+                ? 'Link expired'
+                : isEmailMismatch
+                    ? 'Wrong account'
+                    : 'Access denied';
+        const tone = isRevoked || isEmailMismatch ? 'hot' : isExpired ? 'ash' : 'cool';
 
-                    {isEmailMismatch && (
-                        <div className="phishing-warning" style={{
-                            background: 'rgba(239, 68, 68, 0.1)',
-                            border: '1px solid rgba(239, 68, 68, 0.3)',
-                            borderRadius: '8px',
-                            padding: '12px 16px',
-                            margin: '16px 0',
-                            display: 'flex',
-                            alignItems: 'flex-start',
-                            gap: '10px'
-                        }}>
-                            <svg viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2" style={{ width: '20px', height: '20px', flexShrink: 0, marginTop: '2px' }}>
-                                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                            </svg>
-                            <div style={{ fontSize: '12px', color: '#f87171', lineHeight: '1.4' }}>
-                                <strong style={{ marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                    <Lock size={14} /> Security Notice
-                                </strong>
-                                This link was created for a specific vendor. If you believe this is an error,
-                                contact the person who shared it with you and ask them to create a new link for your email.
+        const toneClass =
+            tone === 'hot' ? styles.gate_hot : tone === 'ash' ? styles.gate_ash : styles.gate_cool;
+
+        return (
+            <main className={`${styles.page} ${styles.pageSignin}`}>
+                <article className={`${styles.gateCard} ${toneClass}`}>
+                    <p className={styles.kicker}>OTP gate</p>
+
+                    <div className={styles.deadSeal} aria-hidden="true">
+                        <span className={styles.deadRipple} />
+                        <span className={styles.deadRipple} />
+                        <span className={styles.deadRing} />
+                        <span className={styles.deadCrack} />
+                        <span className={styles.deadCore}>
+                            <Lock size={22} strokeWidth={2.25} />
+                        </span>
+                        {Array.from({ length: 8 }).map((_, i) => (
+                            <span
+                                key={i}
+                                className={styles.deadAsh}
+                                style={{ ['--i' as string]: i }}
+                            />
+                        ))}
+                    </div>
+
+                    <h1 className={styles.signinTitle}>{title}</h1>
+                    <p className={styles.signinSub}>{accessError}</p>
+
+                    {isEmailMismatch ? (
+                        <div className={styles.gateWarn}>
+                            <Shield size={18} strokeWidth={2} />
+                            <div>
+                                <strong>Security notice</strong>
+                                <p>
+                                    This link was created for a specific vendor. Ask the sender to issue a
+                                    new share to your email if this looks wrong.
+                                </p>
                             </div>
                         </div>
-                    )}
+                    ) : null}
 
-                    <button
-                        onClick={() => {
-                            window.location.href = `/create-link?t=${Date.now()}`;
-                        }}
-                        className={styles.go}
-                        style={{ marginTop: 16 }}
-                    >
+                    <Link href="/" className={styles.gateHome}>
                         Return Home
-                    </button>
-                </div>
+                    </Link>
+
+                    <div className={styles.trust}>
+                        <Shield size={16} strokeWidth={2} />
+                        <span>
+                            {isExpired
+                                ? 'Expired shares wipe payload and OTP — nothing left to reopen.'
+                                : isRevoked
+                                    ? 'The owner closed this vault. A fresh link is required.'
+                                    : 'Only the named vendor can open a Secure Protocol share.'}
+                        </span>
+                    </div>
+                </article>
             </main>
         );
     }
@@ -405,27 +448,61 @@ export default function SharePage({ params }: SharePageProps) {
     const meterTone = countdown <= 30 ? styles.meterHot : countdown <= 60 ? styles.meterWarn : '';
 
     return (
-        <main className={styles.page}>
-            <div className={styles.wash} />
-            <div className={styles.card}>
-                {state === 'success' ? (
-                    <div className={styles.unlock}>
-                        <svg className={styles.lock} viewBox="0 0 64 64" fill="none" aria-hidden="true">
-                            <path
-                                className={styles.shackle}
-                                d="M20 28V22a12 12 0 0 1 24 0v6"
-                                stroke="#0284c7"
-                                strokeWidth="4"
-                                strokeLinecap="round"
+        <main className={state === 'success' ? `${styles.page} ${styles.pageSignin}` : styles.page}>
+            {state !== 'success' ? <div className={styles.wash} /> : null}
+            {state === 'success' ? (
+                <article className={`${styles.gateCard} ${styles.gate_open}`}>
+                    <p className={styles.kicker}>OTP gate</p>
+
+                    <div className={styles.openSeal} aria-hidden="true">
+                        <span className={styles.openRipple} />
+                        <span className={styles.openRipple} />
+                        <span className={styles.openRipple} />
+                        <span className={styles.openRing} />
+                        <span className={styles.openHalo} />
+                        <span className={styles.openCore}>
+                            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                <path
+                                    className={styles.openCheck}
+                                    d="M5 12.5l4.2 4.2L19 7"
+                                    stroke="currentColor"
+                                    strokeWidth="2.6"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                />
+                            </svg>
+                        </span>
+                        {Array.from({ length: 6 }).map((_, i) => (
+                            <span
+                                key={i}
+                                className={styles.openSat}
+                                style={{ ['--i' as string]: i }}
                             />
-                            <rect className={styles.body} x="14" y="28" width="36" height="26" rx="8" fill="#0284c7" />
-                            <circle cx="32" cy="41" r="3.5" fill="#e0f2fe" />
-                        </svg>
-                        <h2>Share unlocked</h2>
-                        <p>Opening the vault…</p>
+                        ))}
+                        {Array.from({ length: 10 }).map((_, i) => (
+                            <span
+                                key={`spark-${i}`}
+                                className={styles.openSpark}
+                                style={{ ['--i' as string]: i }}
+                            />
+                        ))}
                     </div>
-                ) : (
-                    <>
+
+                    <h1 className={styles.signinTitle}>Share unlocked</h1>
+                    <p className={styles.signinSub}>Vault open — taking you in…</p>
+
+                    <div className={styles.openBar} aria-hidden="true">
+                        <span className={styles.openBarFill} />
+                    </div>
+
+                    <div className={styles.trust}>
+                        <Shield size={16} strokeWidth={2} />
+                        <span>Seals matched. Routing you into the secure viewer.</span>
+                    </div>
+                </article>
+            ) : (
+            <div className={styles.card}>
+                <>
                         <div className={styles.head}>
                             <div className={styles.copy}>
                                 <p className={styles.kicker}>OTP gate</p>
@@ -488,31 +565,93 @@ export default function SharePage({ params }: SharePageProps) {
                                         'Enter the six-digit code from your email'
                                     )}
                                 </p>
+
                                 <div
-                                    className={`${styles.track} ${state === 'loading' ? styles.checking : ''} ${shake || state === 'error' ? styles.bad : ''}`}
+                                    className={[
+                                        styles.vault,
+                                        state === 'loading' ? styles.vaultChecking : '',
+                                        shake || state === 'error' ? styles.vaultBad : '',
+                                        otp.every((d) => d) && state === 'idle' ? styles.vaultReady : '',
+                                    ].filter(Boolean).join(' ')}
                                 >
-                                    <span
-                                        className={styles.scan}
-                                        style={{ transform: state === 'loading' ? undefined : `translateX(${activeIndex * 100}%)` }}
-                                    />
-                                    {otp.map((digit, index) => (
-                                        <input
-                                            key={index}
-                                            ref={(el) => { inputRefs.current[index] = el; }}
-                                            type="password"
-                                            inputMode="numeric"
-                                            maxLength={1}
-                                            value={digit}
-                                            onChange={(e) => handleChange(index, e.target.value)}
-                                            onKeyDown={(e) => handleKeyDown(index, e)}
-                                            onPaste={handlePaste}
-                                            onFocus={() => setActiveIndex(index)}
-                                            className={styles.slot}
-                                            disabled={state === 'loading' || countdown <= 0}
-                                            autoComplete="one-time-code"
-                                        />
-                                    ))}
+                                    <div
+                                        className={styles.sealOrb}
+                                        aria-hidden="true"
+                                        style={{ ['--filled' as string]: otp.filter(Boolean).length }}
+                                    >
+                                        <span className={styles.orbRipple} />
+                                        <span className={styles.orbRipple} />
+                                        <span className={styles.orbCore}>
+                                            <span className={styles.orbCount}>{otp.filter(Boolean).length}</span>
+                                            <span className={styles.orbOf}>/6</span>
+                                        </span>
+                                        {Array.from({ length: 6 }).map((_, i) => (
+                                            <span
+                                                key={i}
+                                                className={[
+                                                    styles.orbSat,
+                                                    otp[i] ? styles.orbSatOn : '',
+                                                ].filter(Boolean).join(' ')}
+                                                style={{ ['--i' as string]: i }}
+                                            />
+                                        ))}
+                                    </div>
+
+                                    <div
+                                        className={[
+                                            styles.cells,
+                                            !cellsVisible ? styles.cellsHidden : '',
+                                        ].filter(Boolean).join(' ')}
+                                        aria-hidden={!cellsVisible}
+                                    >
+                                        {otp.map((digit, index) => (
+                                            <label
+                                                key={index}
+                                                className={[
+                                                    styles.cell,
+                                                    digit ? styles.cellFilled : '',
+                                                    activeIndex === index && state !== 'loading' ? styles.cellActive : '',
+                                                ].filter(Boolean).join(' ')}
+                                                style={{ ['--i' as string]: index }}
+                                            >
+                                                <span className={styles.cellRing} aria-hidden="true" />
+                                                <input
+                                                    ref={(el) => { inputRefs.current[index] = el; }}
+                                                    type="text"
+                                                    inputMode="numeric"
+                                                    pattern="[0-9]*"
+                                                    maxLength={1}
+                                                    value={digit}
+                                                    onChange={(e) => handleChange(index, e.target.value)}
+                                                    onKeyDown={(e) => handleKeyDown(index, e)}
+                                                    onPaste={handlePaste}
+                                                    onFocus={() => setActiveIndex(index)}
+                                                    className={styles.cellInput}
+                                                    disabled={state === 'loading' || countdown <= 0 || !cellsVisible}
+                                                    tabIndex={cellsVisible ? 0 : -1}
+                                                    autoComplete={index === 0 ? 'one-time-code' : 'off'}
+                                                    aria-label={`Digit ${index + 1}`}
+                                                />
+                                                {digit ? (
+                                                    <span className={styles.cellDigit} aria-hidden="true">{digit}</span>
+                                                ) : (
+                                                    <span className={styles.cellGhost} aria-hidden="true">·</span>
+                                                )}
+                                            </label>
+                                        ))}
+                                    </div>
+
+                                    <p className={styles.sealLabel}>
+                                        {state === 'loading'
+                                            ? 'Matching seals across the vault…'
+                                            : state === 'error'
+                                                ? 'Seal rejected — try again'
+                                                : otp.every((d) => d)
+                                                    ? 'All seals set — unlocking'
+                                                    : `${otp.filter(Boolean).length} of 6 seals set`}
+                                    </p>
                                 </div>
+
                                 {error ? <p className={styles.error}>{error}</p> : null}
                                 <button
                                     type="button"
@@ -521,7 +660,7 @@ export default function SharePage({ params }: SharePageProps) {
                                     className={`${styles.go} ${state === 'loading' ? styles.busy : ''}`}
                                 >
                                     {state === 'loading' ? <span className={styles.spin} /> : <Lock size={16} />}
-                                    {state === 'loading' ? 'Matching code…' : state === 'error' ? 'Try again' : 'Unlock'}
+                                    {state === 'loading' ? 'Sealing…' : state === 'error' ? 'Try again' : 'Unlock'}
                                 </button>
                                 {resendMessage ? <p className={styles.note}>{resendMessage}</p> : null}
                                 <button
@@ -543,8 +682,8 @@ export default function SharePage({ params }: SharePageProps) {
 
                         <p className={styles.hint}>We only ask for this code on this page — never by email or phone.</p>
                     </>
-                )}
             </div>
+            )}
         </main>
     );
 }

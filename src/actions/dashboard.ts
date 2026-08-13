@@ -389,16 +389,21 @@ export async function ownerHasActiveLink(userId: string): Promise<boolean> {
     const session = await auth();
     if (!session?.user?.id || session.user.id !== userId) return false;
 
-    const active = await prisma.secureLink.findFirst({
-        where: {
-            ownerId: userId,
-            isRevoked: false,
-            isUsed: false,
-            expiresAt: { gt: new Date() },
-            NOT: { LinkAccess: { some: { isUsed: true } } },
-        },
-        select: { id: true },
-    });
+    try {
+        const active = await prisma.secureLink.findFirst({
+            where: {
+                ownerId: userId,
+                isRevoked: false,
+                isUsed: false,
+                expiresAt: { gt: new Date() },
+                NOT: { LinkAccess: { some: { isUsed: true } } },
+            },
+            select: { id: true },
+        });
 
-    return Boolean(active);
+        return Boolean(active);
+    } catch (error) {
+        console.warn('[ownerHasActiveLink] DB unavailable — allowing create-link:', error);
+        return false;
+    }
 }

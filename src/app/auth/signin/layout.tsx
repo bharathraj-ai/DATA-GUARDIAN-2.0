@@ -20,12 +20,12 @@ export default function SignInLayout({
                 dangerouslySetInnerHTML={{
                     __html: `
 html, body {
-  background: #FFFFFF !important;
-  background-color: #FFFFFF !important;
+  background: #f4f7fb !important;
+  background-color: #f4f7fb !important;
   color: #0F172A !important;
 }
 #main-content {
-  background: #ffffff !important;
+  background: #f4f7fb !important;
   min-height: 100vh;
 }
 `,

@@ -35,8 +35,8 @@ export default function ViewLayout({
                 dangerouslySetInnerHTML={{
                     __html: `
 html, body {
-  background: #F8FAFC !important;
-  background-color: #F8FAFC !important;
+  background: #f4f7fb !important;
+  background-color: #f4f7fb !important;
   color: #0F172A !important;
 }
 #main-content {

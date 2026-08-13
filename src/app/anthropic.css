@@ -813,6 +813,21 @@ body, html {
 }
 .hiw-station:hover strong { color: #ffffff !important; }
 .hiw-station:hover small { color: rgba(255, 255, 255, 0.82) !important; }
+
+/* Blue core station inverts to white on hover */
+.hiw-station.hiw-station-core:hover {
+  background: #ffffff !important;
+  border-color: #7dd3fc !important;
+  box-shadow: 0 18px 36px rgba(2, 132, 199, 0.14) !important;
+  color: inherit !important;
+}
+.hiw-station.hiw-station-core:hover .hiw-station-idx { color: #0284c7 !important; }
+.hiw-station.hiw-station-core:hover .hiw-station-icon {
+  background: #e0f2fe !important;
+  color: #0369a1 !important;
+}
+.hiw-station.hiw-station-core:hover strong { color: #0f172a !important; }
+.hiw-station.hiw-station-core:hover small { color: #64748b !important; }
 .hiw-station-idx {
   font-size: 12px !important;
   font-weight: 800 !important;
@@ -1257,12 +1272,18 @@ body, html {
   gap: 8px !important;
   padding: 36px 32px !important;
   text-decoration: none !important;
-  background: #ffffff !important;
+  background: #eef7fd !important;
   border-right: 1px solid #bae6fd !important;
   transition: background 0.2s ease !important;
 }
-.srv-gate-panel-b { border-right: none !important; background: #f8fbff !important; }
-.srv-gate-panel:hover { background: #e0f2fe !important; }
+.srv-gate-panel-b {
+  border-right: none !important;
+  background: #eef7fd !important;
+}
+.srv-gate-panel:hover,
+.srv-gate-panel-b:hover {
+  background: #e0f2fe !important;
+}
 .srv-gate-panel span {
   font-size: 11px !important;
   font-weight: 700 !important;
