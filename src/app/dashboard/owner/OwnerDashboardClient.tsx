@@ -244,7 +244,7 @@ export default function OwnerDashboardClient({
             if (result.success) {
                 setLinks(prev => prev.filter(l => l.id !== link.id));
                 setNotification({
-                    message: `Access revoked${link.allowedVendorEmail ? ` for ${link.allowedVendorEmail}` : ''} and all shared data permanently deleted.`,
+                    message: `Access revoked${link.allowedVendorEmail ? ` for ${link.allowedVendorEmail}` : ''}. Shared data is being deleted.`,
                     type: 'success',
                 });
             } else {
@@ -465,7 +465,7 @@ export default function OwnerDashboardClient({
                                                 placeholder="Search logs..."
                                                 value={auditFilter.search}
                                                 onChange={(e) => setAuditFilter({ ...auditFilter, search: e.target.value })}
-                                                style={{ flex: 1, minWidth: '200px', padding: '8px 12px', borderRadius: '8px', background: 'rgba(0,0,0,0.2)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)' }}
+                                                style={{ flex: '1 1 160px', minWidth: 0, width: '100%', padding: '8px 12px', borderRadius: '8px', background: 'rgba(0,0,0,0.2)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)' }}
                                             />
                                             <select
                                                 value={auditFilter.type}
@@ -624,7 +624,7 @@ export default function OwnerDashboardClient({
                                                     {/* Row 2: Details Grid */}
                                                     <div style={{
                                                         display: 'grid',
-                                                        gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                                                        gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 160px), 1fr))',
                                                         gap: '16px',
                                                         padding: '14px 18px',
                                                         borderRadius: '10px',
@@ -781,7 +781,7 @@ export default function OwnerDashboardClient({
                                                 {/* Properties Detail Grid */}
                                                 <div style={{
                                                     display: 'grid',
-                                                    gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                                                    gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 160px), 1fr))',
                                                     gap: '16px',
                                                     background: '#F9FAFB',
                                                     border: '1px solid #E5E7EB',

@@ -1,13 +1,19 @@
+import { Suspense } from 'react';
 import { redirect } from 'next/navigation';
 import { auth } from '@/lib/auth';
 import { getReceivedLinks } from '@/actions/dashboard';
-import { getDbUserRole } from '@/lib/security/roles';
 import { getOnboardingStep } from '@/lib/onboarding';
+import { normalizeRole } from '@/lib/security/roles';
 import VendorDashboardClient from './VendorDashboardClient';
+import DashboardSkeleton from '../DashboardSkeleton';
+
+async function VendorDashboardData({ email }: { email: string }) {
+    const initialLinks = await getReceivedLinks(email);
+    return <VendorDashboardClient initialLinks={initialLinks} userEmail={email} />;
+}
 
 /**
- * Prefetch received links on the server — eliminates client session waterfall.
- * Role gate uses Postgres, never JWT alone.
+ * JWT role gate first (fast redirect), then stream links so the shell paints immediately.
  */
 export default async function VendorDashboardPage() {
     const session = await auth();
@@ -16,26 +22,17 @@ export default async function VendorDashboardPage() {
         redirect('/auth/signin?callbackUrl=/dashboard/vendor');
     }
 
-    const [dbUser, initialLinks] = await Promise.all([
-        getDbUserRole(session.user.id),
-        getReceivedLinks(session.user.email),
-    ]);
-    if (!dbUser) {
-        redirect('/auth/signin?callbackUrl=/dashboard/vendor');
-    }
-
-    if (getOnboardingStep(dbUser.roleSelected) === 'ROLE_SELECTION') {
+    if (getOnboardingStep(session.user.roleSelected) === 'ROLE_SELECTION') {
         redirect('/auth/role-select?callbackUrl=/dashboard/vendor');
     }
 
-    if (dbUser.role === 'OWNER') {
+    if (normalizeRole(session.user.role) === 'OWNER') {
         redirect('/dashboard/owner');
     }
 
     return (
-        <VendorDashboardClient
-            initialLinks={initialLinks}
-            userEmail={session.user.email}
-        />
+        <Suspense fallback={<DashboardSkeleton />}>
+            <VendorDashboardData email={session.user.email} />
+        </Suspense>
     );
 }

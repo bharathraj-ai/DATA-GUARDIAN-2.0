@@ -118,9 +118,41 @@ export async function uploadStreamToMongo(params: MongoStreamUploadParams): Prom
   });
 }
 
-export async function downloadFromMongo(gridFSId: string, _expectedSize?: number): Promise<Buffer> {
+export async function downloadFromMongo(gridFSId: string, expectedSize?: number): Promise<Buffer> {
   const bucket = await getGridFSBucket();
   const downloadStream = bucket.openDownloadStream(new ObjectId(gridFSId));
+  const known = typeof expectedSize === 'number' && expectedSize > 0 && expectedSize <= 80 * 1024 * 1024;
+
+  if (known) {
+    const out = Buffer.allocUnsafe(expectedSize!);
+    let offset = 0;
+    const overflow: Buffer[] = [];
+    return new Promise((resolve, reject) => {
+      downloadStream.on('data', (chunk: Buffer) => {
+        const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        if (overflow.length === 0 && offset + bytes.length <= out.length) {
+          bytes.copy(out, offset);
+          offset += bytes.length;
+          return;
+        }
+        if (overflow.length === 0) {
+          overflow.push(out.subarray(0, offset), bytes);
+        } else {
+          overflow.push(bytes);
+        }
+        offset += bytes.length;
+      });
+      downloadStream.on('error', reject);
+      downloadStream.on('end', () => {
+        if (overflow.length === 0) {
+          resolve(offset === out.length ? out : out.subarray(0, offset));
+          return;
+        }
+        resolve(Buffer.concat(overflow, offset));
+      });
+    });
+  }
+
   const chunks: Buffer[] = [];
   let total = 0;
   return new Promise((resolve, reject) => {

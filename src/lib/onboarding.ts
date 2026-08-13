@@ -35,6 +35,18 @@ export function dashboardPathForRole(role: string | null | undefined): string {
     return normalizeRole(role) === 'VENDOR' ? '/dashboard/vendor' : '/dashboard/owner';
 }
 
+/** `/dashboard` and role dashboards — skip the extra hop, go straight to role path. */
+export function isDashboardEntryPath(path: string): boolean {
+    return (
+        path === '/dashboard' ||
+        path.startsWith('/dashboard?') ||
+        path === '/dashboard/owner' ||
+        path.startsWith('/dashboard/owner?') ||
+        path === '/dashboard/vendor' ||
+        path.startsWith('/dashboard/vendor?')
+    );
+}
+
 /**
  * Post-login destination after Google OAuth / session restore.
  * Completed users never land on role-select.
@@ -52,6 +64,6 @@ export function resolvePostAuthRedirect(opts: {
     }
 
     const cb = safeCallbackPath(opts.callbackUrl);
-    if (cb) return cb;
+    if (cb && !isDashboardEntryPath(cb)) return cb;
     return dashboardPathForRole(opts.role);
 }

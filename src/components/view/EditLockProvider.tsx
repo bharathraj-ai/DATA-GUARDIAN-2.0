@@ -356,7 +356,7 @@ export function EditLockProvider({
 
     return (
         <EditLockContext.Provider value={ctx}>
-            <div style={{ position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 200, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, pointerEvents: 'none' }}>
+            <div className="edit-lock-status" style={{ position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 200, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, pointerEvents: 'none' }}>
                 <div
                     style={{
                         pointerEvents: 'auto',

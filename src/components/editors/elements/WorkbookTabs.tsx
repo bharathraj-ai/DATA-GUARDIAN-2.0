@@ -9,7 +9,7 @@ interface WorkbookTabsProps {
 
 export function WorkbookTabs({ sheets, activeSheet, onTabChange, onTabDoubleClick }: WorkbookTabsProps) {
   return (
-    <div style={{ display: "flex", borderBottom: "1px solid #e5e7eb", background: "#f8fafc", overflowX: "auto", flexShrink: 0 }}>
+    <div className="workbook-tabs" style={{ display: "flex", borderBottom: "1px solid #e5e7eb", background: "#f8fafc", overflowX: "auto", flexShrink: 0, maxWidth: "100%" }}>
       {sheets.map((sheet, idx) => (
         <div
           key={idx}

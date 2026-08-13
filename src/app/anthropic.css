@@ -280,7 +280,7 @@ body, html {
 }
 
 /* Sections */
-.features-section, .stats-section, .cta-section, .how-cta-section, .security-section, .main-services-section, .use-cases-section, .steps-section {
+.features-section, .stats-section, .how-cta-section, .security-section, .main-services-section, .use-cases-section, .steps-section {
   background: #FFFFFF !important;
 }
 
@@ -339,18 +339,53 @@ body, html {
 
 /* CTA */
 .cta-card, .services-cta-card, .how-cta-card {
-  background: #F8FAFC !important;
-  border: none !important;
-  border-radius: 16px !important;
-  padding: 60px 40px !important;
-  text-align: left !important;
+  background: rgba(255, 255, 255, 0.92) !important;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 20px !important;
 }
 .cta-title, .how-cta-title, .services-cta-title {
   color: #111827 !important;
-  font-size: 32px !important;
 }
 .cta-subtitle, .how-cta-subtitle, .services-cta-subtitle {
   color: #4B5563 !important;
+}
+
+@media (min-width: 769px) {
+  .cta-card, .services-cta-card, .how-cta-card {
+    padding: 56px 48px !important;
+    text-align: left !important;
+    border-radius: 24px !important;
+  }
+  .cta-title, .how-cta-title, .services-cta-title {
+    font-size: 32px !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .cta-section {
+    background:
+      linear-gradient(180deg, rgba(248, 250, 252, 0.82), rgba(255, 255, 255, 0.94)),
+      url('/bg.png') center / cover no-repeat !important;
+    padding: 20px 16px 36px !important;
+  }
+  .cta-card, .services-cta-card, .how-cta-card {
+    text-align: center !important;
+    padding: 28px 18px 32px !important;
+  }
+  .cta-title, .how-cta-title, .services-cta-title {
+    font-size: 24px !important;
+    line-height: 1.3 !important;
+    text-align: center !important;
+  }
+  .cta-subtitle, .how-cta-subtitle, .services-cta-subtitle {
+    font-size: 15px !important;
+    text-align: center !important;
+  }
+  .navbar-mobile-toggle {
+    background: #f1f5f9 !important;
+    color: #0f172a !important;
+    border: 1px solid #cbd5e1 !important;
+  }
 }
 
 /* Status / Alerts */

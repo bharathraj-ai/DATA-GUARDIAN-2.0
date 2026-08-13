@@ -1,0 +1,253 @@
+/**
+ * Production responsive pass — loaded last.
+ * Extends the existing design system; does not change business logic.
+ */
+
+html {
+  overflow-x: clip;
+  max-width: 100%;
+}
+
+body {
+  overflow-x: clip;
+  max-width: 100%;
+}
+
+#main-content,
+.app-page,
+.landing-page,
+.revoke-wrapper,
+.profile-wrapper {
+  min-width: 0;
+  max-width: 100%;
+}
+
+img,
+video {
+  max-width: 100%;
+}
+
+button,
+a.btn,
+.btn,
+input,
+select,
+textarea {
+  max-width: 100%;
+}
+
+/* Live Activity modal — stack sidebar + chat on small screens */
+.live-activity-overlay {
+  padding: max(12px, env(safe-area-inset-top, 0px)) 12px max(12px, env(safe-area-inset-bottom, 0px));
+}
+
+.live-activity-dialog {
+  width: 100%;
+  max-width: 600px;
+  max-height: min(92dvh, 90vh);
+  min-width: 0;
+}
+
+.live-activity-body {
+  display: flex;
+  flex: 1;
+  min-height: 280px;
+  min-width: 0;
+  flex-direction: row;
+}
+
+.live-activity-sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 20px;
+  overflow-y: auto;
+}
+
+.live-activity-chat {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+@media (max-width: 640px) {
+  .live-activity-body {
+    flex-direction: column;
+    min-height: 0;
+    max-height: calc(92dvh - 88px);
+  }
+
+  .live-activity-sidebar {
+    width: 100%;
+    max-height: 140px;
+    border-right: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    padding: 12px 16px;
+  }
+
+  .live-activity-dialog {
+    max-height: 96dvh;
+    border-radius: 14px;
+  }
+}
+
+/* Dashboard / tables / filters */
+@media (max-width: 1023px) {
+  .stats-container-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .card-header-flex {
+    flex-wrap: wrap;
+  }
+
+  .action-filter-wrapper {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .segmented-filter-bar {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    flex-wrap: nowrap;
+  }
+
+  .segmented-filter-bar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .segment-pill-btn {
+    flex: 0 0 auto;
+    min-height: 44px;
+    white-space: nowrap;
+  }
+
+  .premium-link-card {
+    padding: 18px 16px;
+    overflow: hidden;
+  }
+
+  .app-form-card {
+    padding: 24px 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  .stats-container-grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .stat-card-premium {
+    padding: 14px;
+    gap: 12px;
+  }
+
+  .stat-value-premium {
+    font-size: 20px;
+  }
+
+  .app-page-title {
+    font-size: 26px;
+  }
+
+  .app-page-subtitle {
+    font-size: 14px;
+    padding: 0 4px;
+  }
+
+  .premium-detail-label,
+  .status-details .detail-label {
+    min-width: 0 !important;
+  }
+
+  .container {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .hero-section .container {
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+    gap: 28px !important;
+  }
+}
+
+@media (max-width: 360px) {
+  .navbar-logo span {
+    font-size: 15px !important;
+  }
+
+  .otp-box {
+    width: 36px !important;
+    height: 46px !important;
+    font-size: 18px !important;
+  }
+
+  .otp-boxes {
+    gap: 4px !important;
+  }
+}
+
+/* Modals / confirm dialogs */
+@media (max-width: 767px) {
+  .confirm-dialog {
+    width: calc(100% - 24px) !important;
+    max-width: 100% !important;
+    max-height: min(92dvh, 90vh);
+    overflow-y: auto;
+    margin: 12px;
+  }
+
+  .editor-container .confirm-card {
+    padding: 24px 18px;
+    margin: 12px;
+    max-height: min(92dvh, 90vh);
+    overflow-y: auto;
+  }
+
+  .navbar-mobile-toggle {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .btn,
+  .btn-sm {
+    min-height: 44px;
+  }
+}
+
+/* Large desktop breathing room */
+@media (min-width: 1920px) {
+  .container {
+    max-width: 1440px;
+  }
+}
+
+/* Spreadsheet / editor — keep sheet inside the viewport */
+.editor-container,
+.spreadsheet-app,
+.workbook-tabs {
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* Touch: don't rely on hover-only affordances */
+@media (hover: none) and (pointer: coarse) {
+  .nav-link,
+  .nav-link-mobile,
+  .segment-pill-btn,
+  .btn {
+    min-height: 44px;
+  }
+
+  .feature-card:hover,
+  .stat-card-premium:hover,
+  .premium-link-card:hover {
+    transform: none;
+  }
+}

@@ -1,13 +1,11 @@
 'use server';
 
 import { prisma } from '@/lib/prisma';
-import { decryptBuffer, decryptDek } from '@/lib/crypto';
 import * as XLSX from 'xlsx';
 import { authorizeSecureLink } from '@/lib/linkAuthorization';
 import { checkDownloadRateLimit, extractClientIP, formatRateLimitError } from '@/lib/rate-limit';
 import { headers } from 'next/headers';
-import { downloadFromMongo } from '@/lib/mongo/operations';
-import { gridFsIdForFile } from '@/lib/security/resource-ownership';
+import { decryptUserFileBytes } from '@/lib/decrypt-user-file';
 
 const PREVIEW_ROW_LIMIT = 10;
 
@@ -104,49 +102,12 @@ export async function getFilePreview(token: string, fileId: string): Promise<Fil
             return { success: false, error: 'File not found' };
         }
 
-        // 3. Decrypt Content — supports both inline and Mongo-backed files
         let buffer: Buffer;
-
-        if (fileRecord.encryptedContent) {
-            // Inline encrypted content (draft saves)
-            try {
-                const dek = (fileRecord as any).encryptedDek ? decryptDek((fileRecord as any).encryptedDek) : undefined;
-                buffer = decryptBuffer(
-                    fileRecord.encryptedContent,
-                    fileRecord.iv!,
-                    fileRecord.authTag!,
-                    dek
-                );
-            } catch (e) {
-                return { success: false, error: 'Decryption failed' };
-            }
-        } else if ((fileRecord as any).mongoFileId) {
-            try {
-                const gridFSId = gridFsIdForFile(fileRecord);
-                if (!gridFSId) {
-                    return { success: false, error: 'File storage record not found' };
-                }
-
-                const rawBuffer = await downloadFromMongo(gridFSId, fileRecord.fileSize);
-                
-                if (fileRecord.iv && fileRecord.authTag) {
-                    const dek = (fileRecord as any).encryptedDek ? decryptDek((fileRecord as any).encryptedDek) : undefined;
-                    buffer = decryptBuffer(
-                        rawBuffer,
-                        fileRecord.iv,
-                        fileRecord.authTag,
-                        dek
-                    );
-                } else {
-                    // Mongo stores raw if no inline encryption metadata exists
-                    buffer = rawBuffer;
-                }
-            } catch (e) {
-                console.error('[PREVIEW] Mongo download/decrypt failed:', e);
-                return { success: false, error: 'Failed to retrieve file for preview' };
-            }
-        } else {
-            return { success: false, error: 'File has no content available for preview' };
+        try {
+            buffer = await decryptUserFileBytes(fileRecord);
+        } catch (e) {
+            console.error('[PREVIEW] Decrypt failed:', e);
+            return { success: false, error: 'Failed to retrieve file for preview' };
         }
 
         // 4. Process Content based on Type
@@ -229,26 +190,19 @@ export async function getFilePreview(token: string, fileId: string): Promise<Fil
         }
 
         if (looksSpreadsheet) {
-            const workbook = XLSX.read(buffer, { type: 'buffer' });
+            const workbook = XLSX.read(buffer, { type: 'buffer', sheetRows: PREVIEW_ROW_LIMIT });
             const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
             if (!firstSheet) {
                 return { success: false, error: 'Spreadsheet has no readable sheets' };
             }
-            const decoded = firstSheet['!ref'] ? XLSX.utils.decode_range(firstSheet['!ref']) : null;
-            const totalRows = decoded ? decoded.e.r - decoded.s.r + 1 : 0;
-            if (decoded && totalRows > PREVIEW_ROW_LIMIT) {
-                firstSheet['!ref'] = XLSX.utils.encode_range({
-                    s: decoded.s,
-                    e: { r: decoded.s.r + PREVIEW_ROW_LIMIT - 1, c: decoded.e.c },
-                });
-            }
             const rawRows = (XLSX.utils.sheet_to_json(firstSheet, { header: 1 }) as unknown[][]) || [];
-            const rows = rawRows.map((row) => (Array.isArray(row) ? row.map(cellPreviewValue) : []));
-            const restricted = totalRows > PREVIEW_ROW_LIMIT;
-            const previewRows = rows.slice(0, PREVIEW_ROW_LIMIT);
+            const previewRows = rawRows
+                .slice(0, PREVIEW_ROW_LIMIT)
+                .map((row) => (Array.isArray(row) ? row.map(cellPreviewValue) : []));
+            const restricted = previewRows.length >= PREVIEW_ROW_LIMIT;
 
             if (restricted) {
-                await logRestriction('excel_rows', totalRows);
+                await logRestriction('excel_rows', previewRows.length);
             }
 
             return {
@@ -256,8 +210,8 @@ export async function getFilePreview(token: string, fileId: string): Promise<Fil
                 type: 'spreadsheet',
                 content: previewRows,
                 restricted,
-                restrictionType: restricted ? `Showing first ${PREVIEW_ROW_LIMIT} of ${totalRows} rows` : undefined,
-                totalSize: totalRows,
+                restrictionType: restricted ? `Showing first ${PREVIEW_ROW_LIMIT} rows` : undefined,
+                totalSize: previewRows.length,
             };
         }
 

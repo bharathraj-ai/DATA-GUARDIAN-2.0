@@ -113,6 +113,13 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
             return { success: false, error: 'At least one vendor is required. Specify who you are sending data to.' };
         }
 
+        if (!isEmailConfigured()) {
+            return {
+                success: false,
+                error: 'Email is not configured on the server. Set EMAIL_USER and EMAIL_PASS (or SMTP_USER / SMTP_PASS) so the OTP can be delivered.',
+            };
+        }
+
         const allowEditing = formData.get('allowEditing') === 'true';
         const allowDownload = formData.get('allowDownload') === 'true';
         const validatedData = userDataSchema.safeParse(rawData);
@@ -398,39 +405,52 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
 
         logger.info(`Link created with ${files.length} files. ID: ${redactToken(result.id)}`);
 
-        const finishAfterResponse = async () => {
-            await prisma.auditLog.create({
-                data: {
-                    action: 'CREATED',
-                    linkId: result.id,
-                    metadata: JSON.stringify({
-                        fileCount: files.length,
-                        purpose: purpose || undefined,
-                        hasNotifications: !!notificationEmail,
-                        allowDownload,
-                    }),
-                },
-            }).catch(err => logger.warn('Failed to log audit event:', err.message));
+        try {
+            after(async () => {
+                await prisma.auditLog.create({
+                    data: {
+                        action: 'CREATED',
+                        linkId: result.id,
+                        metadata: JSON.stringify({
+                            fileCount: files.length,
+                            purpose: purpose || undefined,
+                            hasNotifications: !!notificationEmail,
+                            allowDownload,
+                        }),
+                    },
+                }).catch(err => logger.warn('Failed to log audit event:', err.message));
+            });
+        } catch {
+            /* audit is best-effort */
+        }
 
-            if (vendorAccessData.length === 0) return;
-            if (!isEmailConfigured()) {
-                logger.error('[EMAIL] Not configured — OTP emails were not sent');
-                return;
-            }
+        // Await OTP email — do not use after() here. On Vercel the isolate can freeze
+        // before Gmail SMTP finishes, so the owner UI would say "emailed" with no mail.
+        if (vendorAccessData.length > 0) {
             const { sendOTPEmail } = await import('@/lib/email');
-            await Promise.allSettled(
+            const results = await Promise.allSettled(
                 vendorAccessData.map((v) =>
                     sendOTPEmail(v.email, token, v.otp, validityMinutes).then(() =>
                         logger.info(`OTP sent to ${redactEmail(v.email)}`),
                     ),
                 ),
             );
-        };
-
-        try {
-            after(finishAfterResponse);
-        } catch {
-            void finishAfterResponse();
+            const failed = results.filter((r) => r.status === 'rejected');
+            if (failed.length === results.length) {
+                const reason = failed[0].status === 'rejected' ? failed[0].reason : null;
+                logger.error(
+                    '[EMAIL FAILED] Could not send any OTP emails after link create',
+                    reason instanceof Error ? reason.message : reason,
+                );
+                return {
+                    success: false,
+                    error: 'Secure link was created, but the OTP email could not be delivered. Check EMAIL_USER/EMAIL_PASS on Vercel (Gmail App Password) or try Resend OTP from the share page.',
+                    shareUrl,
+                    ownerUrl,
+                    expiresAt,
+                    purpose: purpose || undefined,
+                };
+            }
         }
 
         return {

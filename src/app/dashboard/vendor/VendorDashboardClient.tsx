@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { getReceivedLinks, DashboardLink } from '@/actions/dashboard';
 import { sendVendorOTP } from '@/actions/send-vendor-otp';
-import { Mail, Inbox, Clock, Eye, Ban, Coffee, Play, User, Calendar, Paperclip, FileText, RefreshCw } from 'lucide-react';
+import { Mail, Inbox, Clock, Eye, Coffee, Play, User, Calendar, Paperclip, FileText, RefreshCw } from 'lucide-react';
 
 interface VendorDashboardClientProps {
     initialLinks: DashboardLink[];
@@ -111,49 +111,6 @@ export default function VendorDashboardClient({
         });
     };
 
-    const getStatusBadge = (status: string) => {
-        const styles: Record<string, { bg: string; color: string; label: string }> = {
-            active: { bg: 'rgba(34, 197, 94, 0.15)', color: '#22c55e', label: 'Ready to View' },
-            expired: { bg: 'rgba(239, 68, 68, 0.15)', color: '#ef4444', label: 'Expired' },
-            revoked: { bg: 'rgba(239, 68, 68, 0.15)', color: '#ef4444', label: 'Revoked' },
-            used: { bg: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6', label: 'Viewed' },
-            break: { bg: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b', label: 'On Break' },
-        };
-        const s = styles[status] || styles.expired;
-
-        const renderIcon = () => {
-            if (status === 'active') {
-                return (
-                    <span style={{
-                        width: '8px', height: '8px', borderRadius: '50%', background: '#22c55e',
-                        display: 'inline-block', animation: 'pulse 2s infinite',
-                    }} />
-                );
-            }
-            if (status === 'used') {
-                return <Eye size={12} />;
-            }
-            if (status === 'revoked') {
-                return <Ban size={12} />;
-            }
-            if (status === 'break') {
-                return <Coffee size={12} />;
-            }
-            return <Clock size={12} />;
-        };
-
-        return (
-            <span style={{
-                padding: '4px 12px', borderRadius: '12px', fontSize: '0.75rem',
-                fontWeight: '600', background: s.bg, color: s.color,
-                display: 'inline-flex', alignItems: 'center', gap: '6px',
-            }}>
-                {renderIcon()}
-                <span>{s.label}</span>
-            </span>
-        );
-    };
-
     const getTimeRemaining = (expiresAt: Date) => {
         const now = new Date();
         const expiry = new Date(expiresAt);
@@ -166,14 +123,15 @@ export default function VendorDashboardClient({
         return `${minutes}m remaining`;
     };
 
-    const filteredLinks = filter === 'all' ? links : links.filter(l => l.status === filter);
+    const isLive = (status: string) => status === 'active' || status === 'used';
+    const filteredLinks = filter === 'all' ? links : links.filter((l) => l.status === filter);
     const counts = {
         all: links.length,
-        active: links.filter(l => l.status === 'active').length,
-        expired: links.filter(l => l.status === 'expired').length,
-        revoked: links.filter(l => l.status === 'revoked').length,
-        used: links.filter(l => l.status === 'used').length,
-        break: links.filter(l => l.status === 'break').length,
+        active: links.filter((l) => l.status === 'active').length,
+        expired: links.filter((l) => l.status === 'expired').length,
+        revoked: links.filter((l) => l.status === 'revoked').length,
+        used: links.filter((l) => l.status === 'used').length,
+        break: links.filter((l) => l.status === 'break').length,
     };
 
     return (
@@ -273,16 +231,25 @@ export default function VendorDashboardClient({
                                                     </div>
 
                                                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px' }}>
-                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                                            {getStatusBadge(link.status)}
-                                                            {link.status === 'active' && getTimeRemaining(link.expiresAt) && (
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                                                            {link.status === 'break' && (
                                                                 <span style={{
-                                                                    fontSize: '0.72rem', color: '#16a34a', fontWeight: '600',
-                                                                    padding: '2px 8px', borderRadius: '6px',
+                                                                    padding: '4px 10px', borderRadius: '12px', fontSize: '0.75rem',
+                                                                    fontWeight: 600, background: 'rgba(245, 158, 11, 0.15)', color: '#d97706',
+                                                                    display: 'inline-flex', alignItems: 'center', gap: '6px',
+                                                                }}>
+                                                                    <Coffee size={12} />
+                                                                    On Break
+                                                                </span>
+                                                            )}
+                                                            {isLive(link.status) && getTimeRemaining(link.expiresAt) && (
+                                                                <span style={{
+                                                                    fontSize: '0.75rem', color: '#16a34a', fontWeight: '600',
+                                                                    padding: '4px 10px', borderRadius: '12px',
                                                                     background: '#f0fdf4', border: '1px solid #bbf7d0',
                                                                     display: 'inline-flex', alignItems: 'center', gap: '4px'
                                                                 }}>
-                                                                    <Clock size={10} />
+                                                                    <Clock size={12} />
                                                                     <span>{getTimeRemaining(link.expiresAt)}</span>
                                                                 </span>
                                                             )}
@@ -332,13 +299,13 @@ export default function VendorDashboardClient({
                                                 {/* Actions Footer */}
                                                 <div className="premium-card-footer" style={{ borderTop: 'none', paddingTop: 0 }}>
                                                     <div className="premium-actions-left" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
-                                                        {link.status === 'active' ? (
+                                                        {link.status === 'active' || link.status === 'used' ? (
                                                             <Link
                                                                 href={`/share/${link.token}`}
                                                                 className="premium-btn-action primary"
                                                                 style={{ textDecoration: 'none' }}
                                                             >
-                                                                <Eye size={14} /> View Secure Data
+                                                                <Eye size={14} /> {link.status === 'used' ? 'Open Secure Data' : 'View Secure Data'}
                                                             </Link>
                                                         ) : link.status === 'break' ? (
                                                             <Link
@@ -348,15 +315,6 @@ export default function VendorDashboardClient({
                                                             >
                                                                 <Play size={14} /> Resume Work
                                                             </Link>
-                                                        ) : link.status === 'used' ? (
-                                                            <span style={{
-                                                                padding: '6px 14px', borderRadius: '8px',
-                                                                fontSize: '0.8rem', color: '#6B7280',
-                                                                background: '#F9FAFB', border: '1px solid #E5E7EB',
-                                                                fontWeight: 600
-                                                            }}>
-                                                                Data was accessed on {formatDate(link.expiresAt)}
-                                                            </span>
                                                         ) : (
                                                             <span style={{
                                                                 padding: '6px 14px', borderRadius: '8px',
@@ -368,7 +326,7 @@ export default function VendorDashboardClient({
                                                             </span>
                                                         )}
 
-                                                        {(link.status === 'active' || link.status === 'break') && (
+                                                        {(link.status === 'active' || link.status === 'used' || link.status === 'break') && (
                                                             <button
                                                                 type="button"
                                                                 onClick={() => handleResendOTP(link.token)}

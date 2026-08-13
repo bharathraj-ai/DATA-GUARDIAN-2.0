@@ -321,7 +321,7 @@ export default function CreateLinkClient({ initialVendors, hasActiveLink }: Crea
                                 </button>
                             </div>
                             <div className={styles.gridSettings}>
-                                <div style={{ display: 'flex', gap: '10px', flex: 1 }}>
+                                <div className={styles.expiryAmountRow}>
                                     <div className={styles.inputWrapper} style={{ flex: 1 }}>
                                         {formData.expiryMode === 'time' ? (
                                             <Clock className={styles.inputIcon} size={18} />
@@ -624,9 +624,9 @@ export default function CreateLinkClient({ initialVendors, hasActiveLink }: Crea
 
                         {/* Vendor Permissions Box */}
                         <div className={styles.permissionsBox} style={{ marginTop: '2rem' }}>
-                            <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid #e5e7eb', display: 'flex', gap: '12px', alignItems: 'center' }}>
-                                <Building2 size={20} color="#3b82f6" />
-                                <div>
+                            <div className={styles.permHeader}>
+                                <Building2 size={20} color="#3b82f6" style={{ flexShrink: 0, marginTop: 2 }} />
+                                <div className={styles.permText}>
                                     <div style={{ fontWeight: 600, color: '#111827', fontSize: '0.875rem' }}>Vendor Permissions</div>
                                     <div style={{ fontSize: '0.8125rem', color: '#6b7280' }}>Grant vendor specific permissions for shared files.</div>
                                 </div>

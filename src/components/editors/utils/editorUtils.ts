@@ -1,5 +1,11 @@
 export const uid = () => Math.random().toString(36).slice(2, 10);
 
+/** Touch / stylus — single-tap edit, no hover. */
+export function isCoarsePointer(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.matchMedia("(hover: none) and (pointer: coarse)").matches;
+}
+
 export const FONTS = [
   "Georgia", "Times New Roman", "Palatino", "Garamond", "Arial", 
   "Helvetica", "Verdana", "Tahoma", "Trebuchet MS", "Courier New", 

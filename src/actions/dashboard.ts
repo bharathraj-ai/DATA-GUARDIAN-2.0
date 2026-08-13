@@ -42,8 +42,8 @@ export interface SendHistoryRecord {
 
 function getStatus(link: { expiresAt: Date; isUsed: boolean; isRevoked: boolean }): DashboardLink['status'] {
     if (link.isRevoked) return 'revoked';
-    if (link.isUsed) return 'used';
     if (new Date() > link.expiresAt) return 'expired';
+    if (link.isUsed) return 'used';
     return 'active';
 }
 

@@ -1,10 +1,8 @@
 'use server';
 
 import { prisma } from '@/lib/prisma';
-import { decryptBuffer, decryptDek } from '@/lib/crypto';
 import { authorizeSecureLink } from '@/lib/linkAuthorization';
-import { downloadFromMongo } from '@/lib/mongo/operations';
-import { gridFsIdForFile } from '@/lib/security/resource-ownership';
+import { decryptUserFileBytes } from '@/lib/decrypt-user-file';
 
 export type RawFileData = {
     success: boolean;
@@ -50,50 +48,11 @@ export async function getRawFileForEdit(token: string, fileId: string): Promise<
         }
 
         let buffer: Buffer;
-
-        // Priority: inline encrypted content (draft saves) → S3 (original upload)
-        if (fileRecord.encryptedContent) {
-            // ── Inline path: decrypt DB-stored content (latest draft) ──
-            try {
-                const dek = (fileRecord as any).encryptedDek ? decryptDek((fileRecord as any).encryptedDek) : undefined;
-                buffer = decryptBuffer(
-                    fileRecord.encryptedContent,
-                    fileRecord.iv!,
-                    fileRecord.authTag!,
-                    dek
-                );
-            } catch (e) {
-                return { success: false, error: 'Decryption failed' };
-            }
-        } else if ((fileRecord as any).mongoFileId) {
-            // ── Mongo fallback: download file from Mongo ─────────
-            try {
-                const gridFSId = gridFsIdForFile(fileRecord);
-                if (!gridFSId) {
-                    return { success: false, error: 'Mongo file record not found' };
-                }
-
-                const downloadedBuffer = await downloadFromMongo(gridFSId, fileRecord.fileSize);
-
-                // If iv/authTag are present, the file was encrypted at upload — decrypt it.
-                // If they're null, submitFinal stored the file raw in GridFS — use as-is.
-                if (fileRecord.iv && fileRecord.authTag) {
-                    const dek = (fileRecord as any).encryptedDek ? decryptDek((fileRecord as any).encryptedDek) : undefined;
-                    buffer = decryptBuffer(
-                        downloadedBuffer,
-                        fileRecord.iv,
-                        fileRecord.authTag,
-                        dek
-                    );
-                } else {
-                    buffer = downloadedBuffer;
-                }
-            } catch (e) {
-                console.error('[MONGO_EDIT] Download/Decrypt failed:', e);
-                return { success: false, error: 'Failed to retrieve or decrypt file from storage' };
-            }
-        } else {
-            return { success: false, error: 'File has no content available' };
+        try {
+            buffer = await decryptUserFileBytes(fileRecord);
+        } catch (e) {
+            console.error('[EDIT] Decrypt failed:', e);
+            return { success: false, error: 'Failed to retrieve or decrypt file from storage' };
         }
 
         const myAssignedLevel = authResult.context.isOwner

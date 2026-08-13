@@ -2,7 +2,7 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import "../editor.css";
 import { DocumentData } from "../types";
-import { getFileIcon, uid } from "../utils/editorUtils";
+import { getFileIcon, isCoarsePointer, uid } from "../utils/editorUtils";
 import { parseFile } from "../utils/fileParsers";
 import { exportDocument } from "../utils/fileExporters";
 import { useEditorState } from "../hooks/useEditorState";
@@ -48,7 +48,7 @@ export default function UniversalEditor({
   const [initialPdfFile, setInitialPdfFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(Boolean(initialFileProp));
   const [loadingMsg, setLoadingMsg] = useState(initialFileProp ? `Loading ${initialFileProp.name}...` : "");
-  const [scale, setScale] = useState(1.0);
+  const [scale, setScale] = useState(() => (isCoarsePointer() ? 1.35 : 1.0));
   const [showBg, setShowBg] = useState(true);
   
   const [chatOpen, setChatOpen] = useState(false);
@@ -471,28 +471,26 @@ export default function UniversalEditor({
       )}
 
       {/* ═══ Top Navbar ═══ */}
-      <div className="glass-bar" style={{ height: 56, display: "flex", alignItems: "center", padding: "0 20px", flexShrink: 0, zIndex: 100, position: "relative" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+      <div className="glass-bar editor-topbar">
+        <div className="editor-topbar-left">
           {onClose && (
-            <button className="btn btn-ghost" onClick={onClose} style={{ padding: "6px 12px", fontSize: 13, border: "1px solid #e5e7eb", borderRadius: 8, gap: 6 }}>
+            <button className="btn btn-ghost editor-back-btn" onClick={onClose} style={{ padding: "6px 12px", fontSize: 13, border: "1px solid #e5e7eb", borderRadius: 8, gap: 6 }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5" /><polyline points="12 19 5 12 12 5" /></svg>
-              Back
+              <span className="editor-back-label">Back</span>
             </button>
           )}
-          <div style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }} onClick={() => { setDoc(null); setInitialPdfFile(null); setView("editor"); }}>
-            <div style={{ width: 28, height: 28, borderRadius: 8, background: "#e0f2fe", display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid #bae6fd" }}>
+          <div className="editor-brand" onClick={() => { setDoc(null); setInitialPdfFile(null); setView("editor"); }}>
+            <div style={{ width: 28, height: 28, borderRadius: 8, background: "#e0f2fe", display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid #bae6fd", flexShrink: 0 }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0284c7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
             </div>
-            <span style={{ fontFamily: "'Inter', sans-serif", fontWeight: 700, fontSize: 15, color: "#0f172a", letterSpacing: "-0.019em" }}>Data Guardian</span>
+            <span className="editor-brand-label">Data Guardian</span>
           </div>
         </div>
 
-
-
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginLeft: "auto" }}>
+        <div className="editor-topbar-actions">
           {doc && view === "editor" && (
             <>
-              <div style={{ display: "flex", alignItems: "center", gap: 1, padding: "2px", background: "#fff", borderRadius: 8, border: "1px solid #e5e7eb" }}>
+              <div className="editor-zoom" style={{ display: "flex", alignItems: "center", gap: 1, padding: "2px", background: "#fff", borderRadius: 8, border: "1px solid #e5e7eb" }}>
                 <button className="btn btn-ghost" style={{ padding: 6, borderRadius: 4, height: 28, width: 28, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setScale(s => Math.max(0.4, +(s - 0.1).toFixed(2)))} title="Zoom Out">
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="5" y1="12" x2="19" y2="12" /></svg>
                 </button>
@@ -505,7 +503,7 @@ export default function UniversalEditor({
               {token && fileId && (
                 <button className={`btn ${chatOpen ? "btn-primary" : "btn-outline"}`} onClick={() => setChatOpen(!chatOpen)} style={{ padding: "6px 12px", borderRadius: 8, border: chatOpen ? "none" : "1px solid #e5e7eb" }}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
-                  Chat
+                  <span className="editor-action-label">Chat</span>
                 </button>
               )}
 
@@ -513,12 +511,13 @@ export default function UniversalEditor({
                 <>
                   <label className="btn btn-outline" style={{ cursor: "pointer", padding: "6px 12px" }} title="Upload a file to completely replace the current document">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>
-                    Replace
+                    <span className="editor-action-label">Replace</span>
                     <input type="file" style={{ display: "none" }} onChange={handleUploadReplace} />
                   </label>
                   <button className="btn btn-finish" onClick={() => setShowConfirmModal(true)} style={{ padding: "6px 16px" }}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>
-                    Finish Editing
+                    <span className="editor-finish-full">Finish Editing</span>
+                    <span className="editor-finish-short">Finish</span>
                   </button>
                 </>
               )}
@@ -557,7 +556,7 @@ export default function UniversalEditor({
                 {/* PAGES */}
                 <div className="toolbar-section">
                   <div className="toolbar-label">Pages</div>
-                  <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                  <div className="toolbar-chip-row">
                     {doc.pages.map((p, i) => (
                       <button key={p.id} className={`toolbar-page-btn ${activePage === i ? "active" : ""}`} onClick={() => setActivePage(i)} onDoubleClick={() => triggerRenamePage(i)} draggable onDragStart={e => handleDragStart(e, i)} onDragOver={e => handleDragOver(e, i)} onDrop={e => handleDropPage(e, i)} title={p.title || doc.metadata?.sheetNames?.[i] || `Page ${i + 1}`}>{p.title || doc.metadata?.sheetNames?.[i] || String(i + 1)}</button>
                     ))}
@@ -689,8 +688,8 @@ export default function UniversalEditor({
             )}
 
             {/* ═══ Canvas Area (full width) ═══ */}
-            <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", background: "#f4f7fb", position: "relative" }} onClick={() => setSelectedId(null)}>
-              {(doc.type === "xlsx" || doc.type === "csv") ? (
+            <div className={`editor-canvas ${(doc.type === "xlsx" || doc.type === "xls" || doc.type === "csv") ? "is-sheet" : ""}`} onClick={() => setSelectedId(null)}>
+              {(doc.type === "xlsx" || doc.type === "xls" || doc.type === "csv") ? (
                 <SpreadsheetApp
                   doc={doc}
                   scale={scale}
@@ -699,6 +698,7 @@ export default function UniversalEditor({
                   updatePage={updatePage}
                   onRegisterTableActions={onRegisterTableActions}
                   onRenameTab={triggerRenamePage}
+                  hideTabs={!isReadOnly}
                 />
               ) : (
                 <div style={{ minHeight: "100%", padding: "40px", display: "flex", flexDirection: "column", alignItems: "center" }}>
@@ -720,7 +720,7 @@ export default function UniversalEditor({
 
             {/* Chat Drawer */}
             {chatOpen && (
-              <div style={{ width: 320, background: "#ffffff", borderLeft: "1px solid #bae6fd", display: "flex", flexDirection: "column", flexShrink: 0, position: "absolute", right: 0, top: 0, bottom: 0, zIndex: 400, boxShadow: "-12px 0 32px rgba(2, 132, 199, 0.08)" }}>
+              <div className="editor-chat-drawer">
                 <div style={{ padding: 14, background: "linear-gradient(135deg, #0284c7, #0369a1)", display: "flex", gap: 8 }}>
                   <button className="btn btn-ghost" style={{ flex: 1, background: chatTab === 'group' ? "rgba(255,255,255,0.2)" : "transparent", color: "#fff" }} onClick={() => setChatTab('group')}>Team</button>
                   <button className="btn btn-ghost" style={{ flex: 1, background: chatTab === 'private' ? "rgba(255,255,255,0.2)" : "transparent", color: "#fff" }} onClick={() => setChatTab('private')}>Private</button>

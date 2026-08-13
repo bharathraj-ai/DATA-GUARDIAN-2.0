@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { setUserRole } from '@/actions/set-role';
+import { dashboardPathForRole, isDashboardEntryPath } from '@/lib/onboarding';
 import { Session } from 'next-auth';
 import { ArrowRight, KeyRound, Link2, Shield } from 'lucide-react';
 import styles from './role-select.module.css';
@@ -21,9 +22,8 @@ export default function RoleSelectClient({ callbackUrl, session }: RoleSelectCli
     const [error, setError] = useState('');
 
     const destinationForRole = (role: string | undefined) => {
-        if (role === 'OWNER' && callbackUrl) return callbackUrl;
-        if (role === 'OWNER') return '/dashboard/owner';
-        return '/dashboard/vendor';
+        if (callbackUrl && !isDashboardEntryPath(callbackUrl)) return callbackUrl;
+        return dashboardPathForRole(role);
     };
 
     const commitRole = async (role: 'OWNER' | 'VENDOR') => {

@@ -191,5 +191,21 @@
 }
 
 @media (max-width: 560px) {
-  .wrap { right: 16px; bottom: 88px; }
+  .wrap {
+    right: 12px;
+    left: 12px;
+    bottom: 88px;
+    align-items: stretch;
+  }
+  .panel {
+    width: 100%;
+    max-width: none;
+    height: min(70dvh, 480px);
+    max-height: calc(100dvh - 140px);
+  }
+  .fab {
+    align-self: flex-end;
+    min-width: 52px;
+    min-height: 52px;
+  }
 }

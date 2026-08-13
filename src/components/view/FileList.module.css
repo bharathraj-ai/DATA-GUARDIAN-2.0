@@ -342,5 +342,25 @@
     grid-column: 1 / -1;
     justify-content: flex-start;
     padding-left: 60px;
+    flex-wrap: wrap;
+  }
+  .modal {
+    padding: 0;
+    align-items: stretch;
+  }
+  .modalCard {
+    max-width: 100%;
+    max-height: 100dvh;
+    height: 100dvh;
+    border-radius: 0;
+  }
+  .modalBody iframe,
+  .wordFrame {
+    min-height: 50vh;
+    height: min(70dvh, 720px);
+  }
+  .modalHead h3 {
+    word-break: break-word;
+    min-width: 0;
   }
 }

@@ -17,6 +17,24 @@ export default function Navbar() {
     useEffect(() => { setHasMounted(true); }, []);
 
     useEffect(() => {
+        setIsMobileMenuOpen(false);
+    }, [pathname]);
+
+    useEffect(() => {
+        if (!isMobileMenuOpen) return;
+        const prevOverflow = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') setIsMobileMenuOpen(false);
+        };
+        window.addEventListener('keydown', onKey);
+        return () => {
+            document.body.style.overflow = prevOverflow;
+            window.removeEventListener('keydown', onKey);
+        };
+    }, [isMobileMenuOpen]);
+
+    useEffect(() => {
         const handleScroll = () => {
             setIsScrolled(window.scrollY > 20);
         };
@@ -143,10 +161,12 @@ export default function Navbar() {
 
                 {/* Mobile menu button */}
                 <button
+                    type="button"
                     className="navbar-mobile-toggle"
                     onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
                     aria-label={(hasMounted && isMobileMenuOpen) ? 'Close navigation menu' : 'Open navigation menu'}
                     aria-expanded={hasMounted && isMobileMenuOpen}
+                    aria-controls="navbar-mobile-drawer"
                 >
                     {(hasMounted && isMobileMenuOpen) ? (
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -165,7 +185,34 @@ export default function Navbar() {
 
             {/* Mobile Menu */}
             {isMobileMenuOpen && (
-                <div className="navbar-menu-mobile">
+                <>
+                <button
+                    type="button"
+                    className="navbar-drawer-overlay"
+                    aria-label="Close navigation menu"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                />
+                <div
+                    id="navbar-mobile-drawer"
+                    className="navbar-menu-mobile"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label="Site navigation"
+                >
+                    <div className="navbar-drawer-head">
+                        <span>Menu</span>
+                        <button
+                            type="button"
+                            className="navbar-drawer-close"
+                            onClick={() => setIsMobileMenuOpen(false)}
+                            aria-label="Close navigation menu"
+                        >
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                                <line x1="18" y1="6" x2="6" y2="18"></line>
+                                <line x1="6" y1="6" x2="18" y2="18"></line>
+                            </svg>
+                        </button>
+                    </div>
                     {navLinks.map((link) => (
                         <Link
                             key={link.href}
@@ -286,6 +333,7 @@ export default function Navbar() {
                         )}
                     </div>
                 </div>
+                </>
             )}
         </nav>
     );

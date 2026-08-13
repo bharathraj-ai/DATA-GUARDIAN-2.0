@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { TableElementData, TableCellData } from "../types";
+import { isCoarsePointer } from "../utils/editorUtils";
 
 export interface TableActions {
   addRow: () => void;
@@ -221,7 +222,7 @@ export const TableElement = React.memo(({ el, scale, onUpdate, selected, onSelec
             finishEditing();
           }
           setActiveCell({ r, c });
-          if (isActive && !isEditing) {
+          if (isCoarsePointer() || (isActive && !isEditing)) {
             setEditValue(cell.value);
             setEditingCell({ r, c });
           }
@@ -240,6 +241,7 @@ export const TableElement = React.memo(({ el, scale, onUpdate, selected, onSelec
           minWidth: currentWidth * scale,
           width: currentWidth * scale,
           minHeight: rowH * scale,
+          touchAction: "manipulation",
           verticalAlign: "middle",
           transition: isResizingThis ? "none" : "background 0.2s",
           position: "relative",
@@ -273,7 +275,7 @@ export const TableElement = React.memo(({ el, scale, onUpdate, selected, onSelec
               fontStyle: italic ? "italic" : "normal",
               textAlign: align,
               padding: `${2 * scale}px ${4 * scale}px`,
-              fontSize: 11 * scale,
+              fontSize: Math.max(16, 11 * scale),
               fontFamily: "inherit",
               overflow: "hidden",
             }}

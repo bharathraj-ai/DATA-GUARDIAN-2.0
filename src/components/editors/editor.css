@@ -3,7 +3,9 @@
 .editor-container {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100dvh;
+  max-width: 100%;
+  min-width: 0;
   background: #f4f7fb;
   color: #0f172a;
   user-select: none;
@@ -198,6 +200,92 @@
   border-bottom: 1px solid #e5e7eb;
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
 }
+
+.editor-container .editor-topbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  min-height: 56px;
+  height: auto;
+  padding: 8px 16px;
+  flex-shrink: 0;
+  z-index: 100;
+  position: relative;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.editor-container .editor-topbar-left,
+.editor-container .editor-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.editor-container .editor-topbar-actions {
+  margin-left: auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.editor-container .editor-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.editor-container .editor-finish-short {
+  display: none;
+}
+
+.editor-container .editor-canvas {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  background: #f4f7fb;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+}
+
+.editor-container .editor-canvas.is-sheet {
+  overflow: hidden;
+}
+
+.editor-container .editor-chat-drawer {
+  width: 320px;
+  max-width: 100%;
+  background: #ffffff;
+  border-left: 1px solid #bae6fd;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 400;
+  box-shadow: -12px 0 32px rgba(2, 132, 199, 0.08);
+}
+
+.editor-container .toolbar-chip-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.editor-container .toolbar-chip-row::-webkit-scrollbar {
+  display: none;
+}
 .editor-container .confirm-overlay {
   position: fixed;
   inset: 0;
@@ -230,7 +318,9 @@
   flex-shrink: 0;
   overflow-x: auto;
   overflow-y: hidden;
-  scrollbar-width: none;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
 }
 .editor-container .editor-toolbar::-webkit-scrollbar {
   display: none;
@@ -493,4 +583,84 @@
   font-size: 10px;
   font-weight: 600;
   color: #64748b;
+}
+
+@media (max-width: 768px) {
+  .editor-container .editor-topbar {
+    padding: 8px 10px;
+    gap: 8px;
+  }
+
+  .editor-container .editor-brand-label,
+  .editor-container .editor-action-label,
+  .editor-container .editor-back-label,
+  .editor-container .editor-finish-full,
+  .editor-container .editor-zoom {
+    display: none;
+  }
+
+  .editor-container .editor-finish-short {
+    display: inline;
+  }
+
+  .editor-container .editor-topbar .btn {
+    min-height: 40px;
+    min-width: 40px;
+    padding: 8px 10px !important;
+  }
+
+  .editor-container .editor-toolbar {
+    flex-wrap: wrap;
+    row-gap: 10px;
+    padding: 8px 8px 10px;
+    overflow-x: hidden;
+    overflow-y: visible;
+  }
+
+  .editor-container .toolbar-section {
+    padding: 0 6px;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .editor-container .toolbar-section > div {
+    flex-wrap: wrap;
+  }
+
+  .editor-container .toolbar-sep {
+    display: none;
+  }
+
+  .editor-container .toolbar-btn,
+  .editor-container .toolbar-page-btn {
+    min-height: 40px;
+  }
+
+  .editor-container .editor-chat-drawer {
+    width: 100%;
+  }
+
+  .editor-container .pinput,
+  .editor-container textarea {
+    font-size: 16px;
+  }
+
+  .editor-container .confirm-overlay {
+    padding: 12px;
+    align-items: flex-end;
+  }
+  .editor-container .confirm-card {
+    padding: 24px 18px;
+    border-radius: 16px 16px 0 0;
+    max-height: min(88dvh, 90vh);
+    overflow-y: auto;
+  }
+
+  .edit-lock-status {
+    top: auto !important;
+    left: 10px !important;
+    right: auto !important;
+    bottom: calc(10px + env(safe-area-inset-bottom, 0px)) !important;
+    transform: none !important;
+  }
 }

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { PageData, TableElementData, TableCellData, EditorElement } from "../types";
 import { TableActions } from "./TableElement";
+import { isCoarsePointer } from "../utils/editorUtils";
 
 export interface SheetRuntimeState {
   activeCell: { r: number; c: number } | null;
@@ -253,7 +254,7 @@ export const SpreadsheetView = React.memo(({ page, scale, initialState, onStateC
           e.stopPropagation();
           if (editingCell && (editingCell.r !== r || editingCell.c !== c)) finishEditing();
           setActiveCell({ r, c });
-          if (isActive && !isEditing) {
+          if (isCoarsePointer() || (isActive && !isEditing)) {
             setEditValue(cell.value);
             setEditingCell({ r, c });
           }
@@ -271,6 +272,7 @@ export const SpreadsheetView = React.memo(({ page, scale, initialState, onStateC
           minWidth: currentWidth * scale,
           width: currentWidth * scale,
           minHeight: scaledRowH,
+          touchAction: "manipulation",
           verticalAlign: "middle",
           transition: isResizingThis ? "none" : "background 0.2s",
           position: cellIsFrozen ? "sticky" : "relative",
@@ -293,7 +295,8 @@ export const SpreadsheetView = React.memo(({ page, scale, initialState, onStateC
               border: "none", outline: "none", resize: "none",
               background: "transparent", color, fontWeight: bold ? 600 : 400,
               fontStyle: italic ? "italic" : "normal", textAlign: align,
-              padding: `${2 * scale}px ${4 * scale}px`, fontSize: 11 * scale,
+              padding: `${2 * scale}px ${4 * scale}px`,
+              fontSize: Math.max(16, 11 * scale),
               fontFamily: "inherit", overflow: "hidden",
             }}
           />

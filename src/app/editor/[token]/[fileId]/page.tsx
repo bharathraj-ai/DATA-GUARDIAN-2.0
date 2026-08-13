@@ -88,7 +88,7 @@ function EditorWorkspace({
     const wordLike = isWordLikeFile(file);
 
     return (
-        <div style={{ width: '100vw', height: '100vh', background: '#f4f7fb', overflow: 'hidden', position: 'relative' }}>
+        <div style={{ width: '100%', height: '100dvh', maxWidth: '100%', background: '#f4f7fb', overflow: 'hidden', position: 'relative' }}>
             {wordLike ? (
                 <WordEditor
                     token={token}
@@ -142,23 +142,37 @@ export default function EditorPage({ params }: EditorPageProps) {
         const loadFile = async () => {
             try {
                 setLoading(true);
-                const result = await getRawFileForEdit(token, fileId);
+                const rawRes = await fetch(
+                    `/api/documents/${encodeURIComponent(fileId)}/raw?token=${encodeURIComponent(token)}`,
+                    { credentials: 'include', cache: 'no-store' },
+                );
                 if (!isMounted) return;
 
+                if (rawRes.ok) {
+                    const bytes = await rawRes.arrayBuffer();
+                    const fileName = decodeURIComponent(rawRes.headers.get('X-File-Name') || 'document');
+                    const mime = rawRes.headers.get('Content-Type') || 'application/octet-stream';
+                    setFile(new File([bytes], fileName, { type: mime }));
+                    setVersion(Number(rawRes.headers.get('X-File-Version') || 1));
+                    setMyLevel(Number(rawRes.headers.get('X-My-Level') || 2));
+                    setRemainingSeconds(Number(rawRes.headers.get('X-Remaining-Seconds') || 0));
+                    setCapabilities({
+                        canEdit: rawRes.headers.get('X-Can-Edit') === '1',
+                        canPreview: rawRes.headers.get('X-Can-Preview') !== '0',
+                        canComment: rawRes.headers.get('X-Can-Comment') !== '0',
+                        canDownload: rawRes.headers.get('X-Can-Download') === '1',
+                    });
+                    return;
+                }
+
+                const result = await getRawFileForEdit(token, fileId);
+                if (!isMounted) return;
                 if (!result.success || !result.base64Content) {
                     setError(result.error || 'Failed to load file for editing');
                     return;
                 }
-
-                // Decode base64 → Uint8Array using a streaming approach to avoid heap OOM
-                const binaryString = atob(result.base64Content);
-                const bytes = new Uint8Array(binaryString.length);
-                for (let i = 0; i < binaryString.length; i++) {
-                    bytes[i] = binaryString.charCodeAt(i);
-                }
-                const newFile = new File([bytes], result.fileName || 'document', { type: result.mimeType });
-
-                setFile(newFile);
+                const binary = Uint8Array.from(atob(result.base64Content), (c) => c.charCodeAt(0));
+                setFile(new File([binary], result.fileName || 'document', { type: result.mimeType }));
                 setVersion(result.version ?? 1);
                 if (typeof result.myAssignedLevel === 'number') setMyLevel(result.myAssignedLevel);
                 if (result.capabilities) setCapabilities(result.capabilities);

@@ -10,11 +10,13 @@
 .word-topbar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
   padding: 10px 16px;
   background: #fff;
   border-bottom: 1px solid #e2e8f0;
   flex-shrink: 0;
+  min-width: 0;
 }
 
 .word-topbar h1 {
@@ -25,7 +27,8 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 42vw;
+  max-width: min(42vw, 100%);
+  min-width: 0;
 }
 
 .word-topbar .meta {

@@ -105,11 +105,24 @@ describe('production source contracts', () => {
     expect(src).not.toMatch(/tryCheckRevoked/);
   });
 
+  it('instrumentation loads Node-only work only when NEXT_RUNTIME is nodejs', async () => {
+    const fs = await import('fs/promises');
+    const path = await import('path');
+    const hook = await fs.readFile(
+      path.join(process.cwd(), 'src/instrumentation.ts'),
+      'utf8',
+    );
+    expect(hook).toMatch(/process\.env\.NEXT_RUNTIME === ['"]nodejs['"]/);
+    expect(hook).toMatch(/import\(['"]\.\/instrumentation-node['"]\)/);
+    expect(hook).not.toMatch(/['"]@?\/?.*mongo\/client['"]/);
+    expect(hook).not.toMatch(/['"]dns\/promises['"]/);
+  });
+
   it('Vercel instrumentation skips in-process cleanup', async () => {
     const fs = await import('fs/promises');
     const path = await import('path');
     const src = await fs.readFile(
-      path.join(process.cwd(), 'src/instrumentation.ts'),
+      path.join(process.cwd(), 'src/instrumentation-node.ts'),
       'utf8',
     );
     expect(src).toMatch(/process\.env\.VERCEL/);
@@ -138,6 +151,22 @@ describe('production source contracts', () => {
     const path = await import('path');
     const src = await fs.readFile(path.join(process.cwd(), 'Dockerfile'), 'utf8');
     expect(src).toMatch(/\/api\/health\?ready=1/);
+  });
+
+  it('revoke returns before data cleanup (after())', async () => {
+    const fs = await import('fs/promises');
+    const path = await import('path');
+    const src = await fs.readFile(
+      path.join(process.cwd(), 'src/actions/revoke-access.ts'),
+      'utf8',
+    );
+    expect(src).toMatch(/from 'next\/server'/);
+    expect(src).toMatch(/runAfterResponse/);
+    const fnStart = src.indexOf('export async function revokeAccess');
+    const fnSlice = src.slice(fnStart, src.indexOf('export async function getLinkStatus'));
+    expect(fnSlice).toMatch(/runAfterResponse/);
+    const withoutAfter = fnSlice.replace(/runAfterResponse\([\s\S]*?\}\);/g, '');
+    expect(withoutAfter).not.toMatch(/executeSingleLinkCleanup/);
   });
 
   it('break returns before OTP email (after())', async () => {

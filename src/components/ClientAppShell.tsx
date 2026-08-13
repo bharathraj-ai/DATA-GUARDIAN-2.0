@@ -33,7 +33,7 @@ export default function ClientAppShell({ children, footer }: Props) {
 
     if (isFullscreenEditor) {
         return (
-            <div style={{ width: '100vw', height: '100vh', margin: 0, padding: 0, overflow: 'hidden' }}>
+            <div style={{ width: '100%', height: '100dvh', margin: 0, padding: 0, overflow: 'hidden', maxWidth: '100%' }}>
                 <style jsx global>{`
                     body {
                         margin: 0 !important;
@@ -49,7 +49,7 @@ export default function ClientAppShell({ children, footer }: Props) {
     return (
         <>
             {hideChrome ? null : <Navbar />}
-            <div id="main-content" style={{ background: hideSiteFooter ? '#f4f7fb' : '#FFFFFF', minHeight: '100vh' }}>{children}</div>
+            <div id="main-content" style={{ background: hideSiteFooter ? '#f4f7fb' : '#FFFFFF', minHeight: '100dvh', maxWidth: '100%', minWidth: 0 }}>{children}</div>
             {hideSiteFooter ? null : footer}
         </>
     );
