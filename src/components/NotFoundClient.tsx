@@ -22,8 +22,9 @@ const GROUND_Y = 268;
 const PLAYER_X = 72;
 const PLAYER_W = 44;
 const PLAYER_H = 48;
-const BASE_SPEED = 3.0;
-const MAX_SPEED = 6.8;
+const SPEED_SCALE = 1.5;
+const BASE_SPEED = 3.0 * SPEED_SCALE;
+const MAX_SPEED = 6.8 * SPEED_SCALE;
 
 export default function NotFoundClient() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
