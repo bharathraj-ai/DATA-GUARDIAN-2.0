@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { setUserRole } from '@/actions/set-role';
@@ -20,6 +20,7 @@ export default function RoleSelectClient({ callbackUrl, session }: RoleSelectCli
     const [isLoading, setIsLoading] = useState(false);
     const [selected, setSelected] = useState<'OWNER' | 'VENDOR' | null>(null);
     const [error, setError] = useState('');
+    const committingRef = useRef(false);
 
     const destinationForRole = (role: string | undefined) => {
         if (callbackUrl && !isDashboardEntryPath(callbackUrl)) return callbackUrl;
@@ -27,6 +28,8 @@ export default function RoleSelectClient({ callbackUrl, session }: RoleSelectCli
     };
 
     const commitRole = async (role: 'OWNER' | 'VENDOR') => {
+        if (committingRef.current) return;
+        committingRef.current = true;
         setIsLoading(true);
         setError('');
         setSelected(role);
@@ -34,24 +37,23 @@ export default function RoleSelectClient({ callbackUrl, session }: RoleSelectCli
         try {
             const result = await setUserRole(role);
 
-            if (result.success) {
+            if (result.success && result.role) {
                 await update({
-                    role,
                     roleSelected: true,
                     onboardingStep: 'COMPLETE',
                 });
-                router.replace(destinationForRole(role));
-            } else if (result.error === 'Role has already been selected') {
-                await update({ roleSelected: true, onboardingStep: 'COMPLETE' });
-                router.replace(destinationForRole(session?.user?.role ?? role));
-            } else {
-                setError(result.error || 'Failed to set role');
-                setSelected(null);
+                router.replace(destinationForRole(result.role));
+                return;
             }
+
+            committingRef.current = false;
+            setError(result.error || 'Failed to set role');
+            setSelected(null);
+            setIsLoading(false);
         } catch {
+            committingRef.current = false;
             setError('Something went wrong. Please try again.');
             setSelected(null);
-        } finally {
             setIsLoading(false);
         }
     };

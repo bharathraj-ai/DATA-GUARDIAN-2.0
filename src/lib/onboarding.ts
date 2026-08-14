@@ -1,4 +1,4 @@
-import { normalizeRole, type AppRole } from '@/lib/security/roles';
+import { normalizeRole, type AppRole } from '@/lib/security/role-helpers';
 
 /**
  * Persistent onboarding state derived from User.roleSelected.

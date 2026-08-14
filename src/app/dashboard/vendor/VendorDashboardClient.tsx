@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { getReceivedLinks, DashboardLink } from '@/actions/dashboard';
 import { sendVendorOTP } from '@/actions/send-vendor-otp';
@@ -22,12 +22,17 @@ export default function VendorDashboardClient({
     const [resendFeedback, setResendFeedback] = useState<Record<string, { type: 'ok' | 'err'; text: string }>>({});
     const [resendCooldown, setResendCooldown] = useState<Record<string, number>>({});
 
+    const fetchInFlight = useRef(false);
     const fetchLinks = useCallback(async () => {
+        if (fetchInFlight.current) return;
+        fetchInFlight.current = true;
         try {
             const received = await getReceivedLinks(userEmail);
             setLinks(received);
         } catch (error) {
             console.error('Error fetching links:', error);
+        } finally {
+            fetchInFlight.current = false;
         }
     }, [userEmail]);
 

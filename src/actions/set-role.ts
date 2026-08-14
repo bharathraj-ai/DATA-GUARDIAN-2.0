@@ -41,7 +41,14 @@ export async function setUserRole(role: AppRole) {
   });
 
   if (updated.count === 0) {
-    return { success: false, error: 'Role has already been selected' };
+    const existing = await prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { role: true, roleSelected: true },
+    });
+    if (existing?.roleSelected) {
+      return { success: true, role: normalizeRole(existing.role) };
+    }
+    return { success: false, error: 'Failed to set role' };
   }
 
   await prisma.auditLog.create({

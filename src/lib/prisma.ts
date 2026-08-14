@@ -64,9 +64,11 @@ function buildDatasourceUrl(): string {
     const usingPooler = isPoolerHost(url) || parsed.searchParams.get('pgbouncer') === 'true';
     // Dev direct compute has a tiny Neon max_connections budget — keep this low
     // or Neon issues E57P01 ("terminating connection due to administrator command").
+    // Direct Neon compute is small, but 3 is too tight: RSC + server actions +
+    // OAuth adapter queries overlap and hit P2024 (pool timeout).
     const defaultLimit = usingPooler
       ? (process.env.NODE_ENV === 'development' ? '5' : '10')
-      : (process.env.NODE_ENV === 'development' ? '3' : '12');
+      : (process.env.NODE_ENV === 'development' ? '5' : '12');
 
     parsed.searchParams.set(
       'connection_limit',

@@ -142,18 +142,18 @@ const VENDOR_LIST_SELECT = {
  * Avoids OR + relation `some()` which the planner cannot use cleanly.
  */
 async function findReceivedLinksByEmail(email: string) {
-    const [vendorRows, accessRows] = await Promise.all([
-        prisma.vendorAccess.findMany({
-            where: { email },
-            select: { secureLinkId: true },
-            take: 50,
-        }),
-        prisma.linkAccess.findMany({
-            where: { vendorEmail: email },
-            select: { secureLinkId: true },
-            take: 50,
-        }),
-    ]);
+    // Sequential on purpose: Promise.all needs 2 pool slots and trips P2024
+    // when OAuth / owner dashboard already hold the Neon direct limit.
+    const vendorRows = await prisma.vendorAccess.findMany({
+        where: { email },
+        select: { secureLinkId: true },
+        take: 50,
+    });
+    const accessRows = await prisma.linkAccess.findMany({
+        where: { vendorEmail: email },
+        select: { secureLinkId: true },
+        take: 50,
+    });
     const ids = [...new Set([
         ...vendorRows.map((r) => r.secureLinkId),
         ...accessRows.map((r) => r.secureLinkId),
@@ -448,24 +448,22 @@ export async function getOwnerDashboardData(userId: string): Promise<{
         return { links: [], history: [] };
     }
 
+    const links = await fetchOwnedLinksForOwner(userId);
+    const history = await prisma.sendRecord.findMany({
+        where: { ownerId: userId },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+        select: {
+            id: true,
+            topic: true,
+            vendorEmail: true,
+            fileCount: true,
+            status: true,
+            createdAt: true,
+            expiredAt: true,
+        },
+    });
     void purgeOwnerDeadLinks(userId);
-    const [links, history] = await Promise.all([
-        fetchOwnedLinksForOwner(userId),
-        prisma.sendRecord.findMany({
-            where: { ownerId: userId },
-            orderBy: { createdAt: 'desc' },
-            take: 100,
-            select: {
-                id: true,
-                topic: true,
-                vendorEmail: true,
-                fileCount: true,
-                status: true,
-                createdAt: true,
-                expiredAt: true,
-            },
-        }),
-    ]);
     return { links, history };
 }
 
