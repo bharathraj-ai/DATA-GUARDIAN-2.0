@@ -1,4 +1,3 @@
-import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 
 export type CleanupResult = {
@@ -11,13 +10,8 @@ export type CleanupResult = {
     error?: string;
 };
 
-/** Neon round-trips make the 5s default interactive-tx timeout easy to blow. */
-const CLEANUP_TX = {
-    maxWait: 10_000,
-    timeout: 20_000,
-} as const;
-
-const BATCH_SIZE = 25;
+/** Keep batches small — Neon direct compute + cold starts blow long interactive txs. */
+const BATCH_SIZE = 10;
 
 type LinkCleanupRow = {
     id: string;
@@ -45,88 +39,112 @@ async function deleteGridFSFiles(gridFSIds: string[]) {
 }
 
 /**
- * SendRecord / AuditLog survive link deletion — stamp them before the
- * interactive transaction so slow Neon updates cannot expire the tx.
+ * SendRecord / AuditLog survive link deletion.
+ * Runs outside any interactive transaction — Neon round-trips routinely exceed 5s.
+ * Failures here must not block the purge.
  */
 async function stampSurvivingRecords(links: LinkCleanupRow[], now: Date) {
-    const auditByOwner = new Map<string, string[]>();
+    try {
+        const auditByOwner = new Map<string, string[]>();
 
-    for (const link of links) {
-        if (!link.ownerId) continue;
+        for (const link of links) {
+            if (!link.ownerId) continue;
 
-        const status = link.isRevoked ? 'revoked' : 'expired';
-        const isGroupShare = link.LinkAccess.length > 1;
-        const vendorEmailToMatch = isGroupShare
-            ? `Group Share (${link.LinkAccess.length} members)`
-            : (link.LinkAccess[0]?.vendorEmail || null);
+            const status = link.isRevoked ? 'revoked' : 'expired';
+            const isGroupShare = link.LinkAccess.length > 1;
+            const vendorEmailToMatch = isGroupShare
+                ? `Group Share (${link.LinkAccess.length} members)`
+                : (link.LinkAccess[0]?.vendorEmail || null);
 
-        await prisma.sendRecord.updateMany({
-            where: {
-                ownerId: link.ownerId,
-                topic: link.purpose || '',
-                vendorEmail: vendorEmailToMatch,
-                status: 'active',
-            },
-            data: {
-                status,
-                expiredAt: now,
-            },
-        });
+            try {
+                await prisma.sendRecord.updateMany({
+                    where: {
+                        ownerId: link.ownerId,
+                        topic: link.purpose || '',
+                        vendorEmail: vendorEmailToMatch,
+                        status: 'active',
+                    },
+                    data: {
+                        status,
+                        expiredAt: now,
+                    },
+                });
+            } catch (err) {
+                console.warn(
+                    '[CLEANUP] sendRecord stamp skipped:',
+                    err instanceof Error ? err.message : err,
+                );
+            }
 
-        const ids = auditByOwner.get(link.ownerId) ?? [];
-        ids.push(link.id);
-        auditByOwner.set(link.ownerId, ids);
-    }
+            const ids = auditByOwner.get(link.ownerId) ?? [];
+            ids.push(link.id);
+            auditByOwner.set(link.ownerId, ids);
+        }
 
-    for (const [ownerId, linkIds] of auditByOwner) {
-        await prisma.auditLog.updateMany({
-            where: { linkId: { in: linkIds }, ownerId: null },
-            data: { ownerId },
-        });
+        for (const [ownerId, linkIds] of auditByOwner) {
+            try {
+                await prisma.auditLog.updateMany({
+                    where: { linkId: { in: linkIds }, ownerId: null },
+                    data: { ownerId },
+                });
+            } catch (err) {
+                console.warn(
+                    '[CLEANUP] auditLog stamp skipped:',
+                    err instanceof Error ? err.message : err,
+                );
+            }
+        }
+    } catch (err) {
+        console.warn(
+            '[CLEANUP] stampSurvivingRecords failed (non-blocking):',
+            err instanceof Error ? err.message : err,
+        );
     }
 }
 
-async function purgeLinkRows(
-    tx: Prisma.TransactionClient,
-    ids: {
-        linkIds: string[];
-        fileIds: string[];
-        mongoFileIds: string[];
-        userDataIds: string[];
-    },
-) {
-    await tx.chatMessage.deleteMany({
+/**
+ * Ordered deletes without an interactive transaction.
+ * Interactive txs default to 5s and fail on Neon under load; cleanup is idempotent
+ * so a mid-batch failure can be retried on the next run.
+ */
+async function purgeLinkRows(ids: {
+    linkIds: string[];
+    fileIds: string[];
+    mongoFileIds: string[];
+    userDataIds: string[];
+}) {
+    await prisma.chatMessage.deleteMany({
         where: { secureLinkId: { in: ids.linkIds } },
     });
 
     if (ids.fileIds.length > 0) {
-        await tx.documentSession.deleteMany({
+        await prisma.documentSession.deleteMany({
             where: { fileId: { in: ids.fileIds } },
         });
-        await tx.collabOperation.deleteMany({
+        await prisma.collabOperation.deleteMany({
             where: { fileId: { in: ids.fileIds } },
         });
-        await tx.documentChatMessage.deleteMany({
+        await prisma.documentChatMessage.deleteMany({
             where: { fileId: { in: ids.fileIds } },
         });
     }
 
     // UserFile references MongoFile — delete files before mongo metadata.
-    const deletedFiles = await tx.userFile.deleteMany({
+    const deletedFiles = await prisma.userFile.deleteMany({
         where: { secureLinkId: { in: ids.linkIds } },
     });
 
     if (ids.mongoFileIds.length > 0) {
-        await tx.mongoFile.deleteMany({
+        await prisma.mongoFile.deleteMany({
             where: { id: { in: ids.mongoFileIds } },
         });
     }
 
-    const deletedLinks = await tx.secureLink.deleteMany({
+    const deletedLinks = await prisma.secureLink.deleteMany({
         where: { id: { in: ids.linkIds } },
     });
 
-    const deletedUserData = await tx.userData.deleteMany({
+    const deletedUserData = await prisma.userData.deleteMany({
         where: { id: { in: ids.userDataIds } },
     });
 
@@ -215,16 +233,12 @@ export async function executeCleanup(options?: { ownerId?: string }): Promise<Cl
                 .flatMap((link) => link.UserFile.map((f) => f.mongoFileId))
                 .filter((id): id is string => !!id);
 
-            const result = await prisma.$transaction(
-                async (tx) =>
-                    purgeLinkRows(tx, {
-                        linkIds,
-                        fileIds: allFileIds,
-                        mongoFileIds: allMongoFileIds,
-                        userDataIds,
-                    }),
-                CLEANUP_TX,
-            );
+            const result = await purgeLinkRows({
+                linkIds,
+                fileIds: allFileIds,
+                mongoFileIds: allMongoFileIds,
+                userDataIds,
+            });
 
             totalDeletedLinks += result.deletedLinks;
             totalDeletedUserData += result.deletedUserData;
@@ -321,16 +335,12 @@ export async function executeSingleLinkCleanup(token: string): Promise<{ success
             .map((f) => f.mongoFileId)
             .filter((id): id is string => !!id);
 
-        await prisma.$transaction(
-            async (tx) =>
-                purgeLinkRows(tx, {
-                    linkIds: [secureLink.id],
-                    fileIds: secureLink.UserFile.map((f) => f.id),
-                    mongoFileIds,
-                    userDataIds: [secureLink.userId],
-                }),
-            CLEANUP_TX,
-        );
+        await purgeLinkRows({
+            linkIds: [secureLink.id],
+            fileIds: secureLink.UserFile.map((f) => f.id),
+            mongoFileIds,
+            userDataIds: [secureLink.userId],
+        });
 
         return { success: true };
     } catch (error) {

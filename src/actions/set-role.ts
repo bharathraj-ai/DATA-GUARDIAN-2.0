@@ -10,8 +10,6 @@ import {
 } from '@/lib/security/role-helpers';
 import { logger, redactEmail } from '@/lib/logger';
 
-export type { SetUserRoleResult };
-
 /**
  * First-time onboarding only.
  * Any new user can pick OWNER or VENDOR — this choice is permanent.
