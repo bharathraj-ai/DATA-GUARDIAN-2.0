@@ -1,4 +1,4 @@
-import { normalizeRole, type AppRole } from '@/lib/security/role-helpers';
+import { type AppRole, dashboardPathForRole, isDashboardEntryPath } from '@/lib/security/role-helpers';
 
 /**
  * Persistent onboarding state derived from User.roleSelected.
@@ -31,21 +31,7 @@ export function safeCallbackPath(raw: string | null | undefined): string | null 
     return raw;
 }
 
-export function dashboardPathForRole(role: string | null | undefined): string {
-    return normalizeRole(role) === 'VENDOR' ? '/dashboard/vendor' : '/dashboard/owner';
-}
-
-/** `/dashboard` and role dashboards — skip the extra hop, go straight to role path. */
-export function isDashboardEntryPath(path: string): boolean {
-    return (
-        path === '/dashboard' ||
-        path.startsWith('/dashboard?') ||
-        path === '/dashboard/owner' ||
-        path.startsWith('/dashboard/owner?') ||
-        path === '/dashboard/vendor' ||
-        path.startsWith('/dashboard/vendor?')
-    );
-}
+export { dashboardPathForRole, isDashboardEntryPath } from '@/lib/security/role-helpers';
 
 /**
  * Post-login destination after Google OAuth / session restore.

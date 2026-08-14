@@ -6,6 +6,7 @@
  * import those without pulling Prisma into the browser bundle.
  */
 
+import 'server-only';
 import { cache } from 'react';
 import { prisma } from '@/lib/prisma';
 import { canCreateSecureLinks, normalizeRole, type AppRole } from '@/lib/security/role-helpers';
@@ -15,6 +16,8 @@ export {
   ROLE_RANK,
   SELF_SERVICE_ROLES,
   canCreateSecureLinks,
+  dashboardPathForRole,
+  isDashboardEntryPath,
   isElevatedStaff,
   isPrivilegedRole,
   normalizeRole,

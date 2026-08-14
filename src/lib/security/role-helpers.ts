@@ -32,6 +32,22 @@ export function canCreateSecureLinks(role: string | null | undefined): boolean {
   return r === 'OWNER';
 }
 
+export function dashboardPathForRole(role: string | null | undefined): string {
+  return normalizeRole(role) === 'VENDOR' ? '/dashboard/vendor' : '/dashboard/owner';
+}
+
+/** `/dashboard` and role dashboards — skip the extra hop, go straight to role path. */
+export function isDashboardEntryPath(path: string): boolean {
+  return (
+    path === '/dashboard' ||
+    path.startsWith('/dashboard?') ||
+    path === '/dashboard/owner' ||
+    path.startsWith('/dashboard/owner?') ||
+    path === '/dashboard/vendor' ||
+    path.startsWith('/dashboard/vendor?')
+  );
+}
+
 /** Both roles are self-service — any new user picks one on first login (permanent). */
 export const SELF_SERVICE_ROLES: AppRole[] = ['OWNER', 'VENDOR'];
 

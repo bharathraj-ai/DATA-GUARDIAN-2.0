@@ -4,7 +4,7 @@ import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { setUserRole } from '@/actions/set-role';
-import { dashboardPathForRole, isDashboardEntryPath } from '@/lib/onboarding';
+import { dashboardPathForRole, isDashboardEntryPath } from '@/lib/security/role-helpers';
 import { Session } from 'next-auth';
 import { ArrowRight, KeyRound, Link2, Shield } from 'lucide-react';
 import styles from './role-select.module.css';

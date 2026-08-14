@@ -6,7 +6,7 @@ import {
   SELF_SERVICE_ROLES,
   normalizeRole,
   type AppRole,
-} from '@/lib/security/roles';
+} from '@/lib/security/role-helpers';
 import { logger, redactEmail } from '@/lib/logger';
 
 /**
