@@ -3,8 +3,12 @@
 import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
-import { setUserRole } from '@/actions/set-role';
-import { dashboardPathForRole, isDashboardEntryPath } from '@/lib/security/role-helpers';
+import {
+    dashboardPathForRole,
+    isDashboardEntryPath,
+    type AppRole,
+    type SetUserRoleResult,
+} from '@/lib/security/role-helpers';
 import { Session } from 'next-auth';
 import { ArrowRight, KeyRound, Link2, Shield } from 'lucide-react';
 import styles from './role-select.module.css';
@@ -12,9 +16,10 @@ import styles from './role-select.module.css';
 interface RoleSelectClientProps {
     callbackUrl: string | null;
     session: Session | null;
+    onSetRole: (role: AppRole) => Promise<SetUserRoleResult>;
 }
 
-export default function RoleSelectClient({ callbackUrl, session }: RoleSelectClientProps) {
+export default function RoleSelectClient({ callbackUrl, session, onSetRole }: RoleSelectClientProps) {
     const router = useRouter();
     const { update } = useSession();
     const [isLoading, setIsLoading] = useState(false);
@@ -35,9 +40,9 @@ export default function RoleSelectClient({ callbackUrl, session }: RoleSelectCli
         setSelected(role);
 
         try {
-            const result = await setUserRole(role);
+            const result = await onSetRole(role);
 
-            if (result.success && result.role) {
+            if (result.success) {
                 await update({
                     roleSelected: true,
                     onboardingStep: 'COMPLETE',

@@ -6,15 +6,18 @@ import {
   SELF_SERVICE_ROLES,
   normalizeRole,
   type AppRole,
+  type SetUserRoleResult,
 } from '@/lib/security/role-helpers';
 import { logger, redactEmail } from '@/lib/logger';
+
+export type { SetUserRoleResult };
 
 /**
  * First-time onboarding only.
  * Any new user can pick OWNER or VENDOR — this choice is permanent.
  * Uses an atomic updateMany guard so concurrent requests cannot double-set.
  */
-export async function setUserRole(role: AppRole) {
+export async function setUserRole(role: AppRole): Promise<SetUserRoleResult> {
   const session = await auth();
 
   if (!session?.user?.id || !session.user.email) {

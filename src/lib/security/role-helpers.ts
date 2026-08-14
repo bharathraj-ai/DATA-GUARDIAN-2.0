@@ -10,6 +10,11 @@ export const APP_ROLES = [
 
 export type AppRole = (typeof APP_ROLES)[number];
 
+/** Result of first-time role assignment (shared client/server). */
+export type SetUserRoleResult =
+  | { success: true; role: AppRole }
+  | { success: false; error: string };
+
 /** Lower number = higher privilege */
 export const ROLE_RANK: Record<string, number> = {
   OWNER: 1,
