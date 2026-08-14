@@ -26,19 +26,14 @@ export async function GET(
     const token = req.nextUrl.searchParams.get('token');
     if (!token) return NextResponse.json({ error: 'Missing token' }, { status: 401 });
 
-    // Full base64 data-URL is download-equivalent. Editors may still load bytes.
-    let authResult = await authorizeApiRequest(fileId, token, {
+    // Full base64 data-URL is download-equivalent. Editors without download still load bytes.
+    const authResult = await authorizeApiRequest(fileId, token, {
       httpMethod: req.method,
-      action: 'download',
+      action: 'download_or_edit',
+      includeContent: true,
     });
     if (authResult.errorResponse) {
-      authResult = await authorizeApiRequest(fileId, token, {
-        httpMethod: req.method,
-        action: 'edit',
-      });
-      if (authResult.errorResponse) {
-        return authResult.errorResponse;
-      }
+      return authResult.errorResponse;
     }
     const { file } = authResult;
     if (!file) {

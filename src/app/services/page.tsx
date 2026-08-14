@@ -6,7 +6,7 @@ export const dynamic = 'force-static';
 
 export const metadata: Metadata = {
     title: 'Services',
-    description: 'Explore Secure Protocol services: AES-256 encrypted sharing, self-destructing links, OTP protection, instant revocation, QR code delivery, and zero-knowledge architecture.',
+    description: 'Explore Secure Protocol services: AES-256 encrypted sharing, self-destructing links, OTP protection, instant revocation, priority collaboration, and zero-knowledge architecture.',
 };
 
 export default function ServicesPage() {
@@ -159,21 +159,21 @@ export default function ServicesPage() {
                                 <div className="srv-card-icon-wrapper">
                                     <div className="srv-card-icon srv-icon-purple">
                                         <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                            <rect x="3" y="3" width="7" height="7"></rect>
-                                            <rect x="14" y="3" width="7" height="7"></rect>
-                                            <rect x="14" y="14" width="7" height="7"></rect>
-                                            <rect x="3" y="14" width="7" height="7"></rect>
+                                            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                                            <circle cx="9" cy="7" r="4"></circle>
+                                            <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                                            <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
                                         </svg>
                                     </div>
                                 </div>
-                                <h3 className="srv-card-title">QR Code Generation</h3>
+                                <h3 className="srv-card-title">Priority Collaboration</h3>
                                 <p className="srv-card-desc">
-                                    Automatically generate QR codes for every secure link. Perfect for mobile sharing, presentations, or quick access scenarios.
+                                    Multiple vendors can work in the same live session. Edit access follows assigned priority — higher levels can take over, others request without forcing.
                                 </p>
                                 <ul className="srv-card-features">
-                                    <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"></polyline></svg>Auto-generated QR codes</li>
-                                    <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"></polyline></svg>Mobile-optimized scanning</li>
-                                    <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"></polyline></svg>Downloadable QR images</li>
+                                    <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"></polyline></svg>One live editor lock per file</li>
+                                    <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"></polyline></svg>Higher-priority takeover</li>
+                                    <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"></polyline></svg>Request-to-edit notifications</li>
                                 </ul>
                             </div>
                         </ScrollReveal>

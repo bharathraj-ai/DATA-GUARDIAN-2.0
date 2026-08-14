@@ -35,7 +35,7 @@ function SignInContent() {
         } else if (rawCallbackUrl && rawCallbackUrl.startsWith('/') && !rawCallbackUrl.startsWith('//')) {
             router.replace(rawCallbackUrl);
         } else {
-            router.replace(userRole === 'VENDOR' ? '/dashboard/vendor' : '/dashboard');
+            router.replace(userRole === 'VENDOR' ? '/dashboard/vendor' : '/dashboard/owner');
         }
     }, [sessionStatus, session, router, rawCallbackUrl]);
 

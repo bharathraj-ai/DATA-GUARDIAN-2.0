@@ -166,7 +166,15 @@
 }
 
 @media (max-width: 560px) {
+  .overlay {
+    padding: 0;
+    align-items: stretch;
+  }
   .dialog {
-    padding: 22px 18px 18px;
+    width: 100%;
+    max-height: 100dvh;
+    height: 100dvh;
+    border-radius: 0;
+    padding: calc(18px + env(safe-area-inset-top, 0px)) 18px calc(18px + env(safe-area-inset-bottom, 0px));
   }
 }

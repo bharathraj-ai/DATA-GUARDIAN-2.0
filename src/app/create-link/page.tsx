@@ -18,6 +18,7 @@ export default async function CreateLinkPage() {
     }
 
     const dbUser = await getDbUserRole(session.user.id);
+
     if (!dbUser) {
         redirect('/auth/signin?callbackUrl=/create-link');
     }
@@ -30,8 +31,10 @@ export default async function CreateLinkPage() {
         redirect('/dashboard/vendor');
     }
 
-    const initialVendors = await listVendorOptions();
-    const hasActiveLink = await ownerHasActiveLink(session.user.id);
+    const [initialVendors, hasActiveLink] = await Promise.all([
+        listVendorOptions(),
+        ownerHasActiveLink(session.user.id),
+    ]);
 
     return <CreateLinkClient initialVendors={initialVendors} hasActiveLink={hasActiveLink} />;
 }

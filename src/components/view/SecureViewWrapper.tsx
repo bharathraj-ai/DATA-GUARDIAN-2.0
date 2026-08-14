@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import { SecurityShield } from './SecurityShield';
+import { SuddenExitGuard } from './SuddenExitGuard';
 
 interface SecureViewWrapperProps {
     token: string;
@@ -18,9 +19,14 @@ interface SecureViewWrapperProps {
  * - Passes viewer identity to watermark
  */
 export function SecureViewWrapper({ token, viewerEmail, children }: SecureViewWrapperProps) {
+    const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    useEffect(() => () => {
+        if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
+    }, []);
+
     const handleSessionTerminate = useCallback((reason: string) => {
-        // Force reload after short delay to show server-side error state
-        setTimeout(() => {
+        if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
+        reloadTimerRef.current = setTimeout(() => {
             window.location.reload();
         }, 5000);
     }, []);
@@ -39,6 +45,7 @@ export function SecureViewWrapper({ token, viewerEmail, children }: SecureViewWr
             maxTabSwitches={3}
             enableWatermark={true}
         >
+            <SuddenExitGuard token={token} />
             {children}
         </SecurityShield>
     );

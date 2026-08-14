@@ -1,9 +1,14 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
-import { setUserRole } from '@/actions/set-role';
+import {
+    dashboardPathForRole,
+    isDashboardEntryPath,
+    type AppRole,
+    type SetUserRoleResult,
+} from '@/lib/security/role-helpers';
 import { Session } from 'next-auth';
 import { ArrowRight, KeyRound, Link2, Shield } from 'lucide-react';
 import styles from './role-select.module.css';
@@ -11,47 +16,49 @@ import styles from './role-select.module.css';
 interface RoleSelectClientProps {
     callbackUrl: string | null;
     session: Session | null;
+    onSetRole: (role: AppRole) => Promise<SetUserRoleResult>;
 }
 
-export default function RoleSelectClient({ callbackUrl, session }: RoleSelectClientProps) {
+export default function RoleSelectClient({ callbackUrl, session, onSetRole }: RoleSelectClientProps) {
     const router = useRouter();
     const { update } = useSession();
     const [isLoading, setIsLoading] = useState(false);
     const [selected, setSelected] = useState<'OWNER' | 'VENDOR' | null>(null);
     const [error, setError] = useState('');
+    const committingRef = useRef(false);
 
     const destinationForRole = (role: string | undefined) => {
-        if (role === 'OWNER' && callbackUrl) return callbackUrl;
-        if (role === 'OWNER') return '/dashboard/owner';
-        return '/dashboard/vendor';
+        if (callbackUrl && !isDashboardEntryPath(callbackUrl)) return callbackUrl;
+        return dashboardPathForRole(role);
     };
 
     const commitRole = async (role: 'OWNER' | 'VENDOR') => {
+        if (committingRef.current) return;
+        committingRef.current = true;
         setIsLoading(true);
         setError('');
         setSelected(role);
 
         try {
-            const result = await setUserRole(role);
+            const result = await onSetRole(role);
 
             if (result.success) {
                 await update({
-                    role,
                     roleSelected: true,
                     onboardingStep: 'COMPLETE',
                 });
-                router.replace(destinationForRole(role));
-            } else if (result.error === 'Role has already been selected') {
-                await update({ roleSelected: true, onboardingStep: 'COMPLETE' });
-                router.replace(destinationForRole(session?.user?.role ?? role));
-            } else {
-                setError(result.error || 'Failed to set role');
-                setSelected(null);
+                router.replace(destinationForRole(result.role));
+                return;
             }
+
+            committingRef.current = false;
+            setError(result.error || 'Failed to set role');
+            setSelected(null);
+            setIsLoading(false);
         } catch {
+            committingRef.current = false;
             setError('Something went wrong. Please try again.');
             setSelected(null);
-        } finally {
             setIsLoading(false);
         }
     };

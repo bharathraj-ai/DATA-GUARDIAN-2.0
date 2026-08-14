@@ -1437,3 +1437,21 @@
   .cellDigit,
   .cellGhost { font-size: 18px; }
 }
+
+@media (max-width: 380px) {
+  .page { padding: 88px 10px 28px; }
+  .signinCard,
+  .gateCard,
+  .card {
+    min-height: 0;
+    padding: 28px 14px 24px;
+    border-radius: 20px;
+  }
+  .cells { gap: 4px; }
+  .cell {
+    min-height: 42px;
+    border-radius: 12px;
+  }
+  .cellDigit,
+  .cellGhost { font-size: 16px; }
+}

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { PageData, TableElementData, TableCellData, EditorElement } from "../types";
 import { TableActions } from "./TableElement";
+import { isCoarsePointer } from "../utils/editorUtils";
 
 export interface SheetRuntimeState {
   activeCell: { r: number; c: number } | null;
@@ -41,6 +42,8 @@ export const SpreadsheetView = React.memo(({ page, scale, initialState, onStateC
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(initialState?.scrollTop || 0);
   const [clientHeight, setClientHeight] = useState(800);
+  const scrollRafRef = useRef<number | null>(null);
+  const pendingScrollRef = useRef<number | null>(null);
 
   useEffect(() => {
     return () => {
@@ -49,16 +52,30 @@ export const SpreadsheetView = React.memo(({ page, scale, initialState, onStateC
   }, [page.id, activeCell, isFrozenCol, scrollTop, onStateChange]);
 
   useEffect(() => {
-    if (scrollRef.current) {
-      setClientHeight(scrollRef.current.clientHeight);
-      if (initialState?.scrollTop) {
-        scrollRef.current.scrollTop = initialState.scrollTop;
-      }
+    const el = scrollRef.current;
+    if (!el) return;
+    setClientHeight(el.clientHeight);
+    if (initialState?.scrollTop) {
+      el.scrollTop = initialState.scrollTop;
     }
+    const ro = new ResizeObserver(() => {
+      if (scrollRef.current) setClientHeight(scrollRef.current.clientHeight);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
   }, [initialState?.scrollTop]);
 
+  useEffect(() => () => {
+    if (scrollRafRef.current != null) cancelAnimationFrame(scrollRafRef.current);
+  }, []);
+
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    setScrollTop(e.currentTarget.scrollTop);
+    pendingScrollRef.current = e.currentTarget.scrollTop;
+    if (scrollRafRef.current != null) return;
+    scrollRafRef.current = requestAnimationFrame(() => {
+      scrollRafRef.current = null;
+      if (pendingScrollRef.current != null) setScrollTop(pendingScrollRef.current);
+    });
   };
 
   const handleMouseMove = useCallback((e: MouseEvent) => {
@@ -99,9 +116,10 @@ export const SpreadsheetView = React.memo(({ page, scale, initialState, onStateC
   }, [editingCell]);
 
   const updateCell = useCallback((r: number, c: number, patch: Partial<TableCellData>) => {
-    const newRows = rows.map((row: TableCellData[], ri: number) =>
-      ri === r ? row.map((cell: TableCellData, ci: number) => (ci === c ? { ...cell, ...patch } : cell)) : row
-    );
+    const row = rows[r];
+    if (!row) return;
+    const newRows = rows.slice();
+    newRows[r] = row.map((cell: TableCellData, ci: number) => (ci === c ? { ...cell, ...patch } : cell));
     updateTable({ rows: newRows });
   }, [rows, updateTable]);
 
@@ -219,8 +237,8 @@ export const SpreadsheetView = React.memo(({ page, scale, initialState, onStateC
     const isActive = activeCell?.r === r && activeCell?.c === c;
     const isEditing = editingCell?.r === r && editingCell?.c === c;
 
-    const bg = cell.bgColor || (isHeader ? "#f3f4f6" : "#ffffff");
-    const color = cell.textColor || (isHeader ? "#111827" : "#000000");
+    const bg = cell.bgColor || (isHeader ? "#e0f2fe" : "#ffffff");
+    const color = cell.textColor || (isHeader ? "#0f172a" : "#334155");
     const bold = cell.bold ?? isHeader;
     const italic = cell.italic ?? false;
     const align = cell.align || "left";
@@ -236,7 +254,7 @@ export const SpreadsheetView = React.memo(({ page, scale, initialState, onStateC
           e.stopPropagation();
           if (editingCell && (editingCell.r !== r || editingCell.c !== c)) finishEditing();
           setActiveCell({ r, c });
-          if (isActive && !isEditing) {
+          if (isCoarsePointer() || (isActive && !isEditing)) {
             setEditValue(cell.value);
             setEditingCell({ r, c });
           }
@@ -248,12 +266,13 @@ export const SpreadsheetView = React.memo(({ page, scale, initialState, onStateC
           setEditingCell({ r, c });
         }}
         style={{
-          border: isActive ? "2px solid #3b82f6" : "1px solid #e5e7eb",
-          background: isActive && !isEditing ? "#f8fafc" : bg, 
+          border: isActive ? "2px solid #0284c7" : "1px solid #e2e8f0",
+          background: isActive && !isEditing ? "#f0f9ff" : bg, 
           padding: 0,
           minWidth: currentWidth * scale,
           width: currentWidth * scale,
           minHeight: scaledRowH,
+          touchAction: "manipulation",
           verticalAlign: "middle",
           transition: isResizingThis ? "none" : "background 0.2s",
           position: cellIsFrozen ? "sticky" : "relative",
@@ -276,7 +295,8 @@ export const SpreadsheetView = React.memo(({ page, scale, initialState, onStateC
               border: "none", outline: "none", resize: "none",
               background: "transparent", color, fontWeight: bold ? 600 : 400,
               fontStyle: italic ? "italic" : "normal", textAlign: align,
-              padding: `${2 * scale}px ${4 * scale}px`, fontSize: 11 * scale,
+              padding: `${2 * scale}px ${4 * scale}px`,
+              fontSize: Math.max(16, 11 * scale),
               fontFamily: "inherit", overflow: "hidden",
             }}
           />
@@ -301,7 +321,7 @@ export const SpreadsheetView = React.memo(({ page, scale, initialState, onStateC
             style={{
               position: 'absolute', right: -3, top: 0, bottom: 0, width: 6,
               cursor: 'col-resize', zIndex: 40,
-              backgroundColor: isResizingThis ? '#3b82f6' : 'transparent',
+              backgroundColor: isResizingThis ? '#0284c7' : 'transparent',
             }}
           />
         )}
@@ -320,7 +340,7 @@ export const SpreadsheetView = React.memo(({ page, scale, initialState, onStateC
       ref={scrollRef}
       onScroll={handleScroll}
       onClick={() => setActiveCell(null)}
-      style={{ width: "100%", height: "100%", overflow: "auto", position: "relative", background: "#ffffff" }}
+      style={{ width: "100%", height: "100%", overflow: "auto", position: "relative", background: "#ffffff", fontFamily: "Inter, system-ui, sans-serif" }}
     >
       <table style={{ borderCollapse: "collapse", fontSize: 11 * scale, width: totalTableWidth * scale, tableLayout: "fixed" }}>
         {hasHeader && rows[0] && (

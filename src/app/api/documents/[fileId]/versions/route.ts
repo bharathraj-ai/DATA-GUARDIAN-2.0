@@ -38,6 +38,9 @@ export async function GET(
         fileSize: true,
         changeType: true,
         changeDescription: true,
+        createdBy: true,
+        reason: true,
+        previousVersionId: true,
         createdAt: true,
       },
     });
@@ -59,7 +62,7 @@ export async function POST(
 
     if (!token || !versionId) return NextResponse.json({ error: 'Missing fields' }, { status: 400 });
 
-    const authResult = await authorizeApiRequest(fileId, token, { httpMethod: req.method, action: 'edit' });
+    const authResult = await authorizeApiRequest(fileId, token, { httpMethod: req.method, action: 'edit', includeContent: true });
     if (authResult.errorResponse) {
       return authResult.errorResponse;
     }
@@ -72,7 +75,18 @@ export async function POST(
       return NextResponse.json({ error: 'Version not found' }, { status: 404 });
     }
 
-    const version = await prisma.fileVersion.findUnique({ where: { id: ownedVersion.id } });
+    const version = await prisma.fileVersion.findUnique({
+      where: { id: ownedVersion.id },
+      select: {
+        id: true,
+        versionNumber: true,
+        encryptedContent: true,
+        iv: true,
+        authTag: true,
+        encryptedDek: true,
+        fileSize: true,
+      },
+    });
     if (!version) {
       return NextResponse.json({ error: 'Version not found' }, { status: 404 });
     }

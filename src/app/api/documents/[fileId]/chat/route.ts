@@ -109,6 +109,7 @@ export async function GET(
     const messages = await prisma.documentChatMessage.findMany({
       where: {
         fileId,
+        isSystem: false,
         OR: [
           { isPrivate: false },
           { isPrivate: true, sender },
@@ -117,6 +118,16 @@ export async function GET(
       },
       orderBy: { createdAt: 'asc' },
       take: 500,
+      select: {
+        id: true,
+        fileId: true,
+        sender: true,
+        level: true,
+        message: true,
+        isPrivate: true,
+        targetUser: true,
+        createdAt: true,
+      },
     });
 
     return NextResponse.json({ success: true, messages });

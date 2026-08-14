@@ -29,7 +29,12 @@ interface LogMetadata {
     [key: string]: unknown;
 }
 
-async function logSecurityEvent(action: string, linkId: string | null, metadata: LogMetadata) {
+async function logSecurityEvent(
+    action: string,
+    linkId: string | null,
+    metadata: LogMetadata,
+    ownerId?: string | null,
+) {
     try {
         if (metadata.ip) {
             metadata.ip = metadata.ip.substring(0, 6) + '***';
@@ -38,6 +43,7 @@ async function logSecurityEvent(action: string, linkId: string | null, metadata:
             data: {
                 action: action,
                 linkId: linkId || undefined,
+                ownerId: ownerId || undefined,
                 reason: 'Zero-Trust API Authorization Gate',
                 metadata: JSON.stringify(metadata),
             },
@@ -47,7 +53,7 @@ async function logSecurityEvent(action: string, linkId: string | null, metadata:
     }
 }
 
-export type ApiCapability = 'view' | 'preview' | 'edit' | 'download' | 'comment';
+export type ApiCapability = 'view' | 'preview' | 'edit' | 'download' | 'comment' | 'download_or_edit';
 
 export type CapabilityFlags = {
     canEdit: boolean;
@@ -60,6 +66,8 @@ export type AuthorizeApiOptions = {
     httpMethod: string;
     /** Required object-level capability. Defaults to view. */
     action?: ApiCapability;
+    /** Load encrypted BYTEA. Off by default — only decrypting routes should opt in. */
+    includeContent?: boolean;
 };
 
 function normalizeEmail(value: string | null | undefined): string | null {
@@ -86,6 +94,10 @@ function resolveCapabilities(
 }
 
 function denyCapability(action: ApiCapability, capabilities: CapabilityFlags): string | null {
+    if (action === 'download_or_edit') {
+        if (!capabilities.canDownload && !capabilities.canEdit) return 'Forbidden: Access denied';
+        return null;
+    }
     if (action === 'edit' && !capabilities.canEdit) return 'Forbidden: Edit access denied';
     if (action === 'preview' && !capabilities.canPreview) return 'Forbidden: Preview access denied';
     if (action === 'download' && !capabilities.canDownload) return 'Forbidden: Download access denied';
@@ -129,10 +141,11 @@ export async function authorizeApiRequest(
 
     const nonce = _headers.get('x-security-nonce');
     const timestamp = _headers.get('x-timestamp');
+    const requestId = _headers.get('x-request-id') || undefined;
 
     if (redis) {
         if (!nonce || !timestamp) {
-            await logSecurityEvent('DENIED', null, { ip, reason: 'Missing replay protection headers' });
+            await logSecurityEvent('DENIED', null, { ip, reason: 'Missing replay protection headers', requestId });
             return {
                 errorResponse: NextResponse.json(
                     { error: 'Forbidden: Missing x-security-nonce / x-timestamp' },
@@ -143,7 +156,7 @@ export async function authorizeApiRequest(
 
         const parsedTs = parseInt(timestamp, 10);
         if (!Number.isFinite(parsedTs) || Math.abs(Date.now() - parsedTs) > 60000) {
-            await logSecurityEvent('DENIED', null, { ip, reason: 'Stale request timestamp' });
+            await logSecurityEvent('DENIED', null, { ip, reason: 'Stale request timestamp', requestId });
             return {
                 errorResponse: NextResponse.json(
                     { error: 'Replay Attack Prevented: Timestamp stale' },
@@ -154,8 +167,8 @@ export async function authorizeApiRequest(
 
         const setResult = await redis.set(`nonce:${nonce}`, '1', { nx: true, ex: 65 });
         if (setResult === null) {
-            logger.security(`Replay attack detected for token: ${redactToken(token)}`);
-            await logSecurityEvent('DENIED', null, { ip, reason: 'Reused nonce' });
+            logger.security(`Replay attack detected for token: ${redactToken(token)}`, { requestId });
+            await logSecurityEvent('DENIED', null, { ip, reason: 'Reused nonce', requestId });
             return {
                 errorResponse: NextResponse.json(
                     { error: 'Replay Attack Prevented: Nonce reused' },
@@ -168,27 +181,43 @@ export async function authorizeApiRequest(
     const sessionCookie = cookieStore.get('session_id')?.value;
     const verified = verifyShareSession(sessionCookie, token);
     if (!verified.valid) {
-        await logSecurityEvent('DENIED', null, { ip, reason: 'Missing or invalid signed session' });
+        await logSecurityEvent('DENIED', null, { ip, reason: 'Missing or invalid signed session', requestId });
         return { errorResponse: NextResponse.json({ error: 'Unauthorized: Missing Hardened Session' }, { status: 401 }) };
     }
     const sessionId = verified.sessionId;
     const signedVendorEmail = normalizeEmail(verified.vendorEmail);
 
+    let redisSessionPayload: unknown = null;
     if (redis) {
-        const isRevoked = await redis.exists(`revoked:${token}`);
-        if (isRevoked) {
-            await logSecurityEvent('DENIED', null, { ip, reason: 'Access globally revoked in Redis cache' });
+        const sessionKey = `session:${token}:${sessionId}`;
+        const pipeline = redis.pipeline();
+        pipeline.exists(`revoked:${token}`);
+        pipeline.exists(sessionKey);
+        pipeline.scard(`sessions:${token}`);
+        pipeline.get(`active:${token}`);
+        pipeline.get(sessionKey);
+        const [isRevoked, sessionExists, sessionCount, legacyActive, sessionRaw] = await pipeline.exec();
+        redisSessionPayload = sessionRaw;
+
+        if (isRevoked === 1 || isRevoked === true) {
+            await logSecurityEvent('DENIED', null, { ip, reason: 'Access globally revoked in Redis cache', requestId });
             return { errorResponse: NextResponse.json({ error: 'Forbidden: Access revoked' }, { status: 403 }) };
         }
 
-        const activeSessionId = await redis.get(`active:${token}`);
-        if (activeSessionId && activeSessionId !== sessionId) {
-            await logSecurityEvent('DENIED', null, { ip, reason: 'Invalid or expired Redis Session match' });
-            return { errorResponse: NextResponse.json({ error: 'Unauthorized: Invalid or Hijacked Session' }, { status: 401 }) };
+        // Concurrent collaborators each have session:{token}:{sessionId}.
+        // Deny when Redis tracks sessions for this link but this sessionId is absent
+        // (or legacy singleton points at someone else). Empty Redis → signed cookie + DB.
+        if (!(sessionExists === 1 || sessionExists === true)) {
+            const blockedByIndex = typeof sessionCount === 'number' && sessionCount > 0;
+            const blockedByLegacy = Boolean(legacyActive && legacyActive !== sessionId);
+            if (blockedByIndex || blockedByLegacy) {
+                await logSecurityEvent('DENIED', null, { ip, reason: 'Invalid or expired Redis Session match', requestId });
+                return { errorResponse: NextResponse.json({ error: 'Unauthorized: Invalid or Hijacked Session' }, { status: 401 }) };
+            }
         }
     }
 
-    const needsBytes = action === 'edit' || action === 'download' || action === 'preview';
+    const needsBytes = Boolean(options.includeContent);
     const file = await prisma.userFile.findUnique({
         where: { id: fileId },
         select: {
@@ -221,6 +250,7 @@ export async function authorizeApiRequest(
                     isUsed: true,
                     VendorAccess: {
                         select: {
+                            id: true,
                             email: true,
                             level: true,
                             isRevoked: true,
@@ -255,11 +285,11 @@ export async function authorizeApiRequest(
     const secureLink = file.SecureLink;
 
     if (secureLink.isRevoked || secureLink.expiresAt < new Date()) {
-        await logSecurityEvent('DENIED', secureLink.id, { ip, reason: 'Link expired or revoked in DB' });
+        await logSecurityEvent('DENIED', secureLink.id, { ip, reason: 'Link expired or revoked in DB', requestId }, secureLink.ownerId);
         return { errorResponse: NextResponse.json({ error: 'Forbidden: Link has expired or been revoked' }, { status: 403 }) };
     }
     if (secureLink.lockedAt) {
-        await logSecurityEvent('DENIED', secureLink.id, { ip, reason: 'Link permanently locked' });
+        await logSecurityEvent('DENIED', secureLink.id, { ip, reason: 'Link permanently locked', requestId }, secureLink.ownerId);
         return { errorResponse: NextResponse.json({ error: 'Forbidden: Link is permanently locked' }, { status: 403 }) };
     }
 
@@ -267,7 +297,7 @@ export async function authorizeApiRequest(
     if (vendorWithSession?.activeSessionId && vendorWithSession.activeSessionId !== sessionId) {
         const matched = secureLink.VendorAccess.some((v) => v.activeSessionId === sessionId);
         if (!matched) {
-            await logSecurityEvent('DENIED', secureLink.id, { ip, reason: 'DB session mismatch' });
+            await logSecurityEvent('DENIED', secureLink.id, { ip, reason: 'DB session mismatch', requestId }, secureLink.ownerId);
             return { errorResponse: NextResponse.json({ error: 'Unauthorized: Session superseded' }, { status: 401 }) };
         }
     }
@@ -284,9 +314,9 @@ export async function authorizeApiRequest(
         const sessionVendor = secureLink.VendorAccess.find((v) => v.activeSessionId === sessionId);
         let boundDeviceHash: string | null | undefined = sessionVendor?.activeDeviceHash;
 
-        if (!boundDeviceHash && redis) {
+        if (!boundDeviceHash && redisSessionPayload) {
             try {
-                const raw = await redis.get(`session:${token}:${sessionId}`);
+                const raw = redisSessionPayload;
                 if (typeof raw === 'string') {
                     const parsed = JSON.parse(raw) as { deviceFingerprint?: string };
                     boundDeviceHash = parsed.deviceFingerprint;
@@ -305,7 +335,8 @@ export async function authorizeApiRequest(
                 type: 'device_mismatch',
                 expectedHash: boundDeviceHash.substring(0, 8),
                 actualHash: currentDeviceHash.substring(0, 8),
-            });
+                requestId,
+            }, secureLink.ownerId);
 
             return {
                 errorResponse: NextResponse.json(
@@ -374,12 +405,13 @@ export async function authorizeApiRequest(
     if (!isAuthorized) {
         await logSecurityEvent('EMAIL_MISMATCH', secureLink.id, {
             attemptedEmail: redactEmail(effectiveEmail),
-        });
+            requestId,
+        }, secureLink.ownerId);
         return { errorResponse: NextResponse.json({ error: 'Forbidden: Identity Mismatch or Revoked' }, { status: 403 }) };
     }
 
     if (!otpUsed) {
-        await logSecurityEvent('DENIED', secureLink.id, { ip, reason: 'OTP not verified' });
+        await logSecurityEvent('DENIED', secureLink.id, { ip, reason: 'OTP not verified', requestId }, secureLink.ownerId);
         return { errorResponse: NextResponse.json({ error: 'Unauthorized: OTP verification required' }, { status: 401 }) };
     }
 
@@ -397,7 +429,8 @@ export async function authorizeApiRequest(
             action,
             allowEditing: secureLink.allowEditing,
             editingLocked: file.editingLocked,
-        });
+            requestId,
+        }, secureLink.ownerId);
         return { errorResponse: NextResponse.json({ error: capabilityError }, { status: 403 }) };
     }
 
@@ -416,28 +449,34 @@ export async function rotateSessionId(token: string, oldSessionId: string): Prom
     const redis = await getRedisClient();
     if (!redis) return null;
 
-    const isValid = await redis.get(`active:${token}`);
-    if (isValid !== oldSessionId) return null;
+    const oldSessionKey = `session:${token}:${oldSessionId}`;
+    const ttl = await redis.ttl(oldSessionKey);
+    if (ttl <= 0) return null;
 
     const newSessionId = crypto.randomBytes(32).toString('hex');
-    const oldSessionKey = `session:${token}:${oldSessionId}`;
     const newSessionKey = `session:${token}:${newSessionId}`;
-    const ttl = await redis.ttl(oldSessionKey);
+    const sessionsSetKey = `sessions:${token}`;
 
-    if (ttl > 0) {
-        const sessionData = await redis.get(oldSessionKey);
-        const pipeline = redis.pipeline();
+    const sessionData = await redis.get(oldSessionKey);
+    const pipeline = redis.pipeline();
 
-        if (typeof sessionData === 'string') {
-            const parsed = JSON.parse(sessionData);
-            parsed.sessionId = newSessionId;
-            pipeline.set(newSessionKey, JSON.stringify(parsed), { ex: ttl });
-        }
-
-        pipeline.del(oldSessionKey);
-        pipeline.set(`active:${token}`, newSessionId, { ex: ttl });
-        await pipeline.exec();
+    if (typeof sessionData === 'string') {
+        const parsed = JSON.parse(sessionData);
+        parsed.sessionId = newSessionId;
+        pipeline.set(newSessionKey, JSON.stringify(parsed), { ex: ttl });
+    } else if (sessionData && typeof sessionData === 'object') {
+        const parsed = { ...(sessionData as object), sessionId: newSessionId };
+        pipeline.set(newSessionKey, JSON.stringify(parsed), { ex: ttl });
+    } else {
+        return null;
     }
+
+    pipeline.del(oldSessionKey);
+    pipeline.srem(sessionsSetKey, oldSessionId);
+    pipeline.sadd(sessionsSetKey, newSessionId);
+    pipeline.expire(sessionsSetKey, ttl);
+    pipeline.del(`active:${token}`);
+    await pipeline.exec();
 
     return newSessionId;
 }

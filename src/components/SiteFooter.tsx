@@ -58,7 +58,7 @@ const TOPICS: Record<FooterTopicId, FooterTopic> = {
       'Audit-friendly history stays available even after a link is cleaned up.',
       'Role selection happens once during onboarding, then routes you correctly.',
     ],
-    cta: { href: '/dashboard', label: 'Open dashboard' },
+    cta: { href: '/dashboard/owner', label: 'Open dashboard' },
   },
   enterprise: {
     id: 'enterprise',
@@ -86,7 +86,7 @@ const TOPICS: Record<FooterTopicId, FooterTopic> = {
       'Shared files and access records are cleaned up after revoke.',
       'Audit logs keep a record of revoke events for later review.',
     ],
-    cta: { href: '/dashboard', label: 'Open owner controls' },
+    cta: { href: '/dashboard/owner', label: 'Open owner controls' },
   },
   documentation: {
     id: 'documentation',

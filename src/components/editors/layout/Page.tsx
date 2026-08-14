@@ -53,12 +53,12 @@ export const Page = React.memo(({ page, scale, selectedId, onSelect, onUpdate, o
         position: "relative", 
         width: page.width * scale, 
         height: page.height * scale, 
-        background: "#ffffff", 
+        background: "#ffffff",
         boxShadow: "0 4px 12px rgba(0,0,0,0.05), 0 1px 3px rgba(0,0,0,0.1)", 
         marginBottom: 32, 
         flexShrink: 0, 
         overflow: "visible", 
-        border: "1px solid #e4e4e7" 
+        border: "1px solid #e2e8f0" 
       }} 
       onClick={() => onSelect(null)} 
       onDragOver={e => e.preventDefault()} 

@@ -6,7 +6,8 @@ import {
   SELF_SERVICE_ROLES,
   normalizeRole,
   type AppRole,
-} from '@/lib/security/roles';
+  type SetUserRoleResult,
+} from '@/lib/security/role-helpers';
 import { logger, redactEmail } from '@/lib/logger';
 
 /**
@@ -14,7 +15,7 @@ import { logger, redactEmail } from '@/lib/logger';
  * Any new user can pick OWNER or VENDOR — this choice is permanent.
  * Uses an atomic updateMany guard so concurrent requests cannot double-set.
  */
-export async function setUserRole(role: AppRole) {
+export async function setUserRole(role: AppRole): Promise<SetUserRoleResult> {
   const session = await auth();
 
   if (!session?.user?.id || !session.user.email) {
@@ -41,7 +42,14 @@ export async function setUserRole(role: AppRole) {
   });
 
   if (updated.count === 0) {
-    return { success: false, error: 'Role has already been selected' };
+    const existing = await prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { role: true, roleSelected: true },
+    });
+    if (existing?.roleSelected) {
+      return { success: true, role: normalizeRole(existing.role) };
+    }
+    return { success: false, error: 'Failed to set role' };
   }
 
   await prisma.auditLog.create({

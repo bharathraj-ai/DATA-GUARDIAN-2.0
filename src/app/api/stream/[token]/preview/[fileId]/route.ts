@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { decryptBuffer, decryptDek } from '@/lib/crypto';
 import { authorizeSecureLink } from '@/lib/linkAuthorization';
 import { downloadFromMongo } from '@/lib/mongo/operations';
-import { prisma } from '@/lib/prisma';
 import { logger } from '@/lib/logger';
+import { gridFsIdForFile } from '@/lib/security/resource-ownership';
+import { checkDownloadRateLimit, checkLinkRateLimit, extractClientIP } from '@/lib/rate-limit';
 
 /**
  * Inline PDF/image preview stream for vendors.
@@ -17,6 +18,15 @@ export async function GET(
 ) {
     try {
         const { token, fileId } = await params;
+
+        const ip = extractClientIP(_request.headers);
+        const [downloadLimit, linkLimit] = await Promise.all([
+            checkDownloadRateLimit(ip),
+            checkLinkRateLimit(token),
+        ]);
+        if (!downloadLimit.allowed || !linkLimit.allowed) {
+            return NextResponse.json({ error: 'Too many requests' }, { status: 429 });
+        }
 
         const authResult = await authorizeSecureLink(token, 'preview', fileId);
         if (!authResult.success) {
@@ -63,19 +73,15 @@ export async function GET(
             }
         } else if (fileRecord.mongoFileId) {
             try {
-                const mongoFileRecord = await prisma.mongoFile.findUnique({
-                    where: { id: fileRecord.mongoFileId, isDeleted: false },
-                    select: { gridFSId: true },
-                });
-
-                if (!mongoFileRecord) {
+                const gridFSId = gridFsIdForFile(fileRecord);
+                if (!gridFSId) {
                     return NextResponse.json(
                         { error: 'Storage record not found' },
                         { status: 404 }
                     );
                 }
 
-                const downloadedBuffer = await downloadFromMongo(mongoFileRecord.gridFSId);
+                const downloadedBuffer = await downloadFromMongo(gridFSId, fileRecord.fileSize);
 
                 if (fileRecord.iv && fileRecord.authTag) {
                     const dek = fileRecord.encryptedDek

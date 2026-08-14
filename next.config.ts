@@ -10,6 +10,9 @@ const nextConfig: NextConfig = {
   compress: true,
   productionBrowserSourceMaps: false,
   reactStrictMode: true,
+  compiler: {
+    removeConsole: isProd ? { exclude: ['error', 'warn'] } : false,
+  },
 
   typescript: {
     ignoreBuildErrors: false,
@@ -28,6 +31,14 @@ const nextConfig: NextConfig = {
     'qrcode',
   ],
 
+  // Ensure Prisma query engines are traced into serverless/standalone output
+  outputFileTracingIncludes: {
+    '/**': [
+      './node_modules/.prisma/**/*',
+      './node_modules/@prisma/client/**/*',
+    ],
+  },
+
   experimental: {
     serverActions: {
       bodySizeLimit: '10mb',
@@ -43,7 +54,6 @@ const nextConfig: NextConfig = {
       'uuid',
       'next-auth',
       'lucide-react',
-      'framer-motion',
     ],
   },
 

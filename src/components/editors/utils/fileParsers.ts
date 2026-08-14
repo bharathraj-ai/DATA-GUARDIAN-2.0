@@ -151,7 +151,9 @@ export async function parseExcel(file: File): Promise<DocumentData> {
 
 export async function parseFile(file: File): Promise<DocumentData> {
   const ext = file.name.split(".").pop()?.toLowerCase() || "";
-  if (ext === "pdf") throw new Error("PDF files cannot be edited. They are view-only.");
+  if (ext === "pdf" || ext === "doc" || ext === "docx" || ext === "odt") {
+    throw new Error("Open this file in the Word editor.");
+  }
 
   try {
     const text = await file.text();

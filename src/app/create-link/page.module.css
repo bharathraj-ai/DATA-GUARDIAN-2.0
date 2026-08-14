@@ -233,12 +233,6 @@ select.input {
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.08);
 }
 
-@media (max-width: 640px) {
-  .expiryModeSelection {
-    grid-template-columns: 1fr;
-  }
-}
-
 /* Sharing Mode Cards */
 .modeSelection {
   display: grid;
@@ -704,4 +698,131 @@ input:checked + .slider:before {
 .removeBtn:hover {
   color: #ef4444;
   background: #fef2f2;
+}
+
+.expiryAmountRow {
+  display: flex;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.permHeader {
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid #e5e7eb;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.permText {
+  min-width: 0;
+}
+
+@media (max-width: 768px) {
+  .container {
+    padding: 88px 14px 2rem;
+    max-width: 100%;
+  }
+
+  .title {
+    font-size: 1.55rem;
+  }
+
+  .subtitle {
+    font-size: 0.9rem;
+    padding: 0 4px;
+  }
+
+  .formCard {
+    border-radius: 10px;
+  }
+
+  .stepSection,
+  .resultsSection {
+    padding: 1.35rem 1rem;
+  }
+
+  .stepHeader {
+    gap: 12px;
+  }
+
+  .stepSubtitle {
+    margin-left: 0;
+  }
+
+  .grid2,
+  .gridSettings,
+  .modeSelection,
+  .expiryModeSelection {
+    grid-template-columns: 1fr;
+    gap: 0.85rem;
+  }
+
+  .modeCard,
+  .expiryModeCard {
+    width: 100%;
+    min-width: 0;
+    min-height: 52px;
+  }
+
+  .modeCard {
+    padding: 14px 16px;
+    align-items: flex-start;
+  }
+
+  .modeDesc {
+    line-height: 1.4;
+  }
+
+  .expiryAmountRow {
+    flex-direction: column;
+  }
+
+  .permissionRow,
+  .permHeader,
+  .permissionsFooter {
+    padding: 14px 16px;
+    gap: 12px;
+  }
+
+  .permissionRow {
+    align-items: flex-start;
+  }
+
+  .permDesc {
+    line-height: 1.4;
+  }
+
+  .toggle {
+    flex-shrink: 0;
+    margin-top: 4px;
+  }
+
+  .fileCard,
+  .fileInfo,
+  .dropzoneText {
+    flex-wrap: wrap;
+  }
+
+  .fileName {
+    word-break: break-word;
+  }
+
+  .submitBtn,
+  .chooseFilesBtn,
+  .backBtn {
+    min-height: 44px;
+  }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .modeCard:hover,
+  .expiryModeCard:hover,
+  .submitBtn:hover,
+  .chooseFilesBtn:hover,
+  .backBtn:hover {
+    transform: none;
+    box-shadow: none;
+  }
 }

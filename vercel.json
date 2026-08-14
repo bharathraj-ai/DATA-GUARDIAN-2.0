@@ -1,8 +1,17 @@
 {
+    "buildCommand": "npm run vercel-build",
+    "functions": {
+        "src/app/api/stream/[token]/route.ts": {
+            "maxDuration": 60
+        },
+        "src/app/api/session-monitor/route.ts": {
+            "maxDuration": 60
+        }
+    },
     "crons": [
         {
             "path": "/api/cleanup",
-            "schedule": "*/10 * * * *"
+            "schedule": "0 3 * * *"
         }
     ]
 }

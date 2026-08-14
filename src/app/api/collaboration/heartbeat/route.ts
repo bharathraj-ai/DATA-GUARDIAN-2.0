@@ -62,7 +62,7 @@ export async function POST(req: NextRequest) {
             try {
                 cookieEmail = decryptData<{ email: string }>(rawCookie).email.trim().toLowerCase();
             } catch {
-                cookieEmail = rawCookie.includes(':') ? null : rawCookie.trim().toLowerCase();
+                cookieEmail = null;
             }
         }
 

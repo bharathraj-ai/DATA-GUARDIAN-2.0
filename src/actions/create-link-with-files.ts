@@ -19,7 +19,9 @@ import { requireOwnerRole } from '@/lib/security/roles';
 import { checkUploadRateLimit, extractClientIP, formatRateLimitError } from '@/lib/rate-limit';
 import { headers } from 'next/headers';
 import path from 'path';
+import { after } from 'next/server';
 import { logger, redactToken, redactEmail } from '@/lib/logger';
+import { isEmailConfigured } from '@/lib/email';
 
 export type CreateSecureLinkResult = {
     success: boolean;
@@ -40,6 +42,10 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
         if (!(await requireOwnerRole(session.user.id))) {
             return { success: false, error: 'You do not have permission to create secure links.' };
         }
+
+        void import('@/lib/mongo/client').then(({ isMongoConfigured, warmMongoConnection }) => {
+            if (isMongoConfigured()) return warmMongoConnection();
+        }).catch(() => {});
 
         // SECURITY: Rate limit uploads to prevent storage exhaustion
         const _headers = await headers();
@@ -105,6 +111,13 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
 
         if (vendors.length === 0) {
             return { success: false, error: 'At least one vendor is required. Specify who you are sending data to.' };
+        }
+
+        if (!isEmailConfigured()) {
+            return {
+                success: false,
+                error: 'Email is not configured on the server. Set EMAIL_USER and EMAIL_PASS (or SMTP_USER / SMTP_PASS) so the OTP can be delivered.',
+            };
         }
 
         const allowEditing = formData.get('allowEditing') === 'true';
@@ -182,7 +195,7 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
             if (!ALLOWED_EXTENSIONS.has(ext)) {
                 return {
                     success: false,
-                    error: `File "${file.name}": type "${ext}" is not allowed. Permitted: PDF, Excel, CSV, Images, Text.`,
+                    error: `File "${file.name}": type "${ext}" is not allowed. Permitted: Word, PDF, Excel, CSV, Images, Text.`,
                 };
             }
         }
@@ -304,8 +317,10 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
                 },
             });
 
-            // Create SecureLink with Files (V2.1 Enhanced)
             const secureLink = await tx.secureLink.create({
+                include: {
+                    VendorAccess: { select: { id: true, currentOtpHash: true } },
+                },
                 data: {
                     token,
                     ownerToken,
@@ -363,11 +378,7 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
                 },
             });
 
-            // Create initial OtpHistory entries for forensic audit
-            const createdVendors = await tx.vendorAccess.findMany({
-                where: { secureLinkId: secureLink.id },
-                select: { id: true, currentOtpHash: true },
-            });
+            const createdVendors = secureLink.VendorAccess;
             if (createdVendors.length > 0) {
                 await tx.otpHistory.createMany({
                     data: createdVendors
@@ -388,35 +399,58 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
             timeout: 15000,
         });
 
-        // Audit log AFTER transaction
-        await prisma.auditLog.create({
-            data: {
-                action: 'CREATED',
-                linkId: result.id,
-                metadata: JSON.stringify({
-                    fileCount: files.length,
-                    purpose: purpose || undefined,
-                    hasNotifications: !!notificationEmail,
-                    allowDownload,
-                }),
-            },
-        }).catch(err => logger.warn('Failed to log audit event:', err.message));
-
         const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
         const shareUrl = `${baseUrl}/share/${token}`;
         const ownerUrl = `${baseUrl}/revoke/${ownerToken}`;
 
         logger.info(`Link created with ${files.length} files. ID: ${redactToken(result.id)}`);
 
-        // 📧 Send OTP email to all vendors per their unique OTPs (fire-and-forget)
-        if (vendorAccessData.length > 0) {
-            import('@/lib/email').then(({ sendOTPEmail }) => {
-                vendorAccessData.forEach(v => {
-                    sendOTPEmail(v.email, token, v.otp, validityMinutes)
-                        .then(() => logger.info(`OTP sent to ${redactEmail(v.email)}`))
-                        .catch((err) => logger.error('Failed to send OTP:', err.message));
-                });
+        try {
+            after(async () => {
+                await prisma.auditLog.create({
+                    data: {
+                        action: 'CREATED',
+                        linkId: result.id,
+                        metadata: JSON.stringify({
+                            fileCount: files.length,
+                            purpose: purpose || undefined,
+                            hasNotifications: !!notificationEmail,
+                            allowDownload,
+                        }),
+                    },
+                }).catch(err => logger.warn('Failed to log audit event:', err.message));
             });
+        } catch {
+            /* audit is best-effort */
+        }
+
+        // Await OTP email — do not use after() here. On Vercel the isolate can freeze
+        // before Gmail SMTP finishes, so the owner UI would say "emailed" with no mail.
+        if (vendorAccessData.length > 0) {
+            const { sendOTPEmail } = await import('@/lib/email');
+            const results = await Promise.allSettled(
+                vendorAccessData.map((v) =>
+                    sendOTPEmail(v.email, token, v.otp, validityMinutes).then(() =>
+                        logger.info(`OTP sent to ${redactEmail(v.email)}`),
+                    ),
+                ),
+            );
+            const failed = results.filter((r) => r.status === 'rejected');
+            if (failed.length === results.length) {
+                const reason = failed[0].status === 'rejected' ? failed[0].reason : null;
+                logger.error(
+                    '[EMAIL FAILED] Could not send any OTP emails after link create',
+                    reason instanceof Error ? reason.message : reason,
+                );
+                return {
+                    success: false,
+                    error: 'Secure link was created, but the OTP email could not be delivered. Check EMAIL_USER/EMAIL_PASS on Vercel (Gmail App Password) or try Resend OTP from the share page.',
+                    shareUrl,
+                    ownerUrl,
+                    expiresAt,
+                    purpose: purpose || undefined,
+                };
+            }
         }
 
         return {
@@ -425,7 +459,7 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
             ownerUrl,
             // SECURITY: OTP is NEVER returned in API response — delivered via email only
             expiresAt,
-            purpose: purpose || undefined,  // V2.1: Return for UI confirmation
+            purpose: purpose || undefined,
         };
 
     } catch (error) {

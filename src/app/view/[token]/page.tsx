@@ -1,17 +1,19 @@
 import React from 'react';
+import dynamic from 'next/dynamic';
 import { redirect } from 'next/navigation';
 import { getUserData } from '@/actions/get-user';
 import { AlertTriangle, Shield } from 'lucide-react';
 import { CollaborationProvider } from '@/components/view/CollaborationProvider';
 import { SessionTimer } from '@/components/view/SessionTimer';
-import { ChatPanel } from '@/components/view/ChatPanel';
-import { FileList } from '@/components/view/FileList';
 import { SecureViewWrapper } from '@/components/view/SecureViewWrapper';
 import { CompleteWorkButton } from '@/components/view/CompleteWorkButton';
 import { BreakButton } from '@/components/view/BreakButton';
 import { VendorAutoSave } from '@/components/view/VendorAutoSave';
 import { DraftHydrator } from '@/components/view/DraftHydrator';
 import styles from './view.module.css';
+
+const FileList = dynamic(() => import('@/components/view/FileList').then((m) => m.FileList));
+const ChatPanel = dynamic(() => import('@/components/view/ChatPanel').then((m) => m.ChatPanel));
 
 export const metadata = {
     title: 'Secure View | Data Guardian',
@@ -69,6 +71,7 @@ export default async function ViewPage({ params }: { params: Promise<{ token: st
             token={cleanToken}
             initialCapabilities={data.capabilities}
             initialRemainingSeconds={data.remainingSeconds}
+            initialMyLevel={data.myAssignedLevel}
         >
           <SecureViewWrapper token={cleanToken} viewerEmail={data.maskedEmail}>
             <main className={styles.desk}>
@@ -156,7 +159,11 @@ export default async function ViewPage({ params }: { params: Promise<{ token: st
                     <div className={styles.dock}>
                         <DraftHydrator lastSavedWork={data.lastSavedWork} resumePoint={data.resumePoint} />
                         <CompleteWorkButton token={cleanToken} />
-                        <BreakButton token={cleanToken} />
+                        <BreakButton
+                            token={cleanToken}
+                            allowedBreaks={data.allowedBreaks ?? 0}
+                            breaksUsed={data.breaksUsed ?? 0}
+                        />
                         <VendorAutoSave token={cleanToken} />
                     </div>
                 )}

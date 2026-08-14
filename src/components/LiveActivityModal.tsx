@@ -41,10 +41,16 @@ export default function LiveActivityModal({ token, topic, onClose }: LiveActivit
     useEffect(() => {
         let eventSource: EventSource | null = null;
         let isComponentMounted = true;
+        let reconnectTimeout: ReturnType<typeof setTimeout> | undefined;
 
         const connect = () => {
+            if (!isComponentMounted) return;
             setStatus('connecting');
             setErrorMsg(null);
+            if (eventSource) {
+                eventSource.close();
+                eventSource = null;
+            }
 
             eventSource = new EventSource(`/api/session-monitor?token=${token}`);
 
@@ -87,9 +93,9 @@ export default function LiveActivityModal({ token, topic, onClose }: LiveActivit
                     setStatus('error');
                     setErrorMsg('Lost connection to server. Automatically retrying...');
                     eventSource?.close();
-                    
-                    // Attempt reconnect after 5s
-                    setTimeout(() => {
+                    eventSource = null;
+                    if (reconnectTimeout) clearTimeout(reconnectTimeout);
+                    reconnectTimeout = setTimeout(() => {
                         if (isComponentMounted) connect();
                     }, 5000);
                 }
@@ -100,6 +106,7 @@ export default function LiveActivityModal({ token, topic, onClose }: LiveActivit
 
         return () => {
             isComponentMounted = false;
+            if (reconnectTimeout) clearTimeout(reconnectTimeout);
             if (eventSource) {
                 eventSource.close();
             }
@@ -112,18 +119,20 @@ export default function LiveActivityModal({ token, topic, onClose }: LiveActivit
     };
 
     return (
-        <div style={{
+        <div
+            className="live-activity-overlay"
+            style={{
             position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
             background: 'rgba(0, 0, 0, 0.7)', backdropFilter: 'blur(8px)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            zIndex: 9999, padding: '20px'
+            zIndex: 9999
         }} onClick={onClose}>
-            <div style={{
+            <div
+                className="live-activity-dialog"
+                style={{
                 background: '#111827',
                 border: '1px solid rgba(255,255,255,0.1)',
                 borderRadius: '16px',
-                width: '100%', maxWidth: '600px',
-                maxHeight: '90vh',
                 display: 'flex', flexDirection: 'column',
                 boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
                 overflow: 'hidden'
@@ -150,9 +159,9 @@ export default function LiveActivityModal({ token, topic, onClose }: LiveActivit
                             {topic}
                         </p>
                     </div>
-                    <button onClick={onClose} style={{
+                    <button onClick={onClose} aria-label="Close live activity" style={{
                         background: 'rgba(255,255,255,0.05)', border: 'none', color: 'var(--text-secondary)',
-                        width: '32px', height: '32px', borderRadius: '8px', cursor: 'pointer',
+                        width: '44px', height: '44px', borderRadius: '8px', cursor: 'pointer',
                         display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem',
                     }}>×</button>
                 </div>
@@ -163,10 +172,10 @@ export default function LiveActivityModal({ token, topic, onClose }: LiveActivit
                     </div>
                 )}
 
-                <div style={{ display: 'flex', flex: 1, minHeight: '400px', flexDirection: 'row' }}>
+                <div className="live-activity-body">
                     
                     {/* Active Users Sidebar */}
-                    <div style={{ width: '220px', borderRight: '1px solid rgba(255,255,255,0.06)', padding: '20px', overflowY: 'auto' }}>
+                    <div className="live-activity-sidebar">
                         <h3 style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.5px', marginBottom: '16px' }}>
                             Online Members ({participants.length})
                         </h3>
@@ -201,7 +210,7 @@ export default function LiveActivityModal({ token, topic, onClose }: LiveActivit
                     </div>
 
                     {/* Chat Monitor */}
-                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'rgba(0,0,0,0.2)' }}>
+                    <div className="live-activity-chat">
                         <div style={{ padding: '16px 20px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
                             <h3 style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
                                 Recent Chat Activity

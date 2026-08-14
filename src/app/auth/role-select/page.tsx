@@ -6,6 +6,7 @@ import {
     getOnboardingStep,
     safeCallbackPath,
 } from '@/lib/onboarding';
+import { setUserRole } from '@/actions/set-role';
 import { redirect } from 'next/navigation';
 import { Suspense } from 'react';
 import RoleSelectClient from './RoleSelectClient';
@@ -71,7 +72,7 @@ export default async function RoleSelectPage({ searchParams }: Props) {
                 </section>
             </main>
         }>
-            <RoleSelectClient callbackUrl={callbackUrl} session={session} />
+            <RoleSelectClient callbackUrl={callbackUrl} session={session} onSetRole={setUserRole} />
         </Suspense>
     );
 }

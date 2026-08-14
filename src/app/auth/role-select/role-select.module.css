@@ -443,6 +443,10 @@
 }
 
 @media (max-width: 860px) {
+  .page {
+    padding: 88px 14px 28px;
+  }
+
   .stage {
     grid-template-columns: 1fr;
     gap: 12px;

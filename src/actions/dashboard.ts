@@ -42,9 +42,57 @@ export interface SendHistoryRecord {
 
 function getStatus(link: { expiresAt: Date; isUsed: boolean; isRevoked: boolean }): DashboardLink['status'] {
     if (link.isRevoked) return 'revoked';
-    if (link.isUsed) return 'used';
     if (new Date() > link.expiresAt) return 'expired';
+    if (link.isUsed) return 'used';
     return 'active';
+}
+
+/** Live shares only — expired / revoked / completed links are purged, not listed. */
+function liveLinkWhere<T extends Record<string, unknown>>(extra: T = {} as T) {
+    return {
+        ...extra,
+        isRevoked: false,
+        expiresAt: { gt: new Date() },
+    };
+}
+
+const purgeCooldown = new Map<string, number>();
+const PURGE_COOLDOWN_MS = 5 * 60 * 1000;
+
+async function purgeOwnerDeadLinks(ownerId: string) {
+    const now = Date.now();
+    if ((purgeCooldown.get(ownerId) || 0) > now) return;
+    purgeCooldown.set(ownerId, now + PURGE_COOLDOWN_MS);
+
+    try {
+        try {
+            const { isRedisConfigured } = await import('@/lib/redis-helpers');
+            if (isRedisConfigured()) {
+                const redis = (await import('@/lib/redis')).default;
+                const acquired = await redis.set(`dg:purge:${ownerId}`, '1', { nx: true, ex: 300 });
+                if (acquired === null) return;
+            }
+        } catch {
+            /* memory cooldown still applies */
+        }
+
+        const dead = await prisma.secureLink.findFirst({
+            where: {
+                ownerId,
+                OR: [{ isRevoked: true }, { expiresAt: { lt: new Date() } }],
+            },
+            select: { id: true },
+        });
+        if (!dead) return;
+        const { executeCleanup } = await import('@/lib/cleanup-core');
+        await executeCleanup({ ownerId });
+    } catch (err) {
+        purgeCooldown.delete(ownerId);
+        console.warn(
+            '[dashboard] expired/revoked purge failed:',
+            err instanceof Error ? err.message : err,
+        );
+    }
 }
 
 /** List-row fields only — no nested files/audits (loaded on expand). */
@@ -94,6 +142,8 @@ const VENDOR_LIST_SELECT = {
  * Avoids OR + relation `some()` which the planner cannot use cleanly.
  */
 async function findReceivedLinksByEmail(email: string) {
+    // Sequential on purpose: Promise.all needs 2 pool slots and trips P2024
+    // when OAuth / owner dashboard already hold the Neon direct limit.
     const vendorRows = await prisma.vendorAccess.findMany({
         where: { email },
         select: { secureLinkId: true },
@@ -110,9 +160,11 @@ async function findReceivedLinksByEmail(email: string) {
     ])];
 
     return prisma.secureLink.findMany({
-        where: ids.length > 0
-            ? { OR: [{ allowedVendorEmail: email }, { id: { in: ids } }] }
-            : { allowedVendorEmail: email },
+        where: liveLinkWhere(
+            ids.length > 0
+                ? { OR: [{ allowedVendorEmail: email }, { id: { in: ids } }] }
+                : { allowedVendorEmail: email },
+        ),
         orderBy: { createdAt: 'desc' },
         take: 50,
         select: {
@@ -132,14 +184,23 @@ async function findReceivedLinksByEmail(email: string) {
 }
 
 function mapVendorLinks(links: Awaited<ReturnType<typeof findReceivedLinksByEmail>>): DashboardLink[] {
-    return links.map((link) => {
+    return links.flatMap((link) => {
+        const vendorAccessRecord = link.VendorAccess?.[0];
+        if (
+            vendorAccessRecord?.status === 'completed' ||
+            vendorAccessRecord?.status === 'expired'
+        ) {
+            return [];
+        }
         const vendorIsUsed = link.LinkAccess?.[0]?.isUsed ?? link.isUsed;
         const row = mapListLink({ ...link, _count: { UserFile: 0 } }, vendorIsUsed);
-        const vendorAccessRecord = link.VendorAccess?.[0];
-        if (row.status === 'used' && vendorAccessRecord?.status && vendorAccessRecord.status !== 'completed') {
+        if (row.status === 'expired' || row.status === 'revoked') {
+            return [];
+        }
+        if (row.status === 'used' && vendorAccessRecord?.status === 'break') {
             row.status = 'break';
         }
-        return row;
+        return [row];
     });
 }
 
@@ -183,6 +244,22 @@ function mapListLink(link: any, effectiveIsUsed: boolean): DashboardLink {
 /**
  * Owner link list — slim payload for fast first paint.
  */
+async function fetchOwnedLinksForOwner(userId: string): Promise<DashboardLink[]> {
+    const links = await prisma.secureLink.findMany({
+        where: liveLinkWhere({ ownerId: userId }),
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+        select: LIST_SELECT,
+    });
+
+    return links
+        .map((link: any) => {
+            const anyVendorUsed = link.LinkAccess?.some((a: any) => a.isUsed) || false;
+            return mapListLink(link, link.isUsed || anyVendorUsed);
+        })
+        .filter((l) => l.status !== 'expired' && l.status !== 'revoked');
+}
+
 export async function getOwnedLinks(userId: string): Promise<DashboardLink[]> {
     try {
         const session = await auth();
@@ -191,19 +268,8 @@ export async function getOwnedLinks(userId: string): Promise<DashboardLink[]> {
             return [];
         }
 
-        const links = await prisma.secureLink.findMany({
-            where: { ownerId: userId },
-            orderBy: { createdAt: 'desc' },
-            take: 50,
-            select: LIST_SELECT,
-        });
-
-        const mapped = links.map((link: any) => {
-            const anyVendorUsed = link.LinkAccess?.some((a: any) => a.isUsed) || false;
-            return mapListLink(link, link.isUsed || anyVendorUsed);
-        });
-
-        return mapped;
+        await purgeOwnerDeadLinks(userId);
+        return fetchOwnedLinksForOwner(userId);
     } catch (error) {
         console.error('Error fetching owned links:', error);
         return [];
@@ -322,17 +388,21 @@ export async function getOwnerDashboardInitial(): Promise<{
     }
 
     const userId = session.user.id;
+    await purgeOwnerDeadLinks(userId);
+
     const links = await prisma.secureLink.findMany({
-        where: { ownerId: userId },
+        where: liveLinkWhere({ ownerId: userId }),
         orderBy: { createdAt: 'desc' },
         take: 50,
         select: LIST_SELECT,
     });
 
-    const mapped = links.map((link: any) => {
-        const anyVendorUsed = link.LinkAccess?.some((a: any) => a.isUsed) || false;
-        return mapListLink(link, link.isUsed || anyVendorUsed);
-    });
+    const mapped = links
+        .map((link: any) => {
+            const anyVendorUsed = link.LinkAccess?.some((a: any) => a.isUsed) || false;
+            return mapListLink(link, link.isUsed || anyVendorUsed);
+        })
+        .filter((l) => l.status !== 'expired' && l.status !== 'revoked');
     return {
         links: mapped,
         userId,
@@ -378,9 +448,22 @@ export async function getOwnerDashboardData(userId: string): Promise<{
         return { links: [], history: [] };
     }
 
-    // Sequential on purpose — one connection at a time under a tight Neon pool
-    const links = await getOwnedLinks(userId);
-    const history = await getSendHistory(userId);
+    const links = await fetchOwnedLinksForOwner(userId);
+    const history = await prisma.sendRecord.findMany({
+        where: { ownerId: userId },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+        select: {
+            id: true,
+            topic: true,
+            vendorEmail: true,
+            fileCount: true,
+            status: true,
+            createdAt: true,
+            expiredAt: true,
+        },
+    });
+    void purgeOwnerDeadLinks(userId);
     return { links, history };
 }
 
@@ -390,18 +473,27 @@ export async function ownerHasActiveLink(userId: string): Promise<boolean> {
     if (!session?.user?.id || session.user.id !== userId) return false;
 
     try {
-        const active = await prisma.secureLink.findFirst({
+        const candidates = await prisma.secureLink.findMany({
             where: {
                 ownerId: userId,
                 isRevoked: false,
                 isUsed: false,
                 expiresAt: { gt: new Date() },
-                NOT: { LinkAccess: { some: { isUsed: true } } },
             },
             select: { id: true },
+            take: 25,
         });
+        if (candidates.length === 0) return false;
 
-        return Boolean(active);
+        const usedAccess = await prisma.linkAccess.findMany({
+            where: {
+                secureLinkId: { in: candidates.map((c) => c.id) },
+                isUsed: true,
+            },
+            select: { secureLinkId: true },
+        });
+        const usedIds = new Set(usedAccess.map((a) => a.secureLinkId));
+        return candidates.some((c) => !usedIds.has(c.id));
     } catch (error) {
         console.warn('[ownerHasActiveLink] DB unavailable — allowing create-link:', error);
         return false;

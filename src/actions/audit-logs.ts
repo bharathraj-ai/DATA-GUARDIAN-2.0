@@ -28,32 +28,33 @@ export async function getUnifiedAuditLogs(): Promise<UnifiedAuditLog[]> {
     }
 
     try {
-        const secureLinkLogs = await prisma.auditLog.findMany({
-            where: { ownerId: userId },
-            select: {
-                id: true,
-                action: true,
-                reason: true,
-                metadata: true,
-                timestamp: true,
-                linkId: true,
-                SecureLink: {
-                    select: {
-                        purpose: true,
+        const [secureLinkLogs, ownedDocs] = await Promise.all([
+            prisma.auditLog.findMany({
+                where: { ownerId: userId },
+                select: {
+                    id: true,
+                    action: true,
+                    reason: true,
+                    metadata: true,
+                    timestamp: true,
+                    linkId: true,
+                    SecureLink: {
+                        select: {
+                            purpose: true,
+                        },
                     },
                 },
-            },
-            orderBy: {
-                timestamp: 'desc'
-            },
-            take: 100,
-        });
-
-        const ownedDocs = await prisma.document.findMany({
-            where: { ownerId: userId },
-            select: { id: true, fileName: true },
-            take: 500,
-        });
+                orderBy: {
+                    timestamp: 'desc'
+                },
+                take: 100,
+            }),
+            prisma.document.findMany({
+                where: { ownerId: userId },
+                select: { id: true, fileName: true },
+                take: 500,
+            }),
+        ]);
         const docNameById = new Map(ownedDocs.map((d) => [d.id, d.fileName]));
         const documentLogs = ownedDocs.length === 0
             ? []

@@ -1,45 +1,64 @@
+import { Suspense } from 'react';
 import { redirect } from 'next/navigation';
 import { auth } from '@/lib/auth';
 import { getOwnerDashboardData } from '@/actions/dashboard';
-import { getDbUserRole } from '@/lib/security/roles';
 import { getOnboardingStep } from '@/lib/onboarding';
+import { normalizeRole } from '@/lib/security/roles';
 import OwnerDashboardClient from './OwnerDashboardClient';
+import DashboardSkeleton from '../DashboardSkeleton';
+
+async function OwnerDashboardData({
+    userId,
+    userLabel,
+    justCreated,
+}: {
+    userId: string;
+    userLabel: string;
+    justCreated: boolean;
+}) {
+    const dash = await getOwnerDashboardData(userId);
+    return (
+        <OwnerDashboardClient
+            initialLinks={dash.links}
+            initialHistory={dash.history}
+            userId={userId}
+            userLabel={userLabel}
+            justCreated={justCreated}
+        />
+    );
+}
 
 /**
- * Prefetch dashboard data on the server so the client skips the
- * session → server-action waterfall on first paint.
- * Role gate uses Postgres, never JWT alone.
+ * JWT role gate first (fast redirect), then stream links so the shell paints immediately.
  */
-export default async function OwnerDashboardPage() {
+export default async function OwnerDashboardPage({
+    searchParams,
+}: {
+    searchParams: Promise<{ created?: string }>;
+}) {
     const session = await auth();
 
     if (!session?.user?.id) {
         redirect('/auth/signin?callbackUrl=/dashboard/owner');
     }
 
-    const dbUser = await getDbUserRole(session.user.id);
-    if (!dbUser) {
-        redirect('/auth/signin?callbackUrl=/dashboard/owner');
-    }
-
-    if (getOnboardingStep(dbUser.roleSelected) === 'ROLE_SELECTION') {
+    if (getOnboardingStep(session.user.roleSelected) === 'ROLE_SELECTION') {
         redirect('/auth/role-select?callbackUrl=/dashboard/owner');
     }
 
-    if (dbUser.role === 'VENDOR') {
+    if (normalizeRole(session.user.role) === 'VENDOR') {
         redirect('/dashboard/vendor');
     }
 
-    const { links: initialLinks, history: initialHistory } = await getOwnerDashboardData(
-        session.user.id,
-    );
+    const sp = await searchParams;
 
     return (
-        <OwnerDashboardClient
-            initialLinks={initialLinks}
-            initialHistory={initialHistory}
-            userId={session.user.id}
-            userLabel={session.user.name || session.user.email || 'Owner'}
-        />
+        <Suspense fallback={<DashboardSkeleton />}>
+            <OwnerDashboardData
+                userId={session.user.id}
+                userLabel={session.user.name || session.user.email || 'Owner'}
+                justCreated={sp.created === '1'}
+            />
+        </Suspense>
     );
 }

@@ -58,7 +58,6 @@ export async function incrementAndCheckLimit(
         }
 
         const currentCount = await redis.incr(key);
-
         if (currentCount === 1) {
             await redis.expire(key, ttlSeconds);
         }

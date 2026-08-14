@@ -1,5 +1,6 @@
 import { Resolver } from 'dns/promises';
 import { MongoClient, GridFSBucket, Db, ServerApiVersion } from 'mongodb';
+import { logger } from '@/lib/logger';
 
 // ─── Environment Validation ─────────────────────────────────────────
 function getRequiredEnv(key: string): string {
@@ -13,6 +14,8 @@ function getRequiredEnv(key: string): string {
   return value.trim();
 }
 
+let _expandedSrvUri: string | null = null;
+
 /**
  * Windows / some local resolvers refuse Node `querySrv` for mongodb+srv
  * (ECONNREFUSED) even when Atlas records exist. Expand SRV via public DNS
@@ -20,6 +23,7 @@ function getRequiredEnv(key: string): string {
  */
 async function expandMongoSrvUri(uri: string): Promise<string> {
   if (!uri.startsWith('mongodb+srv://')) return uri;
+  if (_expandedSrvUri) return _expandedSrvUri;
 
   const withoutScheme = uri.slice('mongodb+srv://'.length);
   const at = withoutScheme.lastIndexOf('@');
@@ -65,7 +69,8 @@ async function expandMongoSrvUri(uri: string): Promise<string> {
   }
 
   const auth = creds ? `${creds}@` : '';
-  return `mongodb://${auth}${hosts}${pathOnly}?${params.toString()}`;
+  _expandedSrvUri = `mongodb://${auth}${hosts}${pathOnly}?${params.toString()}`;
+  return _expandedSrvUri;
 }
 
 // ─── Lazy Singleton ─────────────────────────────────────────────────
@@ -73,6 +78,9 @@ let _mongoClient: MongoClient | null = null;
 let _db: Db | null = null;
 let _gridFSBucket: GridFSBucket | null = null;
 let _connecting: Promise<MongoClient> | null = null;
+
+/** 1 MiB GridFS chunks — fewer round-trips than the 255 KiB default. */
+export const GRIDFS_CHUNK_SIZE = 1024 * 1024;
 
 export async function getMongoClient(): Promise<MongoClient> {
   if (_mongoClient) return _mongoClient;
@@ -83,14 +91,15 @@ export async function getMongoClient(): Promise<MongoClient> {
     const uri = await expandMongoSrvUri(rawUri);
     const client = new MongoClient(uri, {
       maxPoolSize: 10,
-      minPoolSize: 0,
-      connectTimeoutMS: 15000,
-      socketTimeoutMS: 45000,
-      serverSelectionTimeoutMS: 15000,
+      minPoolSize: process.env.NODE_ENV === 'production' ? 1 : 0,
+      maxIdleTimeMS: 60_000,
+      connectTimeoutMS: 8000,
+      socketTimeoutMS: 30_000,
+      serverSelectionTimeoutMS: 8000,
       serverApi: {
         version: ServerApiVersion.v1,
-        strict: true,
-        deprecationErrors: true,
+        strict: false,
+        deprecationErrors: false,
       },
       tls: true,
       family: 4, // Force IPv4 to prevent Windows OpenSSL alert 80 with Atlas
@@ -99,7 +108,7 @@ export async function getMongoClient(): Promise<MongoClient> {
     try {
       await client.connect();
       _mongoClient = client;
-      console.log('[Mongo] Client connected.');
+      logger.info('[Mongo] Client connected.');
       return client;
     } catch (error) {
       try {
@@ -131,7 +140,8 @@ export async function getGridFSBucket(): Promise<GridFSBucket> {
   if (_gridFSBucket) return _gridFSBucket;
   const db = await getMongoDb();
   _gridFSBucket = new GridFSBucket(db, {
-    bucketName: 'uploads'
+    bucketName: 'uploads',
+    chunkSizeBytes: GRIDFS_CHUNK_SIZE,
   });
   return _gridFSBucket;
 }
@@ -143,4 +153,10 @@ export function isMongoConfigured(): boolean {
   } catch {
     return false;
   }
+}
+
+/** Best-effort warm connect so the first upload/download is not a cold TLS+SRV hit. */
+export async function warmMongoConnection(): Promise<void> {
+  if (!isMongoConfigured()) return;
+  await getMongoClient();
 }

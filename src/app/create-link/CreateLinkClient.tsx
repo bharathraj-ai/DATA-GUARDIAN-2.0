@@ -233,13 +233,11 @@ export default function CreateLinkClient({ initialVendors, hasActiveLink }: Crea
 
             const result = await createSecureLinkWithFiles(data);
 
-            if (result.success && result.shareUrl) {
-                router.refresh();
-                setGeneratedLink(result.shareUrl);
-                setStatus({ message: 'The link and OTP have been sent to the vendor.', type: 'success' });
-            } else {
-                setStatus({ message: result.error || 'Failed to generate link', type: 'error' });
+            if (result.success) {
+                router.replace('/dashboard/owner?created=1');
+                return;
             }
+            setStatus({ message: result.error || 'Failed to generate link', type: 'error' });
         } catch (err: any) {
             console.error('Upload Error:', err);
             setStatus({
@@ -323,7 +321,7 @@ export default function CreateLinkClient({ initialVendors, hasActiveLink }: Crea
                                 </button>
                             </div>
                             <div className={styles.gridSettings}>
-                                <div style={{ display: 'flex', gap: '10px', flex: 1 }}>
+                                <div className={styles.expiryAmountRow}>
                                     <div className={styles.inputWrapper} style={{ flex: 1 }}>
                                         {formData.expiryMode === 'time' ? (
                                             <Clock className={styles.inputIcon} size={18} />
@@ -626,9 +624,9 @@ export default function CreateLinkClient({ initialVendors, hasActiveLink }: Crea
 
                         {/* Vendor Permissions Box */}
                         <div className={styles.permissionsBox} style={{ marginTop: '2rem' }}>
-                            <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid #e5e7eb', display: 'flex', gap: '12px', alignItems: 'center' }}>
-                                <Building2 size={20} color="#3b82f6" />
-                                <div>
+                            <div className={styles.permHeader}>
+                                <Building2 size={20} color="#3b82f6" style={{ flexShrink: 0, marginTop: 2 }} />
+                                <div className={styles.permText}>
                                     <div style={{ fontWeight: 600, color: '#111827', fontSize: '0.875rem' }}>Vendor Permissions</div>
                                     <div style={{ fontSize: '0.8125rem', color: '#6b7280' }}>Grant vendor specific permissions for shared files.</div>
                                 </div>
@@ -715,7 +713,7 @@ export default function CreateLinkClient({ initialVendors, hasActiveLink }: Crea
                                 type="file"
                                 multiple
                                 onChange={handleFileChange}
-                                accept=".xls,.xlsx,.csv,.png,.jpg,.jpeg,.pdf,.txt"
+                                accept=".xls,.xlsx,.csv,.png,.jpg,.jpeg,.pdf,.txt,.doc,.docx,.odt"
                                 id="file-upload"
                                 style={{ display: 'none' }}
                             />
@@ -731,7 +729,7 @@ export default function CreateLinkClient({ initialVendors, hasActiveLink }: Crea
                             </div>
                         </div>
                         <div className={styles.dropzoneHint}>
-                            Max 128MB per file • Supported: Image, PDF, Excel, CSV, Text
+                            Max 128MB per file • Supported: Word, PDF, Excel, CSV, Images, Text
                         </div>
                         {files && files.length > 0 && (
                             <div className={styles.fileList}>

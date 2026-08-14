@@ -1,12 +1,9 @@
 'use server';
 
-import { prisma } from '@/lib/prisma';
 import { decryptData } from '@/lib/crypto';
 import { maskEmail, maskPhone } from '@/lib/masking';
-import { cookies } from 'next/headers';
 import { executeSingleLinkCleanup } from '@/lib/cleanup-core';
 import { authorizeSecureLink, CapabilityFlags } from '@/lib/linkAuthorization';
-import { tryCheckRevoked, tryValidateSession } from '@/lib/redis-helpers';
 
 // Decrypted user data type
 interface DecryptedUserData {
@@ -36,6 +33,7 @@ export type MaskedUserData = {
     expiresAt: Date;
     remainingSeconds: number;
     capabilities: CapabilityFlags;
+    myAssignedLevel: number;
     files: FileMetadata[];
     // Sender & purpose info
     purpose: string | null;
@@ -46,6 +44,8 @@ export type MaskedUserData = {
     vendorStatus?: string;
     lastSavedWork?: any;
     resumePoint?: any;
+    allowedBreaks?: number;
+    breaksUsed?: number;
 };
 
 export type GetUserDataResult = {
@@ -67,7 +67,10 @@ export type GetUserDataResult = {
  */
 export async function getUserData(token: string): Promise<GetUserDataResult> {
     try {
-        const authResult = await authorizeSecureLink(token, 'view');
+        const authResult = await authorizeSecureLink(token, 'view', undefined, {
+            includeDraft: true,
+            includeUserData: true,
+        });
         if (!authResult.success) {
             const err = authResult.error.toLowerCase();
             return {
@@ -79,13 +82,9 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
 
         const capabilities = authResult.context.capabilities;
         const secureLink = authResult.context.secureLink;
+        const encryptedData = (secureLink as { UserData?: { encryptedData: string } | null }).UserData?.encryptedData;
 
-        // Only fetch UserData — the auth result already includes VendorAccess, UserFile, User
-        const userData = await prisma.userData.findUnique({
-            where: { id: secureLink.userId },
-        });
-
-        if (!userData) {
+        if (!encryptedData) {
             return {
                 success: false,
                 error: 'This link is invalid or has been deleted.',
@@ -110,8 +109,8 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
 
         let decryptedData: DecryptedUserData;
         try {
-            decryptedData = decryptData<DecryptedUserData>((userData as any).encryptedData);
-        } catch (decryptError) {
+            decryptedData = decryptData<DecryptedUserData>(encryptedData);
+        } catch {
             console.error('Decryption failed');
             return {
                 success: false,
@@ -124,6 +123,8 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
             status?: string;
             lastSavedWork?: unknown;
             resumePoint?: unknown;
+            allowedBreaks?: number | null;
+            breaksUsed?: number | null;
         } | null;
 
         if (authResult.context.effectiveEmail && !authResult.context.isOwner) {
@@ -133,6 +134,8 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
                 status?: string;
                 lastSavedWork?: unknown;
                 resumePoint?: unknown;
+                allowedBreaks?: number | null;
+                breaksUsed?: number | null;
             }> }).VendorAccess || [];
             vendorAccess = vendors.find((v) => v.email.toLowerCase() === email) ?? null;
         }
@@ -152,6 +155,9 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
                 expiresAt: secureLink.expiresAt,
                 remainingSeconds,
                 capabilities,
+                myAssignedLevel: authResult.context.isOwner
+                    ? 1
+                    : (authResult.context.vendorAccess?.level ?? 2),
                 files: (secureLink as any).UserFile || [],
                 purpose: secureLink.purpose,
                 purposeDetail: secureLink.purposeDetail,
@@ -161,6 +167,8 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
                 vendorStatus: vendorAccess?.status,
                 lastSavedWork: vendorAccess?.lastSavedWork,
                 resumePoint: vendorAccess?.resumePoint,
+                allowedBreaks: vendorAccess?.allowedBreaks ?? 0,
+                breaksUsed: vendorAccess?.breaksUsed ?? 0,
             },
         };
     } catch (error) {
@@ -184,42 +192,24 @@ export async function getFullUserData(token: string): Promise<{
     error?: string;
 }> {
     try {
-        const { cookies } = await import('next/headers');
-        const { verifyShareSession } = await import('@/lib/share-session');
-        const cookieStore = await cookies();
-        const verified = verifyShareSession(cookieStore.get('session_id')?.value, token);
-        if (!verified.valid) {
+        const authResult = await authorizeSecureLink(token, 'view', undefined, {
+            includeDraft: false,
+            includeUserData: true,
+        });
+        if (!authResult.success || !authResult.context.isOwner) {
             return { success: false, error: 'Unauthorized' };
         }
 
-        const revokedInRedis = await tryCheckRevoked(token);
-        if (revokedInRedis === true) {
-            return { success: false, error: 'Revoked' };
-        }
+        const secureLink = authResult.context.secureLink;
+        const encryptedData = (secureLink as { UserData?: { encryptedData: string } | null }).UserData?.encryptedData;
 
-        const isValid = await tryValidateSession(token, verified.sessionId);
-        if (isValid === false) {
-            return { success: false, error: 'Invalid session' };
-        }
-
-        const secureLink = await prisma.secureLink.findUnique({
-            where: { token },
-            include: { UserData: true },
-        });
-
-        if (!secureLink || !secureLink.UserData || !secureLink.isUsed || secureLink.isRevoked) {
+        if (!encryptedData || !secureLink.isUsed) {
             return { success: false, error: 'Not accessible' };
         }
 
-        const now = new Date();
-        if (secureLink.expiresAt < now) {
-            return { success: false, error: 'Expired' };
-        }
-
-        const remainingMs = secureLink.expiresAt.getTime() - now.getTime();
+        const remainingMs = secureLink.expiresAt.getTime() - Date.now();
         const remainingSeconds = Math.max(0, Math.floor(remainingMs / 1000));
-
-        const decryptedData = decryptData<DecryptedUserData>(secureLink.UserData.encryptedData);
+        const decryptedData = decryptData<DecryptedUserData>(encryptedData);
 
         return {
             success: true,

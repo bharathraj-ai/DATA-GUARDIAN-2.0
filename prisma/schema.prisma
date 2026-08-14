@@ -1,5 +1,7 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  // native = local/dev; rhel-openssl-3.0.x = Vercel Node serverless
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
 datasource db {
@@ -80,6 +82,8 @@ model SecureLink {
   @@index([expiresAt])
   @@index([ownerId])
   @@index([ownerId, createdAt])
+  @@index([ownerId, isRevoked, expiresAt])
+  @@index([isRevoked])
   @@index([allowedVendorEmail])
 }
 enum VendorStatus {
@@ -133,6 +137,7 @@ model VendorAccess {
   @@unique([secureLinkId, email])
   @@index([secureLinkId])
   @@index([email])
+  @@index([email, status])
   @@index([activeSessionId])
 }
 
@@ -220,6 +225,7 @@ model UserFile {
 
   @@index([secureLinkId])
   @@index([status])
+  @@index([lockedBy])
 }
 
 model FileVersion {
@@ -231,14 +237,19 @@ model FileVersion {
   authTag           String
   encryptedDek      String?
   fileSize          Int
-  changeType        String   // "annotation" | "page_replace" | "restore"
+  changeType        String   // "annotation" | "page_replace" | "restore" | "collaborative_edit" | "PRIORITY_TAKEOVER"
   changeDescription String?
+  createdBy         String?
+  reason            String?
+  previousVersionId String?
   createdAt         DateTime @default(now())
   UserFile          UserFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
 
   @@unique([fileId, versionNumber])
   @@index([fileId])
   @@index([createdAt])
+  @@index([createdBy])
+  @@index([reason])
 }
 
 model VerificationToken {
@@ -267,6 +278,7 @@ model SendRecord {
   @@index([createdAt])
   @@index([ownerId, createdAt])
   @@index([ownerId, status])
+  @@index([ownerId, status, topic])
 }
 
 /// Persistent annotation overlay stored separately from the encrypted document.

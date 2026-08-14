@@ -4,6 +4,9 @@ import { cookies } from 'next/headers';
 import { verifyShareSession } from '@/lib/share-session';
 import { extractClientIP, checkGlobalRateLimit } from '@/lib/rate-limit';
 
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 /**
  * POST /api/audit
  * Receives client-side security events from SecurityShield.

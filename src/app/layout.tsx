@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Inter } from 'next/font/google';
 import "./globals.css";
 import "./anthropic.css";
+import "./responsive.css";
 import Providers from "@/components/Providers";
 import ClientAppShell from "@/components/ClientAppShell";
 import SiteFooter from "@/components/SiteFooter";

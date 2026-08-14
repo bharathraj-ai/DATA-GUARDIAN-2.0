@@ -6,6 +6,7 @@ import { auth } from '@/lib/auth';
 import { logger } from '@/lib/logger';
 
 export const dynamic = 'force-dynamic'; // Prevent static generation during build
+export const maxDuration = 60;
 
 interface DecryptedUserData {
     firstName: string;
@@ -16,7 +17,7 @@ interface DecryptedUserData {
     age: number;
 }
 
-import { tryCheckRevoked, tryValidateSession, tryGetSessionTTL } from '@/lib/redis-helpers';
+import { trySseAccessCheck, tryGetSessionTTL } from '@/lib/redis-helpers';
 import { verifyShareSession } from '@/lib/share-session';
 
 /**
@@ -36,15 +37,11 @@ export async function GET(
     }
     const sessionId = verified.sessionId;
 
-    // Optional Redis revoke cache
-    const revokedInRedis = await tryCheckRevoked(token);
-    if (revokedInRedis === true) {
+    const sseAccess = await trySseAccessCheck(token, sessionId);
+    if (sseAccess === 'revoked') {
         return new Response('Access revoked', { status: 403 });
     }
-
-    // Optional Redis session cache (null = rely on signed cookie)
-    const sessionValid = await tryValidateSession(token, sessionId);
-    if (sessionValid === false) {
+    if (sseAccess === 'invalid') {
         return new Response('Session invalid or expired', { status: 401 });
     }
 
@@ -57,7 +54,7 @@ export async function GET(
             expiresAt: true,
             isUsed: true,
             isRevoked: true,
-            UserData: true,
+            UserData: { select: { encryptedData: true } },
             LinkAccess: {
                 select: {
                     vendorEmail: true,
@@ -69,6 +66,9 @@ export async function GET(
                     email: true,
                     level: true,
                 },
+            },
+            UserFile: {
+                select: { id: true },
             },
         },
     });
@@ -176,18 +176,28 @@ export async function GET(
             let heartbeatTick = 0;
             let cachedExpiresAt = secureLink.expiresAt;
             let cachedLinkId = secureLink.id;
+            const fileIds = (secureLink as { UserFile?: { id: string }[] }).UserFile?.map((f) => f.id) ?? [];
+            let lastEditLockEventId: string | null = null;
 
-            // Track active session presence
+            // Deterministic id so reconnects upsert instead of duplicating rows
             try {
-                await prisma.documentSession.create({
-                    data: {
-                        fileId: sessionId, // Use fileId to store sessionId for global presence
-                        token: token,
-                        level: userLevel
-                    }
+                const presenceId = `sse:${sessionId}`.slice(0, 191);
+                await prisma.documentSession.upsert({
+                    where: { id: presenceId },
+                    create: {
+                        id: presenceId,
+                        fileId: sessionId,
+                        token,
+                        level: userLevel,
+                        lastSeenAt: new Date(),
+                    },
+                    update: {
+                        lastSeenAt: new Date(),
+                        level: userLevel,
+                    },
                 });
             } catch (e) {
-                logger.error("Failed to create presence session:", e);
+                logger.error("Failed to upsert presence session:", e);
             }
 
             const logSessionEnd = async (reason: string) => {
@@ -258,17 +268,15 @@ export async function GET(
                 }
 
                 try {
-                    const revokedInRedis = await tryCheckRevoked(token);
-                    if (revokedInRedis === true) {
+                    const sseAccess = await trySseAccessCheck(token, sessionId);
+                    if (sseAccess === 'revoked') {
                         safeEnqueue(encoder.encode(`data: ${JSON.stringify({ type: 'revoked' })}\n\n`));
                         clearInterval(heartbeatInterval);
                         safeClose();
                         await logSessionEnd('revoked');
                         return;
                     }
-
-                    const sessionValid = await tryValidateSession(token, sessionId);
-                    if (sessionValid === false) {
+                    if (sseAccess === 'invalid') {
                         safeEnqueue(encoder.encode(`data: ${JSON.stringify({ type: 'session_invalid' })}\n\n`));
                         clearInterval(heartbeatInterval);
                         safeClose();
@@ -315,81 +323,105 @@ export async function GET(
                         return;
                     }
 
+                    // Edit-lock events every tick so priority takeover appears without a page refresh.
+                    let editLocks: Record<string, unknown> | undefined;
+                    try {
+                        const { getEditLockEvent, getEditLockStatuses } = await import('@/lib/collaboration/edit-lock-service');
+                        const latestEvent = await getEditLockEvent(token);
+                        if (latestEvent && latestEvent.id !== lastEditLockEventId) {
+                            lastEditLockEventId = latestEvent.id;
+                            safeEnqueue(encoder.encode(`data: ${JSON.stringify(latestEvent)}\n\n`));
+                        }
+                        if (fileIds.length > 0 && (heartbeatTick % 2 === 0 || Boolean(latestEvent?.type))) {
+                            editLocks = await getEditLockStatuses(fileIds);
+                        }
+                    } catch {
+                        // Lock bus is optional for the kill-switch heartbeat.
+                    }
+
                     if (!mustReconcileDb) {
                         safeEnqueue(encoder.encode(`data: ${JSON.stringify({
                             type: 'heartbeat',
                             remainingSeconds: Math.min(ttl, dbRemainingSeconds),
+                            myLevel: userLevel,
+                            editLocks,
                             timestamp: Date.now(),
                         })}\n\n`));
                         return;
                     }
 
-                    // Fetch active sessions for presence
-                    const threshold = new Date(Date.now() - 15000);
-                    const activeSessions = await prisma.documentSession.findMany({
-                        where: {
-                            token,
-                            lastSeenAt: { gte: threshold }
-                        },
-                        select: {
-                            userId: true,
-                            displayName: true,
-                            level: true,
-                            color: true
-                        }
-                    });
+                    const threshold = new Date(Date.now() - 60_000);
+                    const chatWhere = {
+                        secureLinkId: link.id,
+                        ...(lastChatTimestamp ? { timestamp: { gt: lastChatTimestamp } } : {}),
+                        OR: vendorEmail
+                            ? [
+                                { receiverEmail: null },
+                                { senderEmail: vendorEmail },
+                                { receiverEmail: vendorEmail },
+                              ]
+                            : userEmail
+                              ? [
+                                  { receiverEmail: null },
+                                  { senderEmail: userEmail },
+                                  { receiverEmail: userEmail },
+                                ]
+                              : [{ receiverEmail: null }],
+                    } as const;
+
+                    const [activeSessions, recentChats, latestEditLog] = await Promise.all([
+                        prisma.documentSession.findMany({
+                            where: {
+                                token,
+                                lastSeenAt: { gte: threshold }
+                            },
+                            select: {
+                                userId: true,
+                                displayName: true,
+                                level: true,
+                                color: true
+                            }
+                        }),
+                        prisma.chatMessage.findMany({
+                            where: chatWhere,
+                            orderBy: { timestamp: 'asc' },
+                            take: lastChatTimestamp ? 50 : 100,
+                            select: {
+                                id: true,
+                                senderEmail: true,
+                                receiverEmail: true,
+                                content: true,
+                                timestamp: true,
+                            },
+                        }),
+                        heartbeatTick === 1 || heartbeatTick % 5 === 0
+                            ? prisma.auditLog.findFirst({
+                                where: { linkId: link.id, action: 'VENDOR_EDITED_FILE' },
+                                orderBy: { timestamp: 'desc' },
+                                select: { timestamp: true }
+                            })
+                            : Promise.resolve(null),
+                    ]);
 
                     let highestAuthorityLevel = userLevel;
                     if (activeSessions.length > 0) {
                         highestAuthorityLevel = Math.min(...activeSessions.map(s => s.level));
                     }
 
-                    // Compute highest authority for UI
                     let highestActiveLevel = 99;
                     activeSessions.forEach(session => {
                         if (session.level < highestActiveLevel) highestActiveLevel = session.level;
                     });
 
-                    // Incremental chat: full snapshot once, then only newer rows.
-                    // Filter DMs — only group chat + messages involving this viewer.
-                    const recentChats = await prisma.chatMessage.findMany({
-                        where: {
-                            secureLinkId: link.id,
-                            ...(lastChatTimestamp ? { timestamp: { gt: lastChatTimestamp } } : {}),
-                            OR: vendorEmail
-                                ? [
-                                    { receiverEmail: null },
-                                    { senderEmail: vendorEmail },
-                                    { receiverEmail: vendorEmail },
-                                  ]
-                                : userEmail
-                                  ? [
-                                      { receiverEmail: null },
-                                      { senderEmail: userEmail },
-                                      { receiverEmail: userEmail },
-                                    ]
-                                  : [{ receiverEmail: null }],
-                        },
-                        orderBy: { timestamp: 'asc' },
-                        take: lastChatTimestamp ? 50 : 100,
-                    });
                     if (recentChats.length > 0) {
                         lastChatTimestamp = recentChats[recentChats.length - 1].timestamp;
                     }
-
-                    // Latest-edit probe every 5 ticks (~15s) — not every heartbeat
-                    const latestEditLog = heartbeatTick === 1 || heartbeatTick % 5 === 0
-                        ? await prisma.auditLog.findFirst({
-                            where: { linkId: link.id, action: 'VENDOR_EDITED_FILE' },
-                            orderBy: { timestamp: 'desc' },
-                            select: { timestamp: true }
-                        })
-                        : null;
 
                     // Send heartbeat with countdown, presence, chat, and latest edit info
                     const heartbeat = {
                         type: 'heartbeat',
                         remainingSeconds: Math.min(ttl, dbRemainingSeconds),
+                        myLevel: userLevel,
                         activeParticipants: activeSessions.map((s) => ({
                             email: s.userId,
                             name: s.displayName,
@@ -400,6 +432,7 @@ export async function GET(
                         highestAuthorityLevel,
                         chats: recentChats,
                         latestFileInputTimestamp: latestEditLog?.timestamp?.getTime(),
+                        editLocks,
                         timestamp: Date.now(),
                     };
                     safeEnqueue(encoder.encode(`data: ${JSON.stringify(heartbeat)}\n\n`));

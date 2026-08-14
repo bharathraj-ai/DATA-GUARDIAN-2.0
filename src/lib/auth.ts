@@ -15,8 +15,9 @@ import { logger, redactEmail } from '@/lib/logger';
  * User/Account records still live in Prisma via the adapter.
  *
  * Post-login routing: OAuth always lands on /auth/continue, which reads DB
- * onboarding state and redirects to /dashboard (COMPLETE) or /auth/role-select
- * (ROLE_SELECTION). Completed users never visit role-select.
+ * onboarding state and redirects to /dashboard/owner or /dashboard/vendor
+ * (COMPLETE) or /auth/role-select (ROLE_SELECTION). Completed users never
+ * visit role-select.
  */
 const useSecureCookies = process.env.NEXTAUTH_URL?.startsWith('https://') ?? false;
 const cookiePrefix = useSecureCookies ? '__Secure-' : '';

@@ -52,6 +52,41 @@ export async function submitFinal(
             return { success: false, error: 'File not found.' };
         }
 
+        const { resolveLockActor } = await import('@/lib/collaboration/resolve-lock-actor');
+        const { assertActorHoldsEditLock, requestEditLock } = await import('@/lib/collaboration/edit-lock-service');
+        const actor = resolveLockActor({
+            sessionId: authResult.context.sessionId,
+            effectiveEmail: authResult.context.effectiveEmail,
+            level: authResult.context.isOwner ? 1 : (authResult.context.vendorAccess?.level ?? 2),
+            isOwner: authResult.context.isOwner,
+            token,
+            ownerId: authResult.context.secureLink.ownerId,
+            vendors: authResult.context.secureLink.VendorAccess,
+            clientInstanceId: formData.get('editClientInstanceId')?.toString(),
+        });
+        if (!actor) {
+            return { success: false, error: 'Identity required for editing.' };
+        }
+        let lockCheck = await assertActorHoldsEditLock({ documentId: fileId, actor });
+        if (!lockCheck.ok && (lockCheck.reason === 'no_lock' || lockCheck.reason === 'lock_expired')) {
+            const acquired = await requestEditLock({
+                documentId: fileId,
+                linkId: authResult.context.secureLink.id,
+                actor,
+            });
+            if (acquired.status === 'acquired' || acquired.status === 'already_holder') {
+                lockCheck = { ok: true, lock: acquired.lock };
+            }
+        }
+        if (!lockCheck.ok) {
+            return {
+                success: false,
+                error: lockCheck.reason === 'not_holder'
+                    ? 'Your editing session is no longer active. A higher-priority collaborator may have taken control.'
+                    : 'You do not hold the editing lock for this document.',
+            };
+        }
+
         const isMongoBacked = !!(fileRecord as any).mongoFileId;
 
         logger.info(`FileId: ${fileId}, Vendor: ${redactEmail(vendorEmail)}, FileName: ${uploadedFile.name}, Storage: ${isMongoBacked ? 'Mongo' : 'inline'}`);

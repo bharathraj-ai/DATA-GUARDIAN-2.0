@@ -1,9 +1,18 @@
 'use server';
 
+import { after } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { executeSingleLinkCleanup } from '@/lib/cleanup-core';
 import { auth } from '@/lib/auth';
 import { logger } from '@/lib/logger';
+
+function runAfterResponse(work: () => Promise<void>) {
+    try {
+        after(work);
+    } catch {
+        void work();
+    }
+}
 
 // Cache Redis availability check at module load (performance optimization)
 const isRedisConfigured = !!(
@@ -89,21 +98,16 @@ export async function revokeAccess(
         }
 
         if (secureLink.isRevoked) {
-            // Still purge any leftover ciphertext if a prior revoke left data behind
-            const cleanup = await executeSingleLinkCleanup(secureLink.token);
-            if (cleanup.success) {
-                return {
-                    success: true,
-                    message: 'Access already revoked. Remaining data has been permanently deleted.',
-                };
-            }
+            runAfterResponse(async () => {
+                await executeSingleLinkCleanup(secureLink.token);
+            });
             return {
-                success: false,
-                error: 'This link has already been revoked.',
+                success: true,
+                message: 'Access already revoked. Remaining data is being deleted.',
             };
         }
 
-        // KILL SWITCH: Invalidate Redis + mark revoked, then hard-delete data
+        // KILL SWITCH: Redis + DB revoke first (access stops now). Purge files after the response.
         const [redisResult] = await Promise.all([
             tryInvalidateSession(secureLink.token),
             prisma.$transaction(async (tx) => {
@@ -129,7 +133,7 @@ export async function revokeAccess(
                         reason: 'Owner requested manual revocation — data purge follows',
                         metadata: JSON.stringify({
                             revokedBy: session.user.id,
-                            dataDeleted: true,
+                            dataDeleted: false,
                         }),
                     },
                 });
@@ -142,18 +146,17 @@ export async function revokeAccess(
             }`,
         );
 
-        const cleanup = await executeSingleLinkCleanup(secureLink.token);
-        if (!cleanup.success) {
-            logger.error(`[KILL SWITCH] Cleanup failed for ${secureLink.id}: ${cleanup.error}`);
-            return {
-                success: false,
-                error: 'Access was revoked but data cleanup failed. It will retry on the next cleanup run.',
-            };
-        }
+        const tokenToPurge = secureLink.token;
+        runAfterResponse(async () => {
+            const cleanup = await executeSingleLinkCleanup(tokenToPurge);
+            if (!cleanup.success) {
+                logger.error(`[KILL SWITCH] Cleanup failed for ${secureLink.id}: ${cleanup.error}`);
+            }
+        });
 
         return {
             success: true,
-            message: 'Access revoked and all shared data permanently deleted.',
+            message: 'Access revoked. Shared data is being permanently deleted.',
         };
     } catch (error) {
         logger.error('Error revoking access:', error instanceof Error ? error.message : 'Unknown');
@@ -237,10 +240,10 @@ export async function getLinkStatus(ownerToken: string): Promise<{
         const isExpired = secureLink.expiresAt < now;
         const anyVendorUsed = secureLink.LinkAccess?.some((a) => a.isUsed) || false;
 
-        let dataDeleted = false;
         if (secureLink.isRevoked || isExpired) {
-            const cleanup = await executeSingleLinkCleanup(secureLink.token);
-            dataDeleted = cleanup.success;
+            runAfterResponse(async () => {
+                await executeSingleLinkCleanup(secureLink.token);
+            });
         }
 
         return {
@@ -251,7 +254,7 @@ export async function getLinkStatus(ownerToken: string): Promise<{
                 isExpired,
                 expiresAt: secureLink.expiresAt,
                 createdAt: secureLink.createdAt,
-                dataDeleted,
+                dataDeleted: false,
             },
         };
     } catch (error) {

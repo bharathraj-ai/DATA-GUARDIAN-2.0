@@ -31,7 +31,7 @@ export default function LandingPage() {
               'Self-Destructing Links',
               'Instant Revocation',
               'Screenshot Detection',
-              'QR Code Delivery',
+              'Priority Collaboration',
               'Zero-Knowledge Architecture',
             ],
           }),
@@ -219,13 +219,15 @@ export default function LandingPage() {
               <div className="feature-card">
                 <div className="feature-icon feature-icon-pink">
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect>
-                    <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path>
+                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                    <circle cx="9" cy="7" r="4"></circle>
+                    <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                    <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
                   </svg>
                 </div>
-                <h3 className="feature-title">QR Code Generation</h3>
+                <h3 className="feature-title">Priority Collaboration</h3>
                 <p className="feature-description">
-                  Instantly generate QR codes for your secure links. Perfect for mobile sharing and quick access.
+                  Multiple vendors can work in one live session. Higher priority can take over editing without forcing everyone else out.
                 </p>
               </div>
             </ScrollReveal>
@@ -299,13 +301,13 @@ export default function LandingPage() {
       <section className="cta-section">
         <div className="container">
           <ScrollReveal>
-            <div className="cta-card" style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: '40px', alignItems: 'center' }}>
-              <div>
+            <div className="cta-card">
+              <div className="cta-copy">
                 <h2 className="cta-title">Ready to Secure Your Data?</h2>
                 <p className="cta-subtitle">
                   Start sharing sensitive information with confidence. No credit card required.
                 </p>
-                <div className="cta-buttons" style={{ justifyContent: 'flex-start' }}>
+                <div className="cta-buttons">
                   <Link href="/how-it-works" className="btn btn-primary btn-large">
                     <span>Learn How It Works</span>
                     <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
@@ -317,7 +319,7 @@ export default function LandingPage() {
                   </Link>
                 </div>
               </div>
-              <div className="cta-illustration">
+              <div className="cta-illustration" aria-hidden="true">
                 <div className="cta-shield">
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>

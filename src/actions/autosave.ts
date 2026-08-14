@@ -1,10 +1,7 @@
 'use server';
 
 import { prisma } from '@/lib/prisma';
-import { auth } from '@/lib/auth';
-import { cookies } from 'next/headers';
 import { authorizeSecureLink } from '@/lib/linkAuthorization';
-import { decryptData } from '@/lib/crypto';
 
 export async function autosaveSession(
   token: string, 
@@ -16,47 +13,26 @@ export async function autosaveSession(
   }
 ) {
   try {
-    const authResult = await authorizeSecureLink(token, 'view');
+    const authResult = await authorizeSecureLink(token, 'view', undefined, { includeDraft: false });
     if (!authResult.success) {
       return { success: false, error: authResult.error };
     }
 
-    const session = await auth();
-    let vendorEmail = session?.user?.email;
-    const cookieStore = await cookies();
-    if (!vendorEmail) {
-      // SEC-3: vendor_email cookie is AES-256-GCM encrypted — decrypt before use
-      const rawCookie = cookieStore.get('vendor_email')?.value;
-      if (rawCookie) {
-        try {
-          const decoded = decryptData<{ email: string }>(rawCookie);
-          vendorEmail = decoded.email;
-        } catch {
-          // Graceful fallback: accept plaintext cookie for backward compatibility
-          vendorEmail = rawCookie.includes(':') ? undefined : rawCookie;
-        }
-      }
-    }
-
+    const vendorEmail = authResult.context.effectiveEmail;
     if (!vendorEmail) {
       return { success: false, error: 'Unauthorized vendor session' };
     }
 
-    // Reuse secureLink from authorization result — no extra DB query needed
     const secureLink = authResult.context.secureLink;
-
-    // Look up vendor from the already-loaded VendorAccess array
     const vendorAccess = (secureLink as any).VendorAccess?.find(
-      (v: any) => v.email.toLowerCase() === vendorEmail!.toLowerCase()
+      (v: any) => v.email.toLowerCase() === vendorEmail.toLowerCase()
     );
 
     if (!vendorAccess) {
       return { success: false, error: 'Vendor access not found' };
     }
 
-    const { extractSessionId } = await import('@/lib/share-session');
-    const currentSessionId = extractSessionId(cookieStore.get('session_id')?.value);
-    
+    const currentSessionId = authResult.context.sessionId;
     if (vendorAccess.activeSessionId && currentSessionId && vendorAccess.activeSessionId !== currentSessionId) {
       return { success: false, error: 'Another session is currently active' };
     }
@@ -65,7 +41,6 @@ export async function autosaveSession(
        return { success: false, error: 'Stale autosave request' };
     }
 
-    // Retry mechanism for transient DB connection drops (like ECONNRESET)
     const now = new Date();
     let retries = 3;
     let lastError;
@@ -88,8 +63,6 @@ export async function autosaveSession(
         lastError = err;
         retries--;
         if (retries === 0) throw err;
-        // PERF-2: Exponential backoff — 1s, 2s, 3s for retries 3, 2, 1.
-        // Spreads retry pressure and gives the DB more time to recover after a transient drop.
         await new Promise(resolve => setTimeout(resolve, 1000 * (4 - retries)));
       }
     }

@@ -10,13 +10,156 @@ export type CleanupResult = {
     error?: string;
 };
 
+/** Keep batches small — Neon direct compute + cold starts blow long interactive txs. */
+const BATCH_SIZE = 10;
+
+type LinkCleanupRow = {
+    id: string;
+    userId: string;
+    isRevoked: boolean;
+    ownerId: string | null;
+    purpose: string | null;
+    LinkAccess: { vendorEmail: string }[];
+    UserFile: {
+        id: string;
+        mongoFileId: string | null;
+        mongoFile: { id: string; gridFSId: string } | null;
+    }[];
+};
+
+async function deleteGridFSFiles(gridFSIds: string[]) {
+    if (gridFSIds.length === 0) return;
+    try {
+        const { deleteFromMongo } = await import('@/lib/mongo/operations');
+        await Promise.allSettled(gridFSIds.map((id) => deleteFromMongo(id)));
+        console.log(`[CLEANUP] Batch: deleted ${gridFSIds.length} GridFS file(s)`);
+    } catch (err) {
+        console.error('[CLEANUP] Batch GridFS deletion error (non-blocking):', err);
+    }
+}
+
+/**
+ * SendRecord / AuditLog survive link deletion.
+ * Runs outside any interactive transaction — Neon round-trips routinely exceed 5s.
+ * Failures here must not block the purge.
+ */
+async function stampSurvivingRecords(links: LinkCleanupRow[], now: Date) {
+    try {
+        const auditByOwner = new Map<string, string[]>();
+
+        for (const link of links) {
+            if (!link.ownerId) continue;
+
+            const status = link.isRevoked ? 'revoked' : 'expired';
+            const isGroupShare = link.LinkAccess.length > 1;
+            const vendorEmailToMatch = isGroupShare
+                ? `Group Share (${link.LinkAccess.length} members)`
+                : (link.LinkAccess[0]?.vendorEmail || null);
+
+            try {
+                await prisma.sendRecord.updateMany({
+                    where: {
+                        ownerId: link.ownerId,
+                        topic: link.purpose || '',
+                        vendorEmail: vendorEmailToMatch,
+                        status: 'active',
+                    },
+                    data: {
+                        status,
+                        expiredAt: now,
+                    },
+                });
+            } catch (err) {
+                console.warn(
+                    '[CLEANUP] sendRecord stamp skipped:',
+                    err instanceof Error ? err.message : err,
+                );
+            }
+
+            const ids = auditByOwner.get(link.ownerId) ?? [];
+            ids.push(link.id);
+            auditByOwner.set(link.ownerId, ids);
+        }
+
+        for (const [ownerId, linkIds] of auditByOwner) {
+            try {
+                await prisma.auditLog.updateMany({
+                    where: { linkId: { in: linkIds }, ownerId: null },
+                    data: { ownerId },
+                });
+            } catch (err) {
+                console.warn(
+                    '[CLEANUP] auditLog stamp skipped:',
+                    err instanceof Error ? err.message : err,
+                );
+            }
+        }
+    } catch (err) {
+        console.warn(
+            '[CLEANUP] stampSurvivingRecords failed (non-blocking):',
+            err instanceof Error ? err.message : err,
+        );
+    }
+}
+
+/**
+ * Ordered deletes without an interactive transaction.
+ * Interactive txs default to 5s and fail on Neon under load; cleanup is idempotent
+ * so a mid-batch failure can be retried on the next run.
+ */
+async function purgeLinkRows(ids: {
+    linkIds: string[];
+    fileIds: string[];
+    mongoFileIds: string[];
+    userDataIds: string[];
+}) {
+    await prisma.chatMessage.deleteMany({
+        where: { secureLinkId: { in: ids.linkIds } },
+    });
+
+    if (ids.fileIds.length > 0) {
+        await prisma.documentSession.deleteMany({
+            where: { fileId: { in: ids.fileIds } },
+        });
+        await prisma.collabOperation.deleteMany({
+            where: { fileId: { in: ids.fileIds } },
+        });
+        await prisma.documentChatMessage.deleteMany({
+            where: { fileId: { in: ids.fileIds } },
+        });
+    }
+
+    // UserFile references MongoFile — delete files before mongo metadata.
+    const deletedFiles = await prisma.userFile.deleteMany({
+        where: { secureLinkId: { in: ids.linkIds } },
+    });
+
+    if (ids.mongoFileIds.length > 0) {
+        await prisma.mongoFile.deleteMany({
+            where: { id: { in: ids.mongoFileIds } },
+        });
+    }
+
+    const deletedLinks = await prisma.secureLink.deleteMany({
+        where: { id: { in: ids.linkIds } },
+    });
+
+    const deletedUserData = await prisma.userData.deleteMany({
+        where: { id: { in: ids.userDataIds } },
+    });
+
+    return {
+        deletedLinks: deletedLinks.count,
+        deletedUserData: deletedUserData.count,
+        deletedFiles: deletedFiles.count,
+    };
+}
+
 export async function executeCleanup(options?: { ownerId?: string }): Promise<CleanupResult> {
     try {
         const now = new Date();
         const ownerFilter = options?.ownerId ? { ownerId: options.ownerId } : {};
 
-        // Implement Batching/Pagination
-        const BATCH_SIZE = 100;
         let totalDeletedLinks = 0;
         let totalDeletedUserData = 0;
         let totalDeletedFiles = 0;
@@ -26,7 +169,6 @@ export async function executeCleanup(options?: { ownerId?: string }): Promise<Cl
         let hasMore = true;
 
         while (hasMore) {
-            // Find a batch of expired or revoked secure links
             const linksBatch = await prisma.secureLink.findMany({
                 where: {
                     AND: [
@@ -48,16 +190,16 @@ export async function executeCleanup(options?: { ownerId?: string }): Promise<Cl
                     LinkAccess: {
                         select: {
                             vendorEmail: true,
-                        }
+                        },
                     },
                     UserFile: {
                         select: {
                             id: true,
                             mongoFileId: true,
                             mongoFile: {
-                                select: { id: true, gridFSId: true }
-                            }
-                        }
+                                select: { id: true, gridFSId: true },
+                            },
+                        },
                     },
                     expiresAt: true,
                     createdAt: true,
@@ -70,9 +212,6 @@ export async function executeCleanup(options?: { ownerId?: string }): Promise<Cl
                 break;
             }
 
-            // ═══════════════════════════════════════════════════════════
-            // STEP 1: Delete GridFS binary files from MongoDB
-            // ═══════════════════════════════════════════════════════════
             const allGridFSIds: string[] = [];
             for (const link of linksBatch) {
                 for (const file of link.UserFile) {
@@ -82,131 +221,41 @@ export async function executeCleanup(options?: { ownerId?: string }): Promise<Cl
                 }
             }
 
-            if (allGridFSIds.length > 0) {
-                try {
-                    const { deleteFromMongo } = await import('@/lib/mongo/operations');
-                    await Promise.allSettled(
-                        allGridFSIds.map(id => deleteFromMongo(id))
-                    );
-                    totalDeletedMongoFiles += allGridFSIds.length;
-                    console.log(`[CLEANUP] Batch: deleted ${allGridFSIds.length} GridFS file(s)`);
-                } catch (err) {
-                    console.error('[CLEANUP] Batch GridFS deletion error (non-blocking):', err);
-                }
-            }
+            await deleteGridFSFiles(allGridFSIds);
+            totalDeletedMongoFiles += allGridFSIds.length;
 
-            // ═══════════════════════════════════════════════════════════
-            // STEP 2: Delete all DB records in a transaction
-            // ═══════════════════════════════════════════════════════════
-            const userDataIds = linksBatch.map(link => link.userId);
-            const linkIds = linksBatch.map(link => link.id);
-            const allFileIds = linksBatch.flatMap(link => link.UserFile.map(f => f.id));
+            await stampSurvivingRecords(linksBatch, now);
+
+            const userDataIds = linksBatch.map((link) => link.userId);
+            const linkIds = linksBatch.map((link) => link.id);
+            const allFileIds = linksBatch.flatMap((link) => link.UserFile.map((f) => f.id));
             const allMongoFileIds = linksBatch
-                .flatMap(link => link.UserFile.map(f => f.mongoFileId))
+                .flatMap((link) => link.UserFile.map((f) => f.mongoFileId))
                 .filter((id): id is string => !!id);
 
-            // Delete batch in a transaction
-            // Order matters: UserFile references MongoFile — delete files before mongo metadata.
-            const result = await prisma.$transaction(async (tx) => {
-                // 0. Update SendRecord statuses (these survive deletion)
-                for (const link of linksBatch) {
-                    if (link.ownerId) {
-                        const status = link.isRevoked ? 'revoked' : 'expired';
-                        const isGroupShare = link.LinkAccess.length > 1;
-                        const vendorEmailToMatch = isGroupShare 
-                            ? `Group Share (${link.LinkAccess.length} members)`
-                            : (link.LinkAccess[0]?.vendorEmail || null);
-
-                        await tx.sendRecord.updateMany({
-                            where: {
-                                ownerId: link.ownerId,
-                                topic: link.purpose || '',
-                                vendorEmail: vendorEmailToMatch,
-                                status: 'active',
-                            },
-                            data: {
-                                status,
-                                expiredAt: now,
-                            },
-                        });
-
-                        // Keep owner audit trail after link purge
-                        await tx.auditLog.updateMany({
-                            where: { linkId: link.id, ownerId: null },
-                            data: { ownerId: link.ownerId },
-                        });
-                    }
-                }
-
-                // 1. Delete chat messages
-                await tx.chatMessage.deleteMany({
-                    where: { secureLinkId: { in: linkIds } },
-                });
-
-                // 2. Delete collaboration data for all files
-                if (allFileIds.length > 0) {
-                    await tx.documentSession.deleteMany({
-                        where: { fileId: { in: allFileIds } },
-                    });
-                    await tx.collabOperation.deleteMany({
-                        where: { fileId: { in: allFileIds } },
-                    });
-                    await tx.documentChatMessage.deleteMany({
-                        where: { fileId: { in: allFileIds } },
-                    });
-                }
-
-                // 3. Delete attached files first (FK → MongoFile; cascades FileVersion/Annotation)
-                const deletedFiles = await tx.userFile.deleteMany({
-                    where: {
-                        secureLinkId: { in: linkIds },
-                    },
-                });
-
-                // 4. Delete MongoFile metadata (upload/access logs cascade)
-                if (allMongoFileIds.length > 0) {
-                    await tx.mongoFile.deleteMany({
-                        where: { id: { in: allMongoFileIds } },
-                    });
-                }
-
-                // 5. Delete secure links (cascades VendorAccess, LinkAccess)
-                const deletedLinks = await tx.secureLink.deleteMany({
-                    where: {
-                        id: { in: linkIds },
-                    },
-                });
-
-                // 6. Delete encrypted user data
-                const deletedUserData = await tx.userData.deleteMany({
-                    where: {
-                        id: { in: userDataIds },
-                    },
-                });
-
-                return {
-                    deletedLinks: deletedLinks.count,
-                    deletedUserData: deletedUserData.count,
-                    deletedFiles: deletedFiles.count,
-                };
+            const result = await purgeLinkRows({
+                linkIds,
+                fileIds: allFileIds,
+                mongoFileIds: allMongoFileIds,
+                userDataIds,
             });
 
             totalDeletedLinks += result.deletedLinks;
             totalDeletedUserData += result.deletedUserData;
             totalDeletedFiles += result.deletedFiles;
 
-            // Optional: small delay to yield event loop and reduce DB pressure
-            await new Promise(resolve => setTimeout(resolve, 50));
+            await new Promise((resolve) => setTimeout(resolve, 50));
         }
 
-        // SECURITY: Log only counts, never data content
-        console.log(
-            `[CLEANUP] Purged ${totalDeletedLinks} links, ` +
-            `${totalDeletedUserData} encrypted records, ` +
-            `${totalDeletedFiles} files, ` +
-            `${totalDeletedMongoFiles} GridFS objects, ` +
-            `${totalDeletedAuditLogs} audit logs`
-        );
+        if (totalDeletedLinks > 0) {
+            console.log(
+                `[CLEANUP] Purged ${totalDeletedLinks} links, ` +
+                `${totalDeletedUserData} encrypted records, ` +
+                `${totalDeletedFiles} files, ` +
+                `${totalDeletedMongoFiles} GridFS objects, ` +
+                `${totalDeletedAuditLogs} audit logs`
+            );
+        }
 
         return {
             success: true,
@@ -279,82 +328,18 @@ export async function executeSingleLinkCleanup(token: string): Promise<{ success
             }
         }
 
-        if (mongoGridFSIds.length > 0) {
-            try {
-                const { deleteFromMongo } = await import('@/lib/mongo/operations');
-                await Promise.allSettled(mongoGridFSIds.map((id) => deleteFromMongo(id)));
-            } catch (err) {
-                console.error('[CLEANUP] GridFS deletion error (non-blocking):', err);
-            }
-        }
+        await deleteGridFSFiles(mongoGridFSIds);
+        await stampSurvivingRecords([secureLink], now);
 
-        await prisma.$transaction(async (tx) => {
-            if (secureLink.ownerId) {
-                const status = secureLink.isRevoked ? 'revoked' : 'expired';
-                const isGroupShare = secureLink.LinkAccess.length > 1;
-                const vendorEmailToMatch = isGroupShare
-                    ? `Group Share (${secureLink.LinkAccess.length} members)`
-                    : (secureLink.LinkAccess[0]?.vendorEmail || null);
+        const mongoFileIds = secureLink.UserFile
+            .map((f) => f.mongoFileId)
+            .filter((id): id is string => !!id);
 
-                await tx.sendRecord.updateMany({
-                    where: {
-                        ownerId: secureLink.ownerId,
-                        topic: secureLink.purpose || '',
-                        vendorEmail: vendorEmailToMatch,
-                        status: 'active',
-                    },
-                    data: {
-                        status,
-                        expiredAt: now,
-                    },
-                });
-
-                await tx.auditLog.updateMany({
-                    where: { linkId: secureLink.id, ownerId: null },
-                    data: { ownerId: secureLink.ownerId },
-                });
-            }
-
-            const mongoFileIds = secureLink.UserFile
-                .map((f) => f.mongoFileId)
-                .filter((id): id is string => !!id);
-
-            const fileIds = secureLink.UserFile.map((f) => f.id);
-
-            await tx.chatMessage.deleteMany({
-                where: { secureLinkId: secureLink.id },
-            });
-
-            if (fileIds.length > 0) {
-                await tx.documentSession.deleteMany({
-                    where: { fileId: { in: fileIds } },
-                });
-                await tx.collabOperation.deleteMany({
-                    where: { fileId: { in: fileIds } },
-                });
-                await tx.documentChatMessage.deleteMany({
-                    where: { fileId: { in: fileIds } },
-                });
-            }
-
-            // UserFile before MongoFile (FK)
-            await tx.userFile.deleteMany({
-                where: { secureLinkId: secureLink.id },
-            });
-
-            if (mongoFileIds.length > 0) {
-                await tx.mongoFile.deleteMany({
-                    where: { id: { in: mongoFileIds } },
-                });
-            }
-
-            await tx.secureLink.deleteMany({
-                where: { id: secureLink.id },
-            });
-
-            await tx.userData.deleteMany({
-                where: { id: secureLink.userId },
-            });
+        await purgeLinkRows({
+            linkIds: [secureLink.id],
+            fileIds: secureLink.UserFile.map((f) => f.id),
+            mongoFileIds,
+            userDataIds: [secureLink.userId],
         });
 
         return { success: true };

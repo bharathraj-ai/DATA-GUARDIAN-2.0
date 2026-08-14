@@ -1,13 +1,19 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { completeWork } from '@/actions/complete-work';
 import { CheckCircle2, Check, Loader2 } from 'lucide-react';
 import styles from './vaultDock.module.css';
+import { markInternalNavigation } from './sudden-exit-client';
 
 export function CompleteWorkButton({ token }: { token: string }) {
     const [isLoading, setIsLoading] = useState(false);
     const [isSuccess, setIsSuccess] = useState(false);
+    const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    useEffect(() => () => {
+        if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
+    }, []);
 
     const handleComplete = async () => {
         setIsLoading(true);
@@ -15,7 +21,9 @@ export function CompleteWorkButton({ token }: { token: string }) {
             const res = await completeWork(token);
             if (res.success) {
                 setIsSuccess(true);
-                setTimeout(() => {
+                markInternalNavigation();
+                if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
+                reloadTimerRef.current = setTimeout(() => {
                     window.location.reload();
                 }, 2000);
             } else {

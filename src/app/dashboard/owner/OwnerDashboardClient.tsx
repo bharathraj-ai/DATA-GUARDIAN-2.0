@@ -46,12 +46,14 @@ interface OwnerDashboardClientProps {
     initialHistory: SendHistoryRecord[];
     userId: string;
     userLabel: string;
+    justCreated?: boolean;
 }
 
 export default function OwnerDashboardClient({
     initialLinks,
     initialHistory,
     userLabel,
+    justCreated = false,
 }: OwnerDashboardClientProps) {
     const [links, setLinks] = useState<DashboardLink[]>(initialLinks);
     const [sendHistory] = useState<SendHistoryRecord[]>(initialHistory);
@@ -60,7 +62,11 @@ export default function OwnerDashboardClient({
     const [confirmRevokeId, setConfirmRevokeId] = useState<string | null>(null);
     const [expandedId, setExpandedId] = useState<string | null>(null);
     const [detailsLoadingId, setDetailsLoadingId] = useState<string | null>(null);
-    const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+    const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(
+        justCreated
+            ? { message: 'Secure link created. OTP has been emailed to the vendor.', type: 'success' }
+            : null,
+    );
     const [activeTab, setActiveTab] = useState<'links' | 'history' | 'audit'>('links');
     const [liveActivityLink, setLiveActivityLink] = useState<{token: string, topic: string} | null>(null);
     const [auditLogs, setAuditLogs] = useState<UnifiedAuditLog[]>([]);
@@ -86,6 +92,15 @@ export default function OwnerDashboardClient({
             });
         return () => { cancelled = true; };
     }, [activeTab, auditLoaded]);
+
+    useEffect(() => {
+        if (!justCreated || typeof window === 'undefined') return;
+        const url = new URL(window.location.href);
+        if (url.searchParams.has('created')) {
+            url.searchParams.delete('created');
+            window.history.replaceState({}, '', `${url.pathname}${url.search}`);
+        }
+    }, [justCreated]);
 
     // Auto-dismiss notification
     useEffect(() => {
@@ -229,7 +244,7 @@ export default function OwnerDashboardClient({
             if (result.success) {
                 setLinks(prev => prev.filter(l => l.id !== link.id));
                 setNotification({
-                    message: `Access revoked${link.allowedVendorEmail ? ` for ${link.allowedVendorEmail}` : ''} and all shared data permanently deleted.`,
+                    message: `Access revoked${link.allowedVendorEmail ? ` for ${link.allowedVendorEmail}` : ''}. Shared data is being deleted.`,
                     type: 'success',
                 });
             } else {
@@ -450,7 +465,7 @@ export default function OwnerDashboardClient({
                                                 placeholder="Search logs..."
                                                 value={auditFilter.search}
                                                 onChange={(e) => setAuditFilter({ ...auditFilter, search: e.target.value })}
-                                                style={{ flex: 1, minWidth: '200px', padding: '8px 12px', borderRadius: '8px', background: 'rgba(0,0,0,0.2)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)' }}
+                                                style={{ flex: '1 1 160px', minWidth: 0, width: '100%', padding: '8px 12px', borderRadius: '8px', background: 'rgba(0,0,0,0.2)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)' }}
                                             />
                                             <select
                                                 value={auditFilter.type}
@@ -609,7 +624,7 @@ export default function OwnerDashboardClient({
                                                     {/* Row 2: Details Grid */}
                                                     <div style={{
                                                         display: 'grid',
-                                                        gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                                                        gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 160px), 1fr))',
                                                         gap: '16px',
                                                         padding: '14px 18px',
                                                         borderRadius: '10px',
@@ -766,7 +781,7 @@ export default function OwnerDashboardClient({
                                                 {/* Properties Detail Grid */}
                                                 <div style={{
                                                     display: 'grid',
-                                                    gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                                                    gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 160px), 1fr))',
                                                     gap: '16px',
                                                     background: '#F9FAFB',
                                                     border: '1px solid #E5E7EB',

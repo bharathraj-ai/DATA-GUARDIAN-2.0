@@ -1,9 +1,8 @@
 'use server';
 
 import { prisma } from '@/lib/prisma';
-import { decryptBuffer, decryptDek } from '@/lib/crypto';
 import { authorizeSecureLink } from '@/lib/linkAuthorization';
-import { downloadFromMongo } from '@/lib/mongo/operations';
+import { decryptUserFileBytes } from '@/lib/decrypt-user-file';
 
 export type RawFileData = {
     success: boolean;
@@ -11,6 +10,9 @@ export type RawFileData = {
     mimeType?: string;
     fileName?: string;
     version?: number;
+    myAssignedLevel?: number;
+    capabilities?: { canEdit: boolean; canPreview: boolean; canComment: boolean; canDownload: boolean };
+    remainingSeconds?: number;
     error?: string;
 };
 
@@ -46,55 +48,16 @@ export async function getRawFileForEdit(token: string, fileId: string): Promise<
         }
 
         let buffer: Buffer;
-
-        // Priority: inline encrypted content (draft saves) → S3 (original upload)
-        if (fileRecord.encryptedContent) {
-            // ── Inline path: decrypt DB-stored content (latest draft) ──
-            try {
-                const dek = (fileRecord as any).encryptedDek ? decryptDek((fileRecord as any).encryptedDek) : undefined;
-                buffer = decryptBuffer(
-                    fileRecord.encryptedContent,
-                    fileRecord.iv!,
-                    fileRecord.authTag!,
-                    dek
-                );
-            } catch (e) {
-                return { success: false, error: 'Decryption failed' };
-            }
-        } else if ((fileRecord as any).mongoFileId) {
-            // ── Mongo fallback: download file from Mongo ─────────
-            try {
-                const mongoFileRecord = await prisma.mongoFile.findUnique({
-                    where: { id: (fileRecord as any).mongoFileId, isDeleted: false },
-                    select: { gridFSId: true, mimeType: true },
-                });
-
-                if (!mongoFileRecord) {
-                    return { success: false, error: 'Mongo file record not found' };
-                }
-
-                const downloadedBuffer = await downloadFromMongo(mongoFileRecord.gridFSId);
-
-                // If iv/authTag are present, the file was encrypted at upload — decrypt it.
-                // If they're null, submitFinal stored the file raw in GridFS — use as-is.
-                if (fileRecord.iv && fileRecord.authTag) {
-                    const dek = (fileRecord as any).encryptedDek ? decryptDek((fileRecord as any).encryptedDek) : undefined;
-                    buffer = decryptBuffer(
-                        downloadedBuffer,
-                        fileRecord.iv,
-                        fileRecord.authTag,
-                        dek
-                    );
-                } else {
-                    buffer = downloadedBuffer;
-                }
-            } catch (e) {
-                console.error('[MONGO_EDIT] Download/Decrypt failed:', e);
-                return { success: false, error: 'Failed to retrieve or decrypt file from storage' };
-            }
-        } else {
-            return { success: false, error: 'File has no content available' };
+        try {
+            buffer = await decryptUserFileBytes(fileRecord);
+        } catch (e) {
+            console.error('[EDIT] Decrypt failed:', e);
+            return { success: false, error: 'Failed to retrieve or decrypt file from storage' };
         }
+
+        const myAssignedLevel = authResult.context.isOwner
+            ? 1
+            : (authResult.context.vendorAccess?.level ?? 2);
 
         return {
             success: true,
@@ -102,6 +65,12 @@ export async function getRawFileForEdit(token: string, fileId: string): Promise<
             fileName: fileRecord.fileName,
             version: fileRecord.version,
             base64Content: buffer.toString('base64'),
+            myAssignedLevel,
+            capabilities: authResult.context.capabilities,
+            remainingSeconds: Math.max(
+                0,
+                Math.floor((secureLink.expiresAt.getTime() - Date.now()) / 1000),
+            ),
         };
 
     } catch (error) {
