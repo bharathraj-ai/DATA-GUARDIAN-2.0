@@ -77,7 +77,7 @@ function buildDatasourceUrl(): string {
     );
     parsed.searchParams.set('pool_timeout', process.env.PRISMA_POOL_TIMEOUT || '15');
     if (!parsed.searchParams.has('connect_timeout')) {
-      parsed.searchParams.set('connect_timeout', '15');
+      parsed.searchParams.set('connect_timeout', '20');
     }
     if (usingPooler && !parsed.searchParams.has('pgbouncer')) {
       parsed.searchParams.set('pgbouncer', 'true');
@@ -88,9 +88,14 @@ function buildDatasourceUrl(): string {
   }
 }
 
+function prismaErrorCode(error: unknown): string {
+  const e = error as { code?: string; errorCode?: string };
+  return e.errorCode || e.code || '';
+}
+
 function isAdminTerminatedConnection(error: unknown): boolean {
   const msg = error instanceof Error ? error.message : String(error);
-  const code = (error as { code?: string })?.code;
+  const code = prismaErrorCode(error);
   return (
     code === 'P1017' ||
     /57P01/i.test(msg) ||
@@ -99,23 +104,36 @@ function isAdminTerminatedConnection(error: unknown): boolean {
   );
 }
 
+function isPrismaInitError(error: unknown): boolean {
+  const name = error instanceof Error ? error.name : '';
+  const code = prismaErrorCode(error);
+  const msg = error instanceof Error ? error.message : String(error);
+  return (
+    name === 'PrismaClientInitializationError' ||
+    code === 'P1001' ||
+    /Can't reach database server/i.test(msg)
+  );
+}
+
 function isTransientPrismaError(error: unknown): boolean {
   const msg = error instanceof Error ? error.message : String(error);
-  const code = (error as { code?: string })?.code;
+  const code = prismaErrorCode(error);
   return (
     isAdminTerminatedConnection(error) ||
-    code === 'P1001' ||
+    isPrismaInitError(error) ||
     code === 'P1008' ||
     /kind:\s*Closed/i.test(msg) ||
     /Connection.*closed/i.test(msg) ||
-    /Server has closed the connection/i.test(msg) ||
-    /Can't reach database server/i.test(msg)
+    /Server has closed the connection/i.test(msg)
   );
 }
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+/** Neon scale-to-zero refuses the first TCP attempt; later retries succeed after wake. */
+const NEON_WAKE_RETRY_MS = [1000, 2500, 5000];
 
 function createPrismaClient(): PrismaClient {
   const datasourceUrl = buildDatasourceUrl();
@@ -158,19 +176,35 @@ function createPrismaClient(): PrismaClient {
           return await query(args);
         } catch (error) {
           const killed = isAdminTerminatedConnection(error);
+          const waking = isPrismaInitError(error);
           if (!isTransientPrismaError(error)) throw error;
-          // Neon E57P01 aborts the backend — safe to retry once after disconnect.
+          // Neon E57P01 aborts the backend — safe to retry after disconnect.
+          // P1001 / init: compute is often asleep; retry with backoff so it can wake.
           // Other transients: retry reads only (avoid duplicate writes).
-          if (!killed && !READ_OPERATIONS.has(operation)) throw error;
+          if (!killed && !waking && !READ_OPERATIONS.has(operation)) throw error;
 
-          logger.warn('Prisma transient DB error — reconnecting and retrying once', {
-            operation,
-            model,
-            killed,
-          });
-          await client.$disconnect().catch(() => {});
-          await sleep(killed ? 400 : 250);
-          return query(args);
+          const delays = waking ? NEON_WAKE_RETRY_MS : [killed ? 400 : 250];
+          let lastError = error;
+          for (const delay of delays) {
+            logger.warn('Prisma transient DB error — reconnecting and retrying', {
+              operation,
+              model,
+              killed,
+              waking,
+              delayMs: delay,
+              code: prismaErrorCode(error),
+            });
+            await client.$disconnect().catch(() => {});
+            await sleep(delay);
+            await client.$connect().catch(() => {});
+            try {
+              return await query(args);
+            } catch (retryError) {
+              lastError = retryError;
+              if (!isTransientPrismaError(retryError)) throw retryError;
+            }
+          }
+          throw lastError;
         }
       },
     },
@@ -180,6 +214,15 @@ function createPrismaClient(): PrismaClient {
 }
 
 export const prisma = globalForPrisma.prisma ?? createPrismaClient();
+
+/** Open the Postgres socket while the owner is still on the form. Neon may still be waking. */
+export async function warmPrismaConnection(): Promise<void> {
+  try {
+    await prisma.$connect();
+  } catch {
+    /* Query retries finish the wake if compute was suspended. */
+  }
+}
 
 if (process.env.NODE_ENV !== 'production') {
   globalForPrisma.prisma = prisma;

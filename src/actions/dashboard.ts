@@ -13,7 +13,7 @@ export interface DashboardLink {
     createdAt: Date;
     allowedVendorEmail: string | null;
     vendorAccess: { email: string; level: number; status?: string }[];
-    status: 'active' | 'expired' | 'revoked' | 'used' | 'break';
+    status: 'active' | 'expired' | 'revoked' | 'used' | 'break' | 'completed' | 'suspicious';
     /** Legacy field — OTPs are never persisted; always null. */
     otp: null;
     purpose: string | null;
@@ -45,54 +45,6 @@ function getStatus(link: { expiresAt: Date; isUsed: boolean; isRevoked: boolean 
     if (new Date() > link.expiresAt) return 'expired';
     if (link.isUsed) return 'used';
     return 'active';
-}
-
-/** Live shares only — expired / revoked / completed links are purged, not listed. */
-function liveLinkWhere<T extends Record<string, unknown>>(extra: T = {} as T) {
-    return {
-        ...extra,
-        isRevoked: false,
-        expiresAt: { gt: new Date() },
-    };
-}
-
-const purgeCooldown = new Map<string, number>();
-const PURGE_COOLDOWN_MS = 5 * 60 * 1000;
-
-async function purgeOwnerDeadLinks(ownerId: string) {
-    const now = Date.now();
-    if ((purgeCooldown.get(ownerId) || 0) > now) return;
-    purgeCooldown.set(ownerId, now + PURGE_COOLDOWN_MS);
-
-    try {
-        try {
-            const { isRedisConfigured } = await import('@/lib/redis-helpers');
-            if (isRedisConfigured()) {
-                const redis = (await import('@/lib/redis')).default;
-                const acquired = await redis.set(`dg:purge:${ownerId}`, '1', { nx: true, ex: 300 });
-                if (acquired === null) return;
-            }
-        } catch {
-            /* memory cooldown still applies */
-        }
-
-        const dead = await prisma.secureLink.findFirst({
-            where: {
-                ownerId,
-                OR: [{ isRevoked: true }, { expiresAt: { lt: new Date() } }],
-            },
-            select: { id: true },
-        });
-        if (!dead) return;
-        const { executeCleanup } = await import('@/lib/cleanup-core');
-        await executeCleanup({ ownerId });
-    } catch (err) {
-        purgeCooldown.delete(ownerId);
-        console.warn(
-            '[dashboard] expired/revoked purge failed:',
-            err instanceof Error ? err.message : err,
-        );
-    }
 }
 
 /** List-row fields only — no nested files/audits (loaded on expand). */
@@ -142,17 +94,15 @@ const VENDOR_LIST_SELECT = {
  * Avoids OR + relation `some()` which the planner cannot use cleanly.
  */
 async function findReceivedLinksByEmail(email: string) {
-    // Sequential on purpose: Promise.all needs 2 pool slots and trips P2024
-    // when OAuth / owner dashboard already hold the Neon direct limit.
     const vendorRows = await prisma.vendorAccess.findMany({
-        where: { email },
+        where: { email: { equals: email, mode: 'insensitive' } },
         select: { secureLinkId: true },
-        take: 50,
+        take: 80,
     });
     const accessRows = await prisma.linkAccess.findMany({
-        where: { vendorEmail: email },
+        where: { vendorEmail: { equals: email, mode: 'insensitive' } },
         select: { secureLinkId: true },
-        take: 50,
+        take: 80,
     });
     const ids = [...new Set([
         ...vendorRows.map((r) => r.secureLinkId),
@@ -160,23 +110,22 @@ async function findReceivedLinksByEmail(email: string) {
     ])];
 
     return prisma.secureLink.findMany({
-        where: liveLinkWhere(
+        where:
             ids.length > 0
-                ? { OR: [{ allowedVendorEmail: email }, { id: { in: ids } }] }
-                : { allowedVendorEmail: email },
-        ),
+                ? { OR: [{ allowedVendorEmail: { equals: email, mode: 'insensitive' } }, { id: { in: ids } }] }
+                : { allowedVendorEmail: { equals: email, mode: 'insensitive' } },
         orderBy: { createdAt: 'desc' },
-        take: 50,
+        take: 80,
         select: {
             ...VENDOR_LIST_SELECT,
             LinkAccess: {
                 select: { vendorEmail: true, level: true, isUsed: true, otpVerifiedAt: true },
-                where: { vendorEmail: email },
+                where: { vendorEmail: { equals: email, mode: 'insensitive' } },
                 take: 1,
             },
             VendorAccess: {
                 select: { email: true, level: true, status: true },
-                where: { email },
+                where: { email: { equals: email, mode: 'insensitive' } },
                 take: 1,
             },
         },
@@ -184,23 +133,18 @@ async function findReceivedLinksByEmail(email: string) {
 }
 
 function mapVendorLinks(links: Awaited<ReturnType<typeof findReceivedLinksByEmail>>): DashboardLink[] {
-    return links.flatMap((link) => {
+    return links.map((link) => {
         const vendorAccessRecord = link.VendorAccess?.[0];
-        if (
-            vendorAccessRecord?.status === 'completed' ||
-            vendorAccessRecord?.status === 'expired'
-        ) {
-            return [];
-        }
         const vendorIsUsed = link.LinkAccess?.[0]?.isUsed ?? link.isUsed;
         const row = mapListLink({ ...link, _count: { UserFile: 0 } }, vendorIsUsed);
-        if (row.status === 'expired' || row.status === 'revoked') {
-            return [];
-        }
-        if (row.status === 'used' && vendorAccessRecord?.status === 'break') {
+        if (vendorAccessRecord?.status === 'completed') {
+            row.status = 'completed';
+        } else if (vendorAccessRecord?.status === 'break' && row.status === 'used') {
             row.status = 'break';
+        } else if (vendorAccessRecord?.status === 'expired' && row.isRevoked) {
+            row.status = 'revoked';
         }
-        return [row];
+        return row;
     });
 }
 
@@ -237,8 +181,85 @@ function mapListLink(link: any, effectiveIsUsed: boolean): DashboardLink {
         files: [],
         auditLogs: [],
         otp: null,
-        detailsLoaded: false,
     };
+}
+
+function historyStatusToLinkStatus(status: string): DashboardLink['status'] {
+    if (status === 'completed') return 'completed';
+    if (status === 'suspicious') return 'suspicious';
+    if (status === 'revoked') return 'revoked';
+    if (status === 'active') return 'active';
+    if (status === 'cleaned') return 'expired';
+    return 'expired';
+}
+
+function sendRecordToDashboardLink(record: SendHistoryRecord, email: string): DashboardLink {
+    return {
+        id: `history:${record.id}`,
+        token: '',
+        expiresAt: record.expiredAt || record.createdAt,
+        isUsed: record.status === 'completed',
+        isRevoked: record.status === 'revoked' || record.status === 'suspicious',
+        createdAt: record.createdAt,
+        allowedVendorEmail: record.vendorEmail,
+        vendorAccess: [],
+        vendors: [],
+        purpose: record.topic,
+        purposeDetail: null,
+        notificationEmail: null,
+        failedAttempts: 0,
+        lockedAt: null,
+        otpVerifiedAt: null,
+        status: historyStatusToLinkStatus(record.status),
+        fileCount: record.fileCount,
+        files: [],
+        auditLogs: [],
+        otp: null,
+        detailsLoaded: true,
+    };
+}
+
+function mergeVendorInbox(links: DashboardLink[], records: SendHistoryRecord[], email: string): DashboardLink[] {
+    const covered = new Set(
+        links.map((l) => `${(l.purpose || '').toLowerCase()}|${(l.allowedVendorEmail || email).toLowerCase()}`),
+    );
+    const extras = records
+        .filter((r) => {
+            const emails = (r.vendorEmail || '').toLowerCase();
+            if (!emails.includes(email.toLowerCase())) return false;
+            const key = `${(r.topic || '').toLowerCase()}|${email.toLowerCase()}`;
+            return !covered.has(key);
+        })
+        .map((r) => {
+            const row = sendRecordToDashboardLink(r, email);
+            if (row.status === 'active') {
+                row.status = 'expired';
+                row.isRevoked = false;
+            }
+            return row;
+        });
+    return [...links, ...extras].sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
+}
+
+async function fetchVendorSendHistory(email: string): Promise<SendHistoryRecord[]> {
+    return prisma.sendRecord.findMany({
+        where: {
+            vendorEmail: { contains: email, mode: 'insensitive' },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+        select: {
+            id: true,
+            topic: true,
+            vendorEmail: true,
+            fileCount: true,
+            status: true,
+            createdAt: true,
+            expiredAt: true,
+        },
+    });
 }
 
 /**
@@ -246,18 +267,16 @@ function mapListLink(link: any, effectiveIsUsed: boolean): DashboardLink {
  */
 async function fetchOwnedLinksForOwner(userId: string): Promise<DashboardLink[]> {
     const links = await prisma.secureLink.findMany({
-        where: liveLinkWhere({ ownerId: userId }),
+        where: { ownerId: userId },
         orderBy: { createdAt: 'desc' },
-        take: 50,
+        take: 80,
         select: LIST_SELECT,
     });
 
-    return links
-        .map((link: any) => {
-            const anyVendorUsed = link.LinkAccess?.some((a: any) => a.isUsed) || false;
-            return mapListLink(link, link.isUsed || anyVendorUsed);
-        })
-        .filter((l) => l.status !== 'expired' && l.status !== 'revoked');
+    return links.map((link: any) => {
+        const anyVendorUsed = link.LinkAccess?.some((a: any) => a.isUsed) || false;
+        return mapListLink(link, link.isUsed || anyVendorUsed);
+    });
 }
 
 export async function getOwnedLinks(userId: string): Promise<DashboardLink[]> {
@@ -268,7 +287,6 @@ export async function getOwnedLinks(userId: string): Promise<DashboardLink[]> {
             return [];
         }
 
-        await purgeOwnerDeadLinks(userId);
         return fetchOwnedLinksForOwner(userId);
     } catch (error) {
         console.error('Error fetching owned links:', error);
@@ -289,7 +307,11 @@ export async function getReceivedLinks(email: string): Promise<DashboardLink[]> 
             return [];
         }
 
-        return mapVendorLinks(await findReceivedLinksByEmail(target));
+        return mergeVendorInbox(
+            mapVendorLinks(await findReceivedLinksByEmail(target)),
+            await fetchVendorSendHistory(target),
+            target,
+        );
     } catch (error) {
         console.error('Error fetching received links:', error);
         return [];
@@ -388,21 +410,7 @@ export async function getOwnerDashboardInitial(): Promise<{
     }
 
     const userId = session.user.id;
-    await purgeOwnerDeadLinks(userId);
-
-    const links = await prisma.secureLink.findMany({
-        where: liveLinkWhere({ ownerId: userId }),
-        orderBy: { createdAt: 'desc' },
-        take: 50,
-        select: LIST_SELECT,
-    });
-
-    const mapped = links
-        .map((link: any) => {
-            const anyVendorUsed = link.LinkAccess?.some((a: any) => a.isUsed) || false;
-            return mapListLink(link, link.isUsed || anyVendorUsed);
-        })
-        .filter((l) => l.status !== 'expired' && l.status !== 'revoked');
+    const mapped = await fetchOwnedLinksForOwner(userId);
     return {
         links: mapped,
         userId,
@@ -427,7 +435,11 @@ export async function getVendorDashboardInitial(): Promise<{
     }
 
     return {
-        links: mapVendorLinks(await findReceivedLinksByEmail(email)),
+        links: mergeVendorInbox(
+            mapVendorLinks(await findReceivedLinksByEmail(email)),
+            await fetchVendorSendHistory(email),
+            email,
+        ),
         email,
         name: session?.user?.name ?? null,
     };
@@ -463,7 +475,6 @@ export async function getOwnerDashboardData(userId: string): Promise<{
             expiredAt: true,
         },
     });
-    void purgeOwnerDeadLinks(userId);
     return { links, history };
 }
 

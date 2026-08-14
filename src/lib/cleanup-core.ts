@@ -51,23 +51,18 @@ async function stampSurvivingRecords(links: LinkCleanupRow[], now: Date) {
             if (!link.ownerId) continue;
 
             const status = link.isRevoked ? 'revoked' : 'expired';
-            const isGroupShare = link.LinkAccess.length > 1;
-            const vendorEmailToMatch = isGroupShare
-                ? `Group Share (${link.LinkAccess.length} members)`
-                : (link.LinkAccess[0]?.vendorEmail || null);
+            const vendorEmail =
+                link.LinkAccess.length > 1
+                    ? link.LinkAccess.map((a) => a.vendorEmail).join(', ')
+                    : (link.LinkAccess[0]?.vendorEmail || null);
 
             try {
-                await prisma.sendRecord.updateMany({
-                    where: {
-                        ownerId: link.ownerId,
-                        topic: link.purpose || '',
-                        vendorEmail: vendorEmailToMatch,
-                        status: 'active',
-                    },
-                    data: {
-                        status,
-                        expiredAt: now,
-                    },
+                const { stampSendRecord } = await import('@/lib/send-record');
+                await stampSendRecord({
+                    ownerId: link.ownerId,
+                    purpose: link.purpose,
+                    vendorEmail,
+                    status,
                 });
             } catch (err) {
                 console.warn(

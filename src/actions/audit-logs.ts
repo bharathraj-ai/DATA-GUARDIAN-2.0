@@ -84,7 +84,8 @@ export async function getUnifiedAuditLogs(): Promise<UnifiedAuditLog[]> {
             let description = log.reason || '';
             const metadataObj = log.metadata ? JSON.parse(log.metadata) : {};
 
-            if (log.action === 'DENIED' || log.action === 'LOCKED' || log.action === 'REVOKED') {
+            if (log.action === 'DENIED' || log.action === 'LOCKED' || log.action === 'REVOKED'
+                || log.action === 'SUSPICIOUS_ACTIVITY_REVOKE' || log.action === 'REVOKE_ACCESS_SUCCESS') {
                 severity = 'CRITICAL';
             } else if (log.action === 'EXPIRED') {
                 severity = 'WARNING';
@@ -104,6 +105,9 @@ export async function getUnifiedAuditLogs(): Promise<UnifiedAuditLog[]> {
                         break;
                     case 'NOTIFIED':
                         description = `Security notification was sent to owner.`;
+                        break;
+                    case 'SUSPICIOUS_ACTIVITY_REVOKE':
+                        description = `Vendor screenshot/capture attempt — access revoked and owner notified.`;
                         break;
                     default:
                         description = `System event: ${log.action}`;

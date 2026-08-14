@@ -25,6 +25,7 @@ export function isEmailConfigured(): boolean {
 }
 
 let transporter: Transporter | null = null;
+let warming: Promise<void> | null = null;
 
 function getTransporter(): Transporter {
     if (transporter) return transporter;
@@ -49,6 +50,20 @@ function getTransporter(): Transporter {
     } as nodemailer.TransportOptions);
 
     return transporter;
+}
+
+/** Open the SMTP TLS session while the owner is still filling the form / uploading files. */
+export function warmEmailTransport(): void {
+    if (!isEmailConfigured() || warming) return;
+    try {
+        const t = getTransporter();
+        warming = t.verify().then(
+            () => undefined,
+            () => undefined,
+        );
+    } catch {
+        warming = null;
+    }
 }
 
 async function sendWithTimeout<T>(promise: Promise<T>, label: string): Promise<T> {

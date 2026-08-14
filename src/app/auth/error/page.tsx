@@ -13,6 +13,11 @@ function ErrorContent() {
             title: 'Configuration Error',
             description: 'There is a problem with the server configuration. Please contact support.',
         },
+        HostMismatch: {
+            title: 'Open the app on port 3000',
+            description:
+                'Google sign-in is bound to http://localhost:3000, but this tab used a different port. Another local app was occupying 3000. Restart Data Guardian, then sign in at http://localhost:3000.',
+        },
         AccessDenied: {
             title: 'Access Denied',
             description: 'You do not have permission to access this resource.',

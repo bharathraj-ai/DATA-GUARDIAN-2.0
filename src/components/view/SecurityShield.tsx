@@ -11,10 +11,11 @@
  * The compositor may grab the frame buffer without focusing away from the page.
  *
  * What we CAN do:
- *   - Body-owned blank cover + hide app chrome the instant we see blur / PrtSc / Super
- *   - Pre-cover on Super/Alt (common Ubuntu screenshot chords) before capture completes
- *   - On focus return, re-validate the access session before restoring content
- *   - Never revoke the share link merely because focus was lost
+ *   - Body-owned blank cover the instant we see PrtSc / Super / screenshot chords
+ *   - On the FIRST screenshot, copy, print, tab-hide, or similar suspicious action:
+ *     terminate the vendor session immediately (no warning strikes), revoke the
+ *     share, and email the data owner
+ *   - Super/Alt alone and ordinary window blur still only hide content
  */
 
 import React, {
@@ -85,6 +86,12 @@ const BLOCKED_SHORTCUTS: Array<{
     { key: 'f12', event: 'DEVTOOLS_SHORTCUT', message: 'Developer tools are restricted' },
 ];
 
+function isApplePlatform(): boolean {
+    if (typeof navigator === 'undefined') return false;
+    return /Mac|iPhone|iPad|iPod/.test(navigator.platform || '')
+        || /Mac OS X|iPhone|iPad/.test(navigator.userAgent || '');
+}
+
 /** PrintScreen detection — Ubuntu/Chrome may use key, code, or legacy keyCode 44 */
 function isPrintScreenEvent(e: KeyboardEvent): boolean {
     const key = (e.key || '').toLowerCase();
@@ -142,7 +149,7 @@ export const SecurityShield = memo(function SecurityShield({
     viewerEmail,
     onTabSwitch,
     onSessionTerminate,
-    maxTabSwitches = 3,
+    maxTabSwitches = 1,
     enableWatermark = true,
     children,
 }: SecurityShieldProps) {
@@ -152,6 +159,7 @@ export const SecurityShield = memo(function SecurityShield({
     const [warningLevel, setWarningLevel] = useState<'info' | 'warning' | 'critical'>('info');
     const [isProtected, setIsProtected] = useState(false);
     const [sessionTerminated, setSessionTerminated] = useState(false);
+    const [terminatedBecauseSuspicious, setTerminatedBecauseSuspicious] = useState(false);
 
     /** Cover lives on document.body — never a React-owned node (avoids insertBefore/removeChild races). */
     const coverRef = useRef<HTMLDivElement | null>(null);
@@ -167,7 +175,6 @@ export const SecurityShield = memo(function SecurityShield({
     /** True only after real window blur / tab hide — not Alt/Super pre-arm */
     const leftWindowRef = useRef(false);
     const lastFocusLostAuditAtRef = useRef(0);
-    const lastVerifyAtRef = useRef(0);
     const verifyInFlightRef = useRef(false);
     const restoreDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -182,8 +189,16 @@ export const SecurityShield = memo(function SecurityShield({
     >(() => {});
     const validateAndRestoreRef = useRef<() => Promise<void>>(async () => {});
     const terminateSessionRef = useRef<(reason: string) => void>(() => {});
+    const reportSuspiciousRevokeRef = useRef<
+        (detail: string, reason?: 'screenshot' | 'devtools' | 'tab_switch' | 'copy') => void
+    >(() => {});
     const onTabSwitchRef = useRef(onTabSwitch);
     onTabSwitchRef.current = onTabSwitch;
+    const suspiciousRevokeSentRef = useRef(false);
+    /** Win/Super+Shift — Snipping Tool often swallows the final S before the browser sees it */
+    const osScreenshotChordArmedAtRef = useRef(0);
+    /** Super/Win key — Snipping Tool starts with Win then steals the rest of the chord */
+    const lastMetaKeyAtRef = useRef(0);
 
     const syncCoverCopy = useCallback((opts: { validating?: boolean; terminated?: boolean }) => {
         const cover = coverRef.current;
@@ -192,15 +207,15 @@ export const SecurityShield = memo(function SecurityShield({
         const sub = cover.querySelector('.security-privacy-cover-sub');
         if (!title || !sub) return;
         if (opts.terminated || sessionTerminatedRef.current) {
-            title.textContent = 'Session Terminated';
+            title.textContent = 'Access Revoked';
             sub.textContent =
-                'This viewing session ended due to a security policy. Contact the data owner for a new link.';
+                'Suspicious activity was detected. Vendor access has been denied and the data owner has been notified.';
             return;
         }
         title.textContent = 'Protected Content Hidden';
         sub.textContent = opts.validating
             ? 'Re-validating your access session…'
-            : 'Content is hidden while this window is not focused. It will restore after security checks pass.';
+            : 'Content is hidden. If this was a screenshot or capture attempt, access is being revoked.';
     }, []);
 
     // ── Instant DOM privacy cover (body-owned node; no React className fight) ──
@@ -236,6 +251,7 @@ export const SecurityShield = memo(function SecurityShield({
 
     const deactivatePrivacyCover = useCallback(() => {
         if (sessionTerminatedRef.current) return;
+        if (suspiciousRevokeSentRef.current) return;
         if (document.hidden || !document.hasFocus()) return;
 
         protectionActiveRef.current = false;
@@ -323,7 +339,7 @@ export const SecurityShield = memo(function SecurityShield({
             setSessionTerminated(true);
             activatePrivacyCover('terminated');
             logSecurityEvent('SESSION_TERMINATED', { reason });
-            flashWarning(`Session terminated: ${reason}`, 'critical', 999999);
+            flashWarning(`Access revoked: ${reason}`, 'critical', 999999);
             onSessionTerminate?.(reason);
             setTimeout(flushEvents, 100);
         },
@@ -331,28 +347,62 @@ export const SecurityShield = memo(function SecurityShield({
     );
 
     /**
+     * First suspicious action: blank the frame, end the vendor session immediately,
+     * revoke the share, and notify the owner. No warning strikes.
+     * Super/Alt alone and ordinary focus loss must NOT call this.
+     */
+    const reportSuspiciousActivityAndRevoke = useCallback(
+        (detail: string, reason: 'screenshot' | 'devtools' | 'tab_switch' | 'copy' = 'screenshot') => {
+            if (sessionTerminatedRef.current && suspiciousRevokeSentRef.current) return;
+
+            setTerminatedBecauseSuspicious(true);
+            activatePrivacyCover('suspicious-revoke');
+            terminateSession(
+                'Suspicious activity detected. This working session has been terminated and the data owner has been notified.',
+            );
+
+            if (suspiciousRevokeSentRef.current) return;
+            suspiciousRevokeSentRef.current = true;
+
+            const payload = JSON.stringify({ token, reason, detail });
+            try {
+                navigator.sendBeacon(
+                    '/api/security/suspicious-activity',
+                    new Blob([payload], { type: 'application/json' }),
+                );
+            } catch {
+                /* fetch keepalive below is the primary path */
+            }
+            void fetch('/api/security/suspicious-activity', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                keepalive: true,
+                body: payload,
+            }).catch(() => {
+                // Keep the local kill-switch. Never restore the file after first detection.
+            });
+        },
+        [activatePrivacyCover, terminateSession, token],
+    );
+
+    /**
      * After a real focus leave: keep cover until access is confirmed.
      * Alt/Super pre-arm restores locally without hitting the API.
      */
     const validateAndRestore = useCallback(async () => {
-        if (sessionTerminatedRef.current) return;
+        if (sessionTerminatedRef.current || suspiciousRevokeSentRef.current) return;
         if (document.hidden || !document.hasFocus()) return;
 
         // Local-only restore when we never left the window (modifier pre-arm)
         if (!leftWindowRef.current) {
+            if (Date.now() - lastMetaKeyAtRef.current < 2800) return;
+            if (Date.now() - osScreenshotChordArmedAtRef.current < 2800) return;
             deactivatePrivacyCover();
             return;
         }
 
         if (verifyInFlightRef.current) return;
-
-        // Throttle verify-access — skip network if we validated recently
-        const now = Date.now();
-        if (now - lastVerifyAtRef.current < 8_000) {
-            deactivatePrivacyCover();
-            leftWindowRef.current = false;
-            return;
-        }
 
         const generation = restoreGenerationRef.current;
         verifyInFlightRef.current = true;
@@ -369,7 +419,6 @@ export const SecurityShield = memo(function SecurityShield({
             if (document.hidden || !document.hasFocus()) return;
 
             if (res.ok && data.type === 'active') {
-                lastVerifyAtRef.current = Date.now();
                 leftWindowRef.current = false;
                 deactivatePrivacyCover();
                 return;
@@ -428,6 +477,7 @@ export const SecurityShield = memo(function SecurityShield({
     logSecurityEventRef.current = logSecurityEvent;
     validateAndRestoreRef.current = validateAndRestore;
     terminateSessionRef.current = terminateSession;
+    reportSuspiciousRevokeRef.current = reportSuspiciousActivityAndRevoke;
 
     // ═══════════════════════════════════════════════════════════════
     // KEYBOARD deterrents (Ubuntu PrtSc often intercepted by GNOME —
@@ -442,10 +492,6 @@ export const SecurityShield = memo(function SecurityShield({
                 e.stopPropagation();
                 activatePrivacyCoverRef.current(
                     phase === 'down' ? 'printscreen' : 'printscreen-up',
-                );
-                flashWarningRef.current(
-                    'Screenshots are restricted — content has been hidden',
-                    'critical',
                 );
                 logSecurityEventRef.current('SCREENSHOT_ATTEMPT', {
                     phase,
@@ -464,6 +510,9 @@ export const SecurityShield = memo(function SecurityShield({
                 } catch {
                     /* ignore */
                 }
+                if (phase === 'down') {
+                    reportSuspiciousRevokeRef.current('printscreen', 'screenshot');
+                }
                 return true;
             }
             return false;
@@ -472,11 +521,20 @@ export const SecurityShield = memo(function SecurityShield({
         let chordReleaseTimer: ReturnType<typeof setTimeout> | null = null;
         const scheduleChordReleaseRestore = () => {
             if (chordReleaseTimer) clearTimeout(chordReleaseTimer);
-            // Local restore only — Alt/Super arm must not hit verify-access
             chordReleaseTimer = setTimeout(() => {
-                if (sessionTerminatedRef.current) return;
+                if (sessionTerminatedRef.current || suspiciousRevokeSentRef.current) return;
                 if (!document.hasFocus() || document.hidden) return;
                 if (!protectionActiveRef.current) return;
+                // Snipping Tool (Win+Shift+S) often swallows keys after Super —
+                // keep the cover until the chord window expires. Do not restore.
+                if (Date.now() - osScreenshotChordArmedAtRef.current < 2800) {
+                    scheduleChordReleaseRestore();
+                    return;
+                }
+                if (Date.now() - lastMetaKeyAtRef.current < 2800) {
+                    scheduleChordReleaseRestore();
+                    return;
+                }
                 if (leftWindowRef.current) {
                     void validateAndRestoreRef.current();
                     return;
@@ -499,6 +557,7 @@ export const SecurityShield = memo(function SecurityShield({
                 code === 'OSLeft' ||
                 code === 'OSRight'
             ) {
+                lastMetaKeyAtRef.current = Date.now();
                 if (chordReleaseTimer) clearTimeout(chordReleaseTimer);
                 activatePrivacyCoverRef.current('super-key');
             }
@@ -508,13 +567,24 @@ export const SecurityShield = memo(function SecurityShield({
                 activatePrivacyCoverRef.current('alt-key');
             }
 
+            // Win/Super+Shift is Snipping Tool — OS often swallows "S". Revoke on first chord, no wait.
+            if (!isApplePlatform() && e.metaKey && e.shiftKey) {
+                e.preventDefault();
+                e.stopPropagation();
+                osScreenshotChordArmedAtRef.current = Date.now();
+                activatePrivacyCoverRef.current('os-screenshot-chord');
+                logSecurityEventRef.current('SCREENSHOT_ATTEMPT', { chord: 'meta-shift' });
+                reportSuspiciousRevokeRef.current('win-shift-snip', 'screenshot');
+                return;
+            }
+
             if (handleScreenshotKeys(e, 'down')) return;
 
             if (key === 'f12') {
                 e.preventDefault();
                 e.stopPropagation();
-                flashWarningRef.current('Developer tools are restricted', 'warning');
                 logSecurityEventRef.current('DEVTOOLS_SHORTCUT');
+                reportSuspiciousRevokeRef.current('f12', 'devtools');
                 return;
             }
 
@@ -536,11 +606,25 @@ export const SecurityShield = memo(function SecurityShield({
 
                 e.preventDefault();
                 e.stopPropagation();
-                if (shortcut.event === 'SCREENSHOT_ATTEMPT') {
-                    activatePrivacyCoverRef.current('screenshot-shortcut');
+                activatePrivacyCoverRef.current('suspicious-shortcut');
+                logSecurityEventRef.current(shortcut.event);
+                if (shortcut.event === 'SCREENSHOT_ATTEMPT' || shortcut.event === 'PRINT_ATTEMPT') {
+                    reportSuspiciousRevokeRef.current(shortcut.event, 'screenshot');
+                    return;
+                }
+                if (shortcut.event === 'DEVTOOLS_SHORTCUT' || shortcut.event === 'VIEW_SOURCE_ATTEMPT') {
+                    reportSuspiciousRevokeRef.current(shortcut.event, 'devtools');
+                    return;
+                }
+                if (
+                    shortcut.event === 'COPY_ATTEMPT' ||
+                    shortcut.event === 'CUT_ATTEMPT' ||
+                    shortcut.event === 'SAVE_ATTEMPT'
+                ) {
+                    reportSuspiciousRevokeRef.current(shortcut.event, 'copy');
+                    return;
                 }
                 flashWarningRef.current(shortcut.message, 'warning');
-                logSecurityEventRef.current(shortcut.event);
                 return;
             }
         };
@@ -589,26 +673,23 @@ export const SecurityShield = memo(function SecurityShield({
 
         const handleVisibilityChange = () => {
             if (document.hidden) {
-                markWindowLeft('visibilitychange');
+                const snipChord =
+                    Date.now() - osScreenshotChordArmedAtRef.current < 2800
+                    || Date.now() - lastMetaKeyAtRef.current < 2800;
+                if (snipChord) {
+                    logSecurityEventRef.current('SCREENSHOT_ATTEMPT', {
+                        via: 'visibility-while-snip-chord',
+                    });
+                    reportSuspiciousRevokeRef.current('os-snip-visibility', 'screenshot');
+                    return;
+                }
 
-                setTabSwitchCount((prev) => {
-                    const next = prev + 1;
-                    logSecurityEventRef.current('TAB_SWITCH', { count: next, max: maxTabSwitches });
-                    onTabSwitchRef.current?.(next);
-                    if (next >= maxTabSwitches) {
-                        terminateSessionRef.current(
-                            `Maximum tab switches exceeded (${next}/${maxTabSwitches})`,
-                        );
-                    } else if (next === maxTabSwitches - 1) {
-                        flashWarningRef.current(
-                            `Tab switch ${next}/${maxTabSwitches}. One more may terminate this session.`,
-                            'critical',
-                            6000,
-                        );
-                    }
-                    return next;
-                });
+                markWindowLeft('visibilitychange');
+                logSecurityEventRef.current('TAB_SWITCH', { count: 1, max: 1 });
+                onTabSwitchRef.current?.(1);
+                reportSuspiciousRevokeRef.current('tab-switch', 'tab_switch');
             } else {
+                if (sessionTerminatedRef.current || suspiciousRevokeSentRef.current) return;
                 activatePrivacyCoverRef.current('visibility-return');
                 if (restoreDebounceRef.current) clearTimeout(restoreDebounceRef.current);
                 restoreDebounceRef.current = setTimeout(() => {
@@ -618,11 +699,21 @@ export const SecurityShield = memo(function SecurityShield({
         };
 
         const handleBlur = () => {
+            if (
+                Date.now() - osScreenshotChordArmedAtRef.current < 2800
+                || Date.now() - lastMetaKeyAtRef.current < 2800
+            ) {
+                logSecurityEventRef.current('SCREENSHOT_ATTEMPT', {
+                    via: 'blur-while-snip-chord',
+                });
+                reportSuspiciousRevokeRef.current('os-snip-blur', 'screenshot');
+                return;
+            }
             markWindowLeft('blur');
         };
 
         const handleFocus = () => {
-            if (sessionTerminatedRef.current) return;
+            if (sessionTerminatedRef.current || suspiciousRevokeSentRef.current) return;
             if (!protectionActiveRef.current && !leftWindowRef.current) return;
             activatePrivacyCoverRef.current('window-focus');
             if (restoreDebounceRef.current) clearTimeout(restoreDebounceRef.current);
@@ -639,15 +730,30 @@ export const SecurityShield = memo(function SecurityShield({
         let lastFocused = document.hasFocus() && !document.hidden;
         const focusPoll = window.setInterval(() => {
             const focused = document.hasFocus() && !document.hidden;
-            if (lastFocused && !focused) {
-                activatePrivacyCoverRef.current('focus-poll-lost');
-                leftWindowRef.current = true;
-            } else if (!lastFocused && focused && protectionActiveRef.current) {
-                if (restoreDebounceRef.current) clearTimeout(restoreDebounceRef.current);
-                restoreDebounceRef.current = setTimeout(() => {
-                    void validateAndRestoreRef.current();
-                }, 350);
+            const lostFocus = lastFocused && !focused;
+            const regainedFocus = !lastFocused && focused && protectionActiveRef.current;
+
+            if (lostFocus) {
+                const snipChord =
+                    Date.now() - osScreenshotChordArmedAtRef.current < 2800
+                    || Date.now() - lastMetaKeyAtRef.current < 2800;
+                if (snipChord) {
+                    reportSuspiciousRevokeRef.current('os-snip-focus-poll', 'screenshot');
+                } else {
+                    activatePrivacyCoverRef.current('focus-poll-lost');
+                    leftWindowRef.current = true;
+                }
             }
+
+            if (regainedFocus) {
+                if (!sessionTerminatedRef.current && !suspiciousRevokeSentRef.current) {
+                    if (restoreDebounceRef.current) clearTimeout(restoreDebounceRef.current);
+                    restoreDebounceRef.current = setTimeout(() => {
+                        void validateAndRestoreRef.current();
+                    }, 350);
+                }
+            }
+
             lastFocused = focused;
         }, 100);
 
@@ -675,13 +781,13 @@ export const SecurityShield = memo(function SecurityShield({
         const handleCopy = (e: ClipboardEvent) => {
             e.preventDefault();
             e.clipboardData?.setData('text/plain', '');
-            flashWarningRef.current('Copy is disabled for security', 'warning');
             logSecurityEventRef.current('COPY_ATTEMPT');
+            reportSuspiciousRevokeRef.current('copy', 'copy');
         };
         const handleCut = (e: ClipboardEvent) => {
             e.preventDefault();
-            flashWarningRef.current('Cut is disabled for security', 'warning');
             logSecurityEventRef.current('CUT_ATTEMPT');
+            reportSuspiciousRevokeRef.current('cut', 'copy');
         };
         const handlePaste = (e: ClipboardEvent) => {
             e.preventDefault();
@@ -817,7 +923,7 @@ export const SecurityShield = memo(function SecurityShield({
         cover.innerHTML = `
             <div class="security-privacy-cover-inner">
                 <p class="security-privacy-cover-title">Protected Content Hidden</p>
-                <p class="security-privacy-cover-sub">Content is hidden while this window is not focused. It will restore after security checks pass.</p>
+                <p class="security-privacy-cover-sub">Content is hidden. If this was a screenshot or capture attempt, access is being revoked.</p>
             </div>
         `;
         document.body.appendChild(cover);
@@ -967,11 +1073,12 @@ export const SecurityShield = memo(function SecurityShield({
                     }}
                 >
                     <h2 style={{ fontSize: '24px', fontWeight: 700, margin: '0 0 12px' }}>
-                        Session Terminated
+                        {terminatedBecauseSuspicious ? 'Access Revoked' : 'Session Terminated'}
                     </h2>
-                    <p style={{ fontSize: '15px', color: '#9CA3AF', maxWidth: '400px', lineHeight: 1.6 }}>
-                        Your secure viewing session has been terminated due to security policy
-                        violations. This event has been logged.
+                    <p style={{ fontSize: '15px', color: '#9CA3AF', maxWidth: '420px', lineHeight: 1.6 }}>
+                        {terminatedBecauseSuspicious
+                            ? 'Suspicious activity was detected. This working session has been terminated, vendor access has been denied, and the data owner has been notified.'
+                            : 'Your secure viewing session has been terminated due to security policy violations. This event has been logged.'}
                     </p>
                 </div>
             )}

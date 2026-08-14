@@ -183,7 +183,10 @@ export default function OwnerDashboardClient({
             active: { bg: 'rgba(34, 197, 94, 0.15)', color: '#22c55e', label: 'LIVE' },
             expired: { bg: 'rgba(239, 68, 68, 0.15)', color: '#ef4444', label: 'EXPIRED' },
             revoked: { bg: 'rgba(239, 68, 68, 0.15)', color: '#ef4444', label: 'REVOKED' },
+            suspicious: { bg: 'rgba(220, 38, 38, 0.18)', color: '#dc2626', label: 'SUSPICIOUS' },
             used: { bg: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6', label: 'VIEWED' },
+            completed: { bg: 'rgba(34, 197, 94, 0.15)', color: '#16a34a', label: 'COMPLETED' },
+            break: { bg: 'rgba(245, 158, 11, 0.15)', color: '#d97706', label: 'ON BREAK' },
         };
         const s = styles[status] || styles.expired;
 
@@ -293,19 +296,23 @@ export default function OwnerDashboardClient({
     // Combined stats: links (active data) + sendHistory (preserved records)
     // sendHistory only contains expired/revoked/cleaned records
     // links contains currently active/used records that haven't been cleaned yet
-    const historyCounts = {
-        total: sendHistory.length,
-        expired: sendHistory.filter(r => r.status === 'expired').length,
-        revoked: sendHistory.filter(r => r.status === 'revoked').length,
-        cleaned: sendHistory.filter(r => r.status === 'cleaned').length,
-    };
+    const fromHistory = sendHistory.length > 0;
     const counts = {
-        all: links.length + historyCounts.total,
-        active: links.filter(l => l.status === 'active').length,
-        expired: links.filter(l => l.status === 'expired').length + historyCounts.expired,
-        revoked: links.filter(l => l.status === 'revoked').length + historyCounts.revoked,
-        used: links.filter(l => l.status === 'used').length,
+        all: fromHistory ? sendHistory.length : links.length,
+        active: links.filter((l) => l.status === 'active' || l.status === 'used' || l.status === 'break').length,
+        completed: fromHistory
+            ? sendHistory.filter((r) => r.status === 'completed').length
+            : links.filter((l) => l.status === 'completed').length,
+        expired: fromHistory
+            ? sendHistory.filter((r) => r.status === 'expired' || r.status === 'cleaned').length
+            : links.filter((l) => l.status === 'expired').length,
+        revoked: fromHistory
+            ? sendHistory.filter((r) => r.status === 'revoked' || r.status === 'suspicious').length
+            : links.filter((l) => l.status === 'revoked' || l.status === 'suspicious').length,
     };
+    const liveLinks = links.filter(
+        (l) => l.status === 'active' || l.status === 'used' || l.status === 'break',
+    );
 
     return (
         <main className="app-page">
@@ -374,9 +381,9 @@ export default function OwnerDashboardClient({
                             {[
                                 { label: 'Total Links', value: counts.all, iconClass: 'stat-icon-total', icon: <Link2 size={20} /> },
                                 { label: 'Live', value: counts.active, iconClass: 'stat-icon-live', icon: <Clock size={20} /> },
-                                { label: 'Viewed', value: counts.used, iconClass: 'stat-icon-viewed', icon: <Eye size={20} /> },
+                                { label: 'Completed cleanly', value: counts.completed, iconClass: 'stat-icon-viewed', icon: <Eye size={20} /> },
                                 { label: 'Expired', value: counts.expired, iconClass: 'stat-icon-expired', icon: <Clock size={20} /> },
-                                { label: 'Revoked', value: counts.revoked, iconClass: 'stat-icon-revoked', icon: <Ban size={20} /> },
+                                { label: 'Revoked / suspicious', value: counts.revoked, iconClass: 'stat-icon-revoked', icon: <Ban size={20} /> },
                             ].map((stat) => (
                                 <div key={stat.label} className="stat-card-premium">
                                     <div className={`stat-icon-wrapper ${stat.iconClass}`}>
@@ -417,7 +424,7 @@ export default function OwnerDashboardClient({
                                 }}
                             >
                                 <Link2 size={16} />
-                                <span>Active Links ({links.length})</span>
+                                <span>Active Links ({liveLinks.length})</span>
                             </button>
                             <button
                                 onClick={() => setActiveTab('history')}
@@ -594,29 +601,29 @@ export default function OwnerDashboardClient({
                                                             fontSize: '0.75rem', padding: '4px 12px',
                                                             borderRadius: '8px', fontWeight: '600',
                                                             textTransform: 'uppercase', flexShrink: 0, marginLeft: '12px',
-                                                            background: record.status === 'active'
+                                                            background: record.status === 'active' || record.status === 'completed'
                                                                 ? '#DCFCE7'
-                                                                : record.status === 'revoked'
+                                                                : record.status === 'revoked' || record.status === 'suspicious'
                                                                     ? '#FEE2E2'
                                                                     : '#F3F4F6',
-                                                            color: record.status === 'active'
+                                                            color: record.status === 'active' || record.status === 'completed'
                                                                 ? '#15803D'
-                                                                : record.status === 'revoked'
+                                                                : record.status === 'revoked' || record.status === 'suspicious'
                                                                     ? '#B91C1C'
                                                                     : '#4B5563',
                                                         }}>
                                                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                                                                {record.status === 'active' ? (
+                                                                {record.status === 'active' || record.status === 'completed' ? (
                                                                     <span style={{
                                                                         width: '6px', height: '6px', borderRadius: '50%', background: '#15803D',
                                                                         display: 'inline-block'
                                                                     }} />
-                                                                ) : record.status === 'revoked' ? (
+                                                                ) : record.status === 'revoked' || record.status === 'suspicious' ? (
                                                                     <Ban size={10} />
                                                                 ) : (
                                                                     <Clock size={10} />
                                                                 )}
-                                                                {record.status}
+                                                                {record.status === 'suspicious' ? 'suspicious revoke' : record.status}
                                                             </span>
                                                         </span>
                                                     </div>
@@ -709,7 +716,7 @@ export default function OwnerDashboardClient({
                                         <div className="button-spinner" style={{ width: '32px', height: '32px', margin: '0 auto 12px' }}></div>
                                         <p style={{ color: 'var(--color-text-secondary)' }}>Loading your links...</p>
                                     </div>
-                                ) : links.length === 0 ? (
+                                ) : liveLinks.length === 0 ? (
                                     <div className="app-form-card" style={{ textAlign: 'center', padding: '48px' }}>
                                         <div style={{ fontSize: '3rem', marginBottom: '16px' }}>
                                             <Link2 size={48} style={{ margin: '0 auto' }} />
@@ -724,7 +731,7 @@ export default function OwnerDashboardClient({
 
                                 ) : (
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                                        {links.map((link) => (
+                                        {liveLinks.map((link) => (
                                             <div key={link.id} className="premium-link-card">
                                                 {/* Top Row: Avatar Circle, Vendor info, Status badges */}
                                                 <div className="card-header-flex">

@@ -334,7 +334,15 @@ export async function completeWork(token: string): Promise<CompleteWorkResult> {
             }
         }
 
-        // 8. AUTO-CLEANUP: Purge ALL ciphertext / files for this link (awaited)
+        // 8. Preserve dashboard history, then purge ciphertext
+        const { stampSendRecord } = await import('@/lib/send-record');
+        await stampSendRecord({
+            ownerId: secureLink.ownerId,
+            purpose: (secureLink as { purpose?: string | null }).purpose,
+            vendorEmail: vendorEmail !== 'unknown' ? vendorEmail : null,
+            status: 'completed',
+        });
+
         const { executeSingleLinkCleanup } = await import('@/lib/cleanup-core');
         const cleanup = await executeSingleLinkCleanup(token);
         if (!cleanup.success) {

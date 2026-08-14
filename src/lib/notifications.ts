@@ -20,7 +20,8 @@ export type NotificationEvent =
     | 'DEVICE_MISMATCH'  // Anti-phishing: Access from different device
     | 'FAILED_ATTEMPTS'  // Anti-phishing: OTP failure (revoked immediately)
     | 'FORWARDED_LINK'   // Zero Trust: Link opened by wrong email recipient
-    | 'VENDOR_SUBMITTED'; // Vendor submitted final edited document
+    | 'VENDOR_SUBMITTED' // Vendor submitted final edited document
+    | 'SUSPICIOUS_ACTIVITY'; // Screenshot/capture attempt — access revoked
 
 interface NotificationPayload {
     email: string;
@@ -33,8 +34,9 @@ interface NotificationPayload {
         expiryTime?: Date;
         failedAttempts?: number;   // for FAILED_ATTEMPTS alerts
         intendedRecipient?: string; // for FORWARDED_LINK alerts
-        vendorEmail?: string;       // for VENDOR_SUBMITTED
+        vendorEmail?: string;       // for VENDOR_SUBMITTED / SUSPICIOUS_ACTIVITY
         fileName?: string;          // for VENDOR_SUBMITTED
+        suspiciousReason?: string;  // for SUSPICIOUS_ACTIVITY
     };
 }
 
@@ -120,6 +122,14 @@ function createEmailTemplate(payload: NotificationPayload): { subject: string; h
             const fileLabel = metadata?.fileName || 'a document';
             message = `${vendorLabel} has finished editing and submitted the final version of "${fileLabel}" at ${formattedTime}. You can review the submitted document in your dashboard.`;
             iconColor = '#10b981'; // green
+            break;
+
+        case 'SUSPICIOUS_ACTIVITY':
+            subject = '🚨 Data Guardian: Suspicious Activity — Access Denied';
+            heading = 'Vendor Access Revoked';
+            const actor = metadata?.vendorEmail || 'A vendor';
+            message = `${actor} attempted suspicious activity (such as a screenshot or screen capture) on your shared data at ${formattedTime}. We immediately terminated their session, revoked access, and closed the share link. They can no longer view or edit the files.`;
+            iconColor = '#dc2626';
             break;
     }
 
@@ -378,6 +388,28 @@ export async function notifyVendorSubmitted(
         tokenId,
         timestamp: new Date(),
         metadata: { vendorEmail, fileName }
+    });
+}
+
+/**
+ * Notify the owner that a vendor attempted to screenshot/capture shared data
+ * and that vendor access was immediately revoked.
+ */
+export async function notifySuspiciousActivity(
+    email: string,
+    tokenId: string,
+    vendorEmail: string | null,
+    suspiciousReason: string
+): Promise<void> {
+    await sendAccessNotification({
+        email,
+        event: 'SUSPICIOUS_ACTIVITY',
+        tokenId,
+        timestamp: new Date(),
+        metadata: {
+            vendorEmail: vendorEmail || undefined,
+            suspiciousReason,
+        },
     });
 }
 

@@ -66,6 +66,7 @@ export async function revokeAccess(
                 token: true,
                 ownerId: true,
                 isRevoked: true,
+                purpose: true,
             },
         });
 
@@ -145,6 +146,13 @@ export async function revokeAccess(
                 redisResult.success ? `${redisResult.latencyMs}ms` : 'N/A'
             }`,
         );
+
+        const { stampSendRecord } = await import('@/lib/send-record');
+        await stampSendRecord({
+            ownerId: secureLink.ownerId,
+            purpose: secureLink.purpose,
+            status: 'revoked',
+        });
 
         const tokenToPurge = secureLink.token;
         runAfterResponse(async () => {

@@ -1,4 +1,4 @@
-import { getGridFSBucket, GRIDFS_CHUNK_SIZE } from './client';
+import { getGridFSBucket, getMongoDb, GRIDFS_CHUNK_SIZE, withMongoRetry } from './client';
 import { ObjectId } from 'mongodb';
 import { Readable, Transform } from 'stream';
 import crypto from 'crypto';
@@ -13,6 +13,7 @@ export interface MongoUploadParams {
   vendorId?: string;
   uploadedBy: string;
   classification?: string;
+  extraMetadata?: Record<string, string>;
 }
 
 export interface MongoStreamUploadParams {
@@ -47,6 +48,7 @@ function uploadMetadata(params: {
   uploadedBy: string;
   classification?: string;
   checksum?: string;
+  extraMetadata?: Record<string, string>;
 }) {
   return {
     mimeType: params.mimeType,
@@ -57,30 +59,56 @@ function uploadMetadata(params: {
     uploadedBy: params.uploadedBy,
     classification: params.classification || 'INTERNAL',
     ...(params.checksum ? { checksum: params.checksum } : {}),
+    ...(params.extraMetadata || {}),
   };
 }
 
+/**
+ * Direct chunk inserts — GridFS streams add seconds of backpressure on small files.
+ * Same `uploads.files` / `uploads.chunks` layout as `openUploadStream`, so downloads stay compatible.
+ */
 export async function uploadToMongo(params: MongoUploadParams): Promise<MongoUploadResult> {
-  const bucket = await getGridFSBucket();
   const checksum = computeChecksum(params.buffer);
-  const readableStream = Readable.from(params.buffer);
+  const length = params.buffer.length;
+  const chunkSize = GRIDFS_CHUNK_SIZE;
 
-  return new Promise((resolve, reject) => {
-    const uploadStream = bucket.openUploadStream(params.originalFileName, {
-      chunkSizeBytes: GRIDFS_CHUNK_SIZE,
+  return withMongoRetry(async () => {
+    const db = await getMongoDb();
+    const id = new ObjectId();
+
+    if (length > 0) {
+      const chunkDocs = [];
+      for (let offset = 0, n = 0; offset < length; offset += chunkSize, n++) {
+        const slice = params.buffer.subarray(offset, Math.min(offset + chunkSize, length));
+        chunkDocs.push({
+          files_id: id,
+          n,
+          data: offset === 0 && slice.length === length ? params.buffer : Buffer.from(slice),
+        });
+      }
+      const chunks = db.collection('uploads.chunks');
+      if (chunkDocs.length === 1) {
+        await chunks.insertOne(chunkDocs[0]);
+      } else {
+        await chunks.insertMany(chunkDocs, { ordered: true });
+      }
+    }
+
+    await db.collection('uploads.files').insertOne({
+      _id: id,
+      length,
+      chunkSize,
+      uploadDate: new Date(),
+      filename: params.originalFileName,
       metadata: uploadMetadata({ ...params, checksum }),
     });
 
-    readableStream.pipe(uploadStream)
-      .on('error', reject)
-      .on('finish', () => {
-        resolve({
-          gridFSId: uploadStream.id.toString(),
-          checksum,
-          fileSize: params.buffer.length,
-          mimeType: params.mimeType,
-        });
-      });
+    return {
+      gridFSId: id.toString(),
+      checksum,
+      fileSize: length,
+      mimeType: params.mimeType,
+    };
   });
 }
 

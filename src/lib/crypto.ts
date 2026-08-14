@@ -30,12 +30,16 @@ export function generateOTP(): string {
  * - We need fast verification for good UX
  * - HMAC with a secret key provides sufficient security
  */
-export async function hashOTP(otp: string): Promise<string> {
+export function hashOTPSync(otp: string): string {
     const secret = process.env.OTP_HMAC_SECRET || process.env.ENCRYPTION_KEY;
     if (!secret) {
         throw new Error('OTP_HMAC_SECRET or ENCRYPTION_KEY is required for OTP hashing');
     }
     return crypto.createHmac('sha256', secret).update(otp).digest('hex');
+}
+
+export async function hashOTP(otp: string): Promise<string> {
+    return hashOTPSync(otp);
 }
 
 /**

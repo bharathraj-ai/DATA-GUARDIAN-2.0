@@ -1,9 +1,10 @@
 'use client';
-import { useState, DragEvent } from 'react';
+import { useState, DragEvent, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { createSecureLinkWithFiles } from '@/actions/create-link-with-files';
-import { VendorOption } from '@/actions/get-vendors';
+import type { CreateSecureLinkResult } from '@/lib/create-link-result';
+import type { CreateLinkJson } from '@/lib/create-link-payload';
+import type { VendorOption } from '@/lib/vendor-options';
 import styles from './page.module.css';
 import { 
     Shield, 
@@ -25,10 +26,14 @@ import {
     X,
     ChevronDown,
     ChevronUp,
-    Search
+    Search,
 } from 'lucide-react';
 
 type ExpiryMode = 'time' | 'days' | 'months';
+
+function fileKey(file: File) {
+    return `${file.name}:${file.size}:${file.lastModified}`;
+}
 
 interface FormDataState {
     firstName: string;
@@ -74,7 +79,11 @@ export default function CreateLinkClient({ initialVendors, hasActiveLink }: Crea
         allowDownload: false,
     });
     const [files, setFiles] = useState<FileList | null>(null);
-    const [generatedLink, setGeneratedLink] = useState('');
+    const [stageStatus, setStageStatus] = useState<
+        Record<string, { status: 'preparing' | 'ready' | 'error'; gridFSId?: string; error?: string }>
+    >({});
+    const stagePromises = useRef(new Map<string, Promise<string>>());
+    const [linkSent, setLinkSent] = useState(false);
     const [status, setStatus] = useState({ message: '', type: '' });
     const [isLoading, setIsLoading] = useState(false);
     const [vendors] = useState<VendorOption[]>(initialVendors);
@@ -85,6 +94,11 @@ export default function CreateLinkClient({ initialVendors, hasActiveLink }: Crea
     
     // Drag and Drop state
     const [isDragging, setIsDragging] = useState(false);
+
+    useEffect(() => {
+        router.prefetch('/dashboard/owner');
+        fetch('/api/create-link', { method: 'GET', credentials: 'same-origin' }).catch(() => {});
+    }, [router]);
 
     const filteredVendors = vendors.filter((vendor) => {
         const q = vendorSearch.trim().toLowerCase();
@@ -106,9 +120,56 @@ export default function CreateLinkClient({ initialVendors, hasActiveLink }: Crea
         setFormData({ ...formData, [e.target.name]: value });
     };
 
+    const queueStaging = (list: FileList | File[]) => {
+        Array.from(list).forEach((file) => {
+            const key = fileKey(file);
+            if (stagePromises.current.has(key)) return;
+            setStageStatus((prev) => ({ ...prev, [key]: { status: 'preparing' } }));
+            const promise = (async () => {
+                const postOnce = async () => {
+                    const res = await fetch('/api/create-link/stage', {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: { 'X-File-Name': encodeURIComponent(file.name) },
+                        body: file,
+                    });
+                    const json = (await res.json().catch(() => ({}))) as {
+                        success?: boolean;
+                        gridFSId?: string;
+                        error?: string;
+                    };
+                    return { res, json };
+                };
+
+                let { res, json } = await postOnce();
+                if ((!json.success || !json.gridFSId) && res.status >= 500) {
+                    ({ res, json } = await postOnce());
+                }
+                if (!json.success || !json.gridFSId) {
+                    throw new Error(json.error || `Failed to prepare "${file.name}".`);
+                }
+                setStageStatus((prev) => ({
+                    ...prev,
+                    [key]: { status: 'ready', gridFSId: json.gridFSId },
+                }));
+                return json.gridFSId;
+            })().catch((err: unknown) => {
+                stagePromises.current.delete(key);
+                const raw = err instanceof Error ? err.message : `Failed to prepare "${file.name}".`;
+                const message = /mongodb\.net|server monitor|ECONNRESET|ETIMEDOUT/i.test(raw)
+                    ? 'Could not reach file storage. Please attach the file again.'
+                    : raw;
+                setStageStatus((prev) => ({ ...prev, [key]: { status: 'error', error: message } }));
+                throw new Error(message);
+            });
+            stagePromises.current.set(key, promise);
+        });
+    };
+
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files.length > 0) {
             setFiles(e.target.files);
+            queueStaging(e.target.files);
         }
     };
     
@@ -127,11 +188,22 @@ export default function CreateLinkClient({ initialVendors, hasActiveLink }: Crea
         setIsDragging(false);
         if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
             setFiles(e.dataTransfer.files);
+            queueStaging(e.dataTransfer.files);
         }
     };
 
     const removeFile = (index: number) => {
         if (!files) return;
+        const removed = files[index];
+        if (removed) {
+            const key = fileKey(removed);
+            stagePromises.current.delete(key);
+            setStageStatus((prev) => {
+                const next = { ...prev };
+                delete next[key];
+                return next;
+            });
+        }
         const dt = new DataTransfer();
         for (let i = 0; i < files.length; i++) {
             if (i !== index) dt.items.add(files[i]);
@@ -187,6 +259,7 @@ export default function CreateLinkClient({ initialVendors, hasActiveLink }: Crea
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        e.stopPropagation();
         setStatus({ message: '', type: '' });
 
         const error = validateForm();
@@ -198,43 +271,73 @@ export default function CreateLinkClient({ initialVendors, hasActiveLink }: Crea
         setIsLoading(true);
 
         try {
-            const data = new FormData();
-            Object.entries(formData).forEach(([key, value]) => {
-                if (key === 'vendors' || key === 'vendorEmail' || key === 'validityUnit' || key === 'expiryMode') {
-                    return;
-                } else if (key === 'expiryAmount') {
-                    const amount = parseInt(formData.expiryAmount, 10);
-                    const resolved =
-                        formData.expiryMode === 'time' && formData.validityUnit === 'hours'
-                            ? amount * 60
-                            : amount;
-                    data.append('expiryMode', formData.expiryMode);
-                    data.append('expiryAmount', resolved.toString());
-                } else {
-                    data.append(key, value as string);
+            const amount = parseInt(formData.expiryAmount, 10);
+            const resolvedExpiry =
+                formData.expiryMode === 'time' && formData.validityUnit === 'hours'
+                    ? amount * 60
+                    : amount;
+
+            const vendors =
+                sharingMode === 'individual' && formData.vendorEmail
+                    ? [{ email: formData.vendorEmail.toLowerCase(), level: 1 }]
+                    : selectedVendors.map((v, index) => ({ email: v.email.toLowerCase(), level: index + 1 }));
+
+            const selected = files ? Array.from(files) : [];
+            for (const file of selected) {
+                if (!stagePromises.current.has(fileKey(file))) {
+                    queueStaging([file]);
                 }
+            }
+            const stagedGridFsIds = await Promise.all(
+                selected.map((file) => {
+                    const key = fileKey(file);
+                    const staged = stageStatus[key];
+                    if (staged?.status === 'error') {
+                        return Promise.reject(new Error(staged.error || `Failed to prepare "${file.name}".`));
+                    }
+                    if (staged?.gridFSId) return Promise.resolve(staged.gridFSId);
+                    const pending = stagePromises.current.get(key);
+                    if (!pending) {
+                        return Promise.reject(new Error(`Failed to prepare "${file.name}".`));
+                    }
+                    return pending;
+                }),
+            );
+
+            const payload: CreateLinkJson = {
+                firstName: formData.firstName,
+                lastName: formData.lastName,
+                email: formData.email,
+                phone: formData.phone,
+                gender: formData.gender,
+                age: Number(formData.age) || 0,
+                expiryMode: formData.expiryMode,
+                expiryAmount: resolvedExpiry,
+                purpose: formData.topic,
+                purposeDetail: formData.message,
+                allowEditing: formData.allowEditing,
+                allowDownload: formData.allowDownload,
+                vendors,
+                stagedGridFsIds,
+            };
+
+            const response = await fetch('/api/create-link', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
             });
-            data.append('purpose', formData.topic);
-            data.append('purposeDetail', formData.message);
-            data.append('allowEditing', formData.allowEditing ? 'true' : 'false');
-            data.append('allowDownload', formData.allowDownload ? 'true' : 'false');
-            
-            if (sharingMode === 'individual' && formData.vendorEmail) {
-                data.append('vendors', JSON.stringify([{ email: formData.vendorEmail.toLowerCase(), level: 1 }]));
-            } else if (sharingMode === 'group' && selectedVendors.length > 0) {
-                data.append('vendors', JSON.stringify(selectedVendors.map((v, index) => ({ email: v.email.toLowerCase(), level: index + 1 }))));
-            }
-
-            if (files) {
-                for (let i = 0; i < files.length; i++) {
-                    data.append('files', files[i]);
-                }
-            }
-
-            const result = await createSecureLinkWithFiles(data);
+            const result = (await response.json().catch(() => ({}))) as CreateSecureLinkResult;
 
             if (result.success) {
-                router.replace('/dashboard/owner?created=1');
+                setLinkSent(true);
+                setStatus({
+                    message: 'The secure link has been sent to the vendor. They will receive the OTP by email.',
+                    type: 'success',
+                });
+                requestAnimationFrame(() => {
+                    document.getElementById('generated-link-result')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                });
                 return;
             }
             setStatus({ message: result.error || 'Failed to generate link', type: 'error' });
@@ -739,7 +842,16 @@ export default function CreateLinkClient({ initialVendors, hasActiveLink }: Crea
                                             <FileText className={styles.fileIcon} size={18} />
                                             <div>
                                                 <div className={styles.fileName}>{file.name}</div>
-                                                <div className={styles.fileSize}>{formatBytes(file.size)}</div>
+                                                <div className={styles.fileSize}>
+                                                    {formatBytes(file.size)}
+                                                    {stageStatus[fileKey(file)]?.status === 'preparing'
+                                                        ? ' · Preparing…'
+                                                        : stageStatus[fileKey(file)]?.status === 'ready'
+                                                          ? ' · Ready'
+                                                          : stageStatus[fileKey(file)]?.status === 'error'
+                                                            ? ` · ${stageStatus[fileKey(file)]?.error || 'Failed'}`
+                                                            : ''}
+                                                </div>
                                             </div>
                                         </div>
                                         <button 
@@ -754,7 +866,7 @@ export default function CreateLinkClient({ initialVendors, hasActiveLink }: Crea
                             </div>
                         )}
 
-                        {status.message && (
+                        {status.message && (!linkSent || status.type === 'error') && (
                             <div className={`${styles.statusMessage} ${status.type === 'error' ? styles.statusError : styles.statusSuccess}`}>
                                 {status.type === 'success' ? <CheckCircle2 size={18} /> : <XCircle size={18} />}
                                 {status.message}
@@ -763,26 +875,38 @@ export default function CreateLinkClient({ initialVendors, hasActiveLink }: Crea
                         <div style={{ marginTop: '2rem' }}>
                             <button type="submit" disabled={isLoading} className={styles.submitBtn}>
                                 {isLoading ? (
-                                    <span>Generating Link...</span>
+                                    <span>
+                                        {files &&
+                                        Array.from(files).some(
+                                            (file) => stageStatus[fileKey(file)]?.status === 'preparing',
+                                        )
+                                            ? 'Preparing files...'
+                                            : 'Generating Link...'}
+                                    </span>
                                 ) : (
                                     <>
                                         <Lock size={18} />
-                                        {hasActiveLink || generatedLink ? 'Get Another Link' : 'Generate Secure Link'}
+                                        {hasActiveLink || linkSent ? 'Get Another Link' : 'Generate Secure Link'}
                                     </>
                                 )}
                             </button>
                         </div>
                     </div>
                     {/* Results Section */}
-                    {generatedLink && (
-                        <div className={styles.resultsSection}>
+                    {linkSent && (
+                        <div id="generated-link-result" className={styles.resultsSection}>
                             <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', padding: '1.5rem', borderRadius: '8px', marginBottom: '1.5rem' }}>
                                 <h3 style={{ color: '#047857', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', fontSize: '1rem' }}>
                                     <CheckCircle2 size={18} />
-                                    Link generated successfully
+                                    Link sent to the vendor
                                 </h3>
                                 <p style={{ margin: 0, color: '#065f46', fontSize: '0.875rem', lineHeight: 1.5 }}>
-                                    The link and OTP have been sent to the vendor. You don’t need to share the URL yourself.
+                                    The secure link has been sent to the vendor. They will receive the OTP by email — you do not need to share anything yourself.
+                                </p>
+                                <p style={{ margin: '12px 0 0' }}>
+                                    <Link href="/dashboard/owner" style={{ color: '#047857', fontSize: '0.875rem', fontWeight: 600 }}>
+                                        Open owner dashboard
+                                    </Link>
                                 </p>
                             </div>
                         </div>

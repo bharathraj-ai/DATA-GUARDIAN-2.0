@@ -1,12 +1,13 @@
 'use client';
 
 import React, { useState, useCallback, memo, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useCollaborationStore } from '@/store/useCollaborationStore';
 import { PermissionGuard } from '@/components/view/PermissionGuard';
 import { getFilePreview, FilePreviewResult } from '@/actions/get-file-preview';
 import type { FileMetadata } from '@/actions/get-user';
 import { useRouter } from 'next/navigation';
-import { Download, Eye, FileText, Lock, Pencil, ShieldOff } from 'lucide-react';
+import { Download, Eye, FileText, Loader2, Lock, Pencil, ShieldOff, X } from 'lucide-react';
 import styles from './FileList.module.css';
 import { markInternalNavigation } from './sudden-exit-client';
 
@@ -55,6 +56,7 @@ export const FileList = memo(function FileList({ token, files, isOwner }: FileLi
 
     const [isEditLoading, setIsEditLoading] = useState<string | null>(null);
     const [previewData, setPreviewData] = useState<FilePreviewResult | null>(null);
+    const [previewMeta, setPreviewMeta] = useState<{ fileName: string; fileType: string } | null>(null);
     const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
     const [isPreviewLoading, setIsPreviewLoading] = useState(false);
     const [isDownloadLoading, setIsDownloadLoading] = useState<string | null>(null);
@@ -75,8 +77,9 @@ export const FileList = memo(function FileList({ token, files, isOwner }: FileLi
         router.push(`/editor/${token}/${fileId}`);
     }, [token, capabilities.canEdit, router]);
 
-    const handlePreview = useCallback(async (fileId: string, fileType: string) => {
+    const handlePreview = useCallback(async (fileId: string, fileType: string, fileName: string) => {
         if (!capabilities.canPreview) return;
+        setPreviewMeta({ fileName, fileType });
         setIsPreviewLoading(true);
         try {
             setPdfBlobUrl((prev) => {
@@ -89,6 +92,7 @@ export const FileList = memo(function FileList({ token, files, isOwner }: FileLi
                 if (!response.ok) {
                     const errorData = await response.json().catch(() => ({}));
                     alert(errorData.error || 'Failed to open preview');
+                    setPreviewMeta(null);
                     return;
                 }
                 const blob = await response.blob();
@@ -108,10 +112,12 @@ export const FileList = memo(function FileList({ token, files, isOwner }: FileLi
                 setPreviewData(res);
             } else {
                 alert(res.error || 'Failed to open preview');
+                setPreviewMeta(null);
             }
         } catch (error) {
             console.error('Preview error:', error);
             alert('An error occurred while opening preview.');
+            setPreviewMeta(null);
         } finally {
             setIsPreviewLoading(false);
         }
@@ -142,7 +148,24 @@ export const FileList = memo(function FileList({ token, files, isOwner }: FileLi
             return null;
         });
         setPreviewData(null);
+        setPreviewMeta(null);
     }, []);
+
+    const previewOpen = Boolean(previewMeta);
+
+    useEffect(() => {
+        if (!previewOpen) return;
+        const prevOverflow = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') closePreview();
+        };
+        window.addEventListener('keydown', onKey);
+        return () => {
+            document.body.style.overflow = prevOverflow;
+            window.removeEventListener('keydown', onKey);
+        };
+    }, [previewOpen, closePreview]);
 
     const handleDownload = useCallback(async (fileId: string, fileName: string) => {
         if (!capabilities.canDownload) return;
@@ -223,18 +246,18 @@ export const FileList = memo(function FileList({ token, files, isOwner }: FileLi
                                     </div>
                                     <div className={styles.actions}>
                                         <PermissionGuard requiredCapability="canEdit">
-                                            <button
-                                                type="button"
-                                                onClick={() => handleEdit(file.id)}
-                                                disabled={!!isEditLoading}
-                                                className={`${styles.btn} ${isPdf ? styles.btnDanger : styles.btnGhost}`}
-                                            >
-                                                {isEditLoading === file.id
-                                                    ? 'Opening…'
-                                                    : isPdf
-                                                        ? <><Lock size={14} /> Secure preview</>
+                                            {!isPdf && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleEdit(file.id)}
+                                                    disabled={!!isEditLoading}
+                                                    className={`${styles.btn} ${styles.btnGhost}`}
+                                                >
+                                                    {isEditLoading === file.id
+                                                        ? 'Opening…'
                                                         : <><Pencil size={14} /> Edit</>}
-                                            </button>
+                                                </button>
+                                            )}
                                         </PermissionGuard>
                                         <PermissionGuard requiredCapability="canDownload">
                                             <button
@@ -250,13 +273,15 @@ export const FileList = memo(function FileList({ token, files, isOwner }: FileLi
                                         </PermissionGuard>
                                         <button
                                             type="button"
-                                            onClick={() => handlePreview(file.id, file.fileType)}
+                                            onClick={() => handlePreview(file.id, file.fileType, file.fileName)}
                                             disabled={isPreviewLoading}
                                             className={`${styles.btn} ${styles.btnPreview}`}
                                         >
-                                            {isPreviewLoading
-                                                ? 'Loading…'
-                                                : <><Eye size={14} /> Preview</>}
+                                            {isPreviewLoading && previewMeta?.fileName === file.fileName
+                                                ? 'Opening…'
+                                                : isPdf
+                                                    ? <><Lock size={14} /> View file</>
+                                                    : <><Eye size={14} /> Preview</>}
                                         </button>
                                     </div>
                                 </div>
@@ -266,70 +291,87 @@ export const FileList = memo(function FileList({ token, files, isOwner }: FileLi
                 </div>
             </PermissionGuard>
 
-            {previewData && (
-                <div className={styles.modal} onClick={closePreview}>
-                    <div className={styles.modalCard} onClick={(e) => e.stopPropagation()}>
-                        <div className={styles.modalHead}>
-                            <h3>Secure preview</h3>
-                            <button type="button" className={styles.close} onClick={closePreview} aria-label="Close preview">
-                                ×
-                            </button>
+            {previewOpen && createPortal(
+                <div
+                    className={styles.viewer}
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="secure-file-viewer-title"
+                >
+                    <div className={styles.viewerHead}>
+                        <div className={styles.viewerTitle}>
+                            <Lock size={16} />
+                            <div>
+                                <p className={styles.viewerKicker}>Owner file</p>
+                                <h3 id="secure-file-viewer-title">{previewMeta?.fileName || 'Secure preview'}</h3>
+                            </div>
                         </div>
-                        {previewData.restricted && previewData.restrictionType && (
-                            <div className={styles.restrict}>{previewData.restrictionType}</div>
-                        )}
-                        <div className={styles.modalBody}>
-                            {previewData.type === 'image' && (
-                                <img
-                                    src={(pdfBlobUrl || previewData.content) as string}
-                                    alt="Preview"
-                                />
-                            )}
-                            {previewData.type === 'pdf' && (
-                                pdfBlobUrl ? (
-                                    <iframe
-                                        src={`${pdfBlobUrl}#toolbar=0&navpanes=0&scrollbar=1&view=FitH`}
-                                        title="PDF Preview"
-                                    />
-                                ) : (
-                                    <p>Preparing PDF preview…</p>
-                                )
-                            )}
-                            {previewData.type === 'text' && (
-                                <pre>{previewData.content as string}</pre>
-                            )}
-                            {previewData.type === 'word' && typeof previewData.content === 'string' && (
-                                <iframe
-                                    className={styles.wordFrame}
-                                    title="Word preview"
-                                    sandbox=""
-                                    srcDoc={`<!DOCTYPE html><html><head><meta charset="utf-8"><style>
-                                      body{font-family:Calibri,'Segoe UI',Inter,sans-serif;font-size:15px;line-height:1.55;color:#0f172a;margin:24px;background:#fff}
-                                      p{margin:0 0 10px} h1,h2,h3{margin:16px 0 8px} table{border-collapse:collapse;width:100%}
-                                      td,th{border:1px solid #cbd5e1;padding:6px 8px} img{max-width:100%;height:auto}
-                                    </style></head><body>${previewData.content}</body></html>`}
-                                />
-                            )}
-                            {previewData.type === 'spreadsheet' && Array.isArray(previewData.content) && (
-                                <div className={styles.tableWrap}>
-                                    <table>
-                                        <tbody>
-                                            {(previewData.content as unknown[][]).map((row: unknown[], i: number) => (
-                                                <tr key={i} style={{ fontWeight: i === 0 ? 700 : 400 }}>
-                                                    {row.map((cell: unknown, j: number) => (
-                                                        <td key={j}>
-                                                            {formatPreviewCell(cell)}
-                                                        </td>
-                                                    ))}
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            )}
-                        </div>
+                        <button type="button" className={styles.close} onClick={closePreview} aria-label="Close file viewer">
+                            <X size={18} />
+                        </button>
                     </div>
-                </div>
+                    {previewData?.restricted && previewData.restrictionType && (
+                        <div className={styles.restrict}>{previewData.restrictionType}</div>
+                    )}
+                    <div className={`${styles.viewerStage} ${previewData?.type === 'image' ? styles.viewerStageImage : ''}`}>
+                        {isPreviewLoading && !previewData && (
+                            <div className={styles.viewerLoading}>
+                                <Loader2 size={22} className={styles.spin} />
+                                Opening file…
+                            </div>
+                        )}
+                        {previewData?.type === 'image' && (
+                            <img
+                                src={(pdfBlobUrl || previewData.content) as string}
+                                alt={previewMeta?.fileName || 'Preview'}
+                            />
+                        )}
+                        {previewData?.type === 'pdf' && (
+                            pdfBlobUrl ? (
+                                <iframe
+                                    src={`${pdfBlobUrl}#toolbar=0&navpanes=0&scrollbar=1&view=FitH`}
+                                    title={previewMeta?.fileName || 'PDF preview'}
+                                />
+                            ) : (
+                                <div className={styles.viewerLoading}>Preparing PDF…</div>
+                            )
+                        )}
+                        {previewData?.type === 'text' && (
+                            <pre>{previewData.content as string}</pre>
+                        )}
+                        {previewData?.type === 'word' && typeof previewData.content === 'string' && (
+                            <iframe
+                                className={styles.wordFrame}
+                                title={previewMeta?.fileName || 'Word preview'}
+                                sandbox=""
+                                srcDoc={`<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+                                  html,body{height:100%;margin:0}
+                                  body{font-family:Calibri,'Segoe UI',Inter,sans-serif;font-size:15px;line-height:1.55;color:#0f172a;padding:28px 36px;background:#fff;box-sizing:border-box}
+                                  p{margin:0 0 10px} h1,h2,h3{margin:16px 0 8px} table{border-collapse:collapse;width:100%}
+                                  td,th{border:1px solid #cbd5e1;padding:6px 8px} img{max-width:100%;height:auto}
+                                </style></head><body>${previewData.content}</body></html>`}
+                            />
+                        )}
+                        {previewData?.type === 'spreadsheet' && Array.isArray(previewData.content) && (
+                            <div className={styles.tableWrap}>
+                                <table>
+                                    <tbody>
+                                        {(previewData.content as unknown[][]).map((row: unknown[], i: number) => (
+                                            <tr key={i} style={{ fontWeight: i === 0 ? 700 : 400 }}>
+                                                {row.map((cell: unknown, j: number) => (
+                                                    <td key={j}>
+                                                        {formatPreviewCell(cell)}
+                                                    </td>
+                                                ))}
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+                    </div>
+                </div>,
+                document.body,
             )}
         </>
     );

@@ -153,6 +153,35 @@ describe('production source contracts', () => {
     expect(src).toMatch(/\/api\/health\?ready=1/);
   });
 
+  it('suspicious screenshot revokes on first detection and never restores locally', async () => {
+    const fs = await import('fs/promises');
+    const path = await import('path');
+    const src = await fs.readFile(
+      path.join(process.cwd(), 'src/components/view/SecurityShield.tsx'),
+      'utf8',
+    );
+    expect(src).toMatch(/No warning strikes/);
+    expect(src).toMatch(/lastMetaKeyAtRef/);
+    expect(src).toMatch(/suspiciousRevokeSentRef\.current\) return/);
+    expect(src).not.toMatch(/suspiciousRevokeSentRef\.current = false/);
+    expect(src).not.toMatch(/It will restore after security checks pass/);
+  });
+
+  it('suspicious-activity revoke returns before cleanup (after()) and notifies owner without blocking', async () => {
+    const fs = await import('fs/promises');
+    const path = await import('path');
+    const src = await fs.readFile(
+      path.join(process.cwd(), 'src/app/api/security/suspicious-activity/route.ts'),
+      'utf8',
+    );
+    expect(src).toMatch(/from 'next\/server'/);
+    expect(src).toMatch(/runAfterResponse/);
+    expect(src).toMatch(/revokeForSuspiciousActivity/);
+    expect(src).toMatch(/notifySuspiciousActivity/);
+    const withoutAfter = src.replace(/runAfterResponse\([\s\S]*?\}\);/g, '');
+    expect(withoutAfter).not.toMatch(/executeSingleLinkCleanup/);
+  });
+
   it('revoke returns before data cleanup (after())', async () => {
     const fs = await import('fs/promises');
     const path = await import('path');
@@ -167,6 +196,52 @@ describe('production source contracts', () => {
     expect(fnSlice).toMatch(/runAfterResponse/);
     const withoutAfter = fnSlice.replace(/runAfterResponse\([\s\S]*?\}\);/g, '');
     expect(withoutAfter).not.toMatch(/executeSingleLinkCleanup/);
+  });
+
+  it('create-link returns before OTP email (after())', async () => {
+    const fs = await import('fs/promises');
+    const path = await import('path');
+    const src = await fs.readFile(
+      path.join(process.cwd(), 'src/actions/create-link-with-files.ts'),
+      'utf8',
+    );
+    expect(src).toMatch(/from 'next\/server'/);
+    expect(src).toMatch(/runAfterResponse/);
+    const emailIdx = src.indexOf('sendOTPEmail(');
+    const afterIdx = src.indexOf('runAfterResponse');
+    const returnIdx = src.indexOf('success: true');
+    expect(emailIdx).toBeGreaterThan(afterIdx);
+    expect(returnIdx).toBeGreaterThan(-1);
+    expect(src).toMatch(/prisma\.secureLink\.create/);
+    expect(src).not.toMatch(/\$transaction\(\[/);
+    expect(src).toMatch(/Promise\.allSettled/);
+    expect(src).toMatch(/createSecureLinkFromJson/);
+    expect(src).toMatch(/loadStagedFiles/);
+    const stageSrc = await fs.readFile(
+      path.join(process.cwd(), 'src/lib/create-link-stage.ts'),
+      'utf8',
+    );
+    expect(stageSrc).toMatch(/encryptBuffer/);
+    expect(stageSrc).toMatch(/uploadToMongo/);
+    const mongoOps = await fs.readFile(
+      path.join(process.cwd(), 'src/lib/mongo/operations.ts'),
+      'utf8',
+    );
+    expect(mongoOps).toMatch(/uploads\.chunks/);
+    expect(mongoOps).toMatch(/insertOne/);
+  });
+
+  it('create-link client posts JSON to /api/create-link (not a Server Action)', async () => {
+    const fs = await import('fs/promises');
+    const path = await import('path');
+    const src = await fs.readFile(
+      path.join(process.cwd(), 'src/app/create-link/CreateLinkClient.tsx'),
+      'utf8',
+    );
+    expect(src).toMatch(/fetch\('\/api\/create-link'/);
+    expect(src).toMatch(/\/api\/create-link\/stage/);
+    expect(src).toMatch(/application\/json/);
+    expect(src).not.toMatch(/from '@\/actions\/create-link-with-files'/);
   });
 
   it('break returns before OTP email (after())', async () => {

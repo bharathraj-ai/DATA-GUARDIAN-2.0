@@ -91,11 +91,18 @@ export async function getMongoClient(): Promise<MongoClient> {
     const uri = await expandMongoSrvUri(rawUri);
     const client = new MongoClient(uri, {
       maxPoolSize: 10,
-      minPoolSize: process.env.NODE_ENV === 'production' ? 1 : 0,
-      maxIdleTimeMS: 60_000,
-      connectTimeoutMS: 8000,
-      socketTimeoutMS: 30_000,
-      serverSelectionTimeoutMS: 8000,
+      minPoolSize: 1,
+      maxIdleTimeMS: 600_000,
+      connectTimeoutMS: 15_000,
+      socketTimeoutMS: 45_000,
+      serverSelectionTimeoutMS: 20_000,
+      heartbeatFrequencyMS: 10_000,
+      // Streaming hellos often die on Windows/NAT ("server monitor timeout").
+      serverMonitoringMode: 'poll',
+      // Don't wait for replica-set majority — that added multiple seconds per small upload.
+      writeConcern: { w: 1, wtimeoutMS: 8000 },
+      retryWrites: true,
+      retryReads: true,
       serverApi: {
         version: ServerApiVersion.v1,
         strict: false,
@@ -159,4 +166,49 @@ export function isMongoConfigured(): boolean {
 export async function warmMongoConnection(): Promise<void> {
   if (!isMongoConfigured()) return;
   await getMongoClient();
+}
+
+export function isTransientMongoError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  const name = error instanceof Error ? error.name : '';
+  return (
+    name === 'MongoNetworkError' ||
+    name === 'MongoServerSelectionError' ||
+    name === 'MongoNetworkTimeoutError' ||
+    /server monitor timeout|interrupted|ECONNRESET|ETIMEDOUT|ENOTFOUND|ECONNREFUSED|not connected|connection.*closed|topology was destroyed|MongoExpiredSessionError|SSL|tls/i.test(
+      msg,
+    )
+  );
+}
+
+export function mongoFriendlyError(error: unknown): string {
+  if (isTransientMongoError(error)) {
+    return 'Could not reach file storage. Please attach the file again.';
+  }
+  return error instanceof Error ? error.message : 'File storage failed.';
+}
+
+export async function resetMongoConnection(): Promise<void> {
+  const client = _mongoClient;
+  _mongoClient = null;
+  _db = null;
+  _gridFSBucket = null;
+  _connecting = null;
+  if (client) {
+    await client.close().catch(() => {});
+  }
+}
+
+export async function withMongoRetry<T>(work: () => Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    if (!isTransientMongoError(error)) throw error;
+    logger.warn('[Mongo] Stale connection — reconnecting and retrying once', {
+      message: error instanceof Error ? error.message : String(error),
+    });
+    await resetMongoConnection();
+    await getMongoClient();
+    return work();
+  }
 }

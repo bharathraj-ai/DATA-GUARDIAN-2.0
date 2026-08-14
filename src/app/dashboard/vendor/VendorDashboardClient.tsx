@@ -129,13 +129,19 @@ export default function VendorDashboardClient({
     };
 
     const isLive = (status: string) => status === 'active' || status === 'used';
-    const filteredLinks = filter === 'all' ? links : links.filter((l) => l.status === filter);
+    const matchesFilter = (status: string, f: typeof filter) => {
+        if (f === 'all') return true;
+        if (f === 'used') return status === 'used' || status === 'completed';
+        if (f === 'revoked') return status === 'revoked' || status === 'suspicious';
+        return status === f;
+    };
+    const filteredLinks = filter === 'all' ? links : links.filter((l) => matchesFilter(l.status, filter));
     const counts = {
         all: links.length,
         active: links.filter((l) => l.status === 'active').length,
         expired: links.filter((l) => l.status === 'expired').length,
-        revoked: links.filter((l) => l.status === 'revoked').length,
-        used: links.filter((l) => l.status === 'used').length,
+        revoked: links.filter((l) => l.status === 'revoked' || l.status === 'suspicious').length,
+        used: links.filter((l) => l.status === 'used' || l.status === 'completed').length,
         break: links.filter((l) => l.status === 'break').length,
     };
 
@@ -163,8 +169,8 @@ export default function VendorDashboardClient({
                                 { label: 'Total Received', value: counts.all, iconClass: 'stat-icon-total', icon: <Inbox size={20} /> },
                                 { label: 'Ready to View', value: counts.active, iconClass: 'stat-icon-live', icon: <Play size={20} /> },
                                 { label: 'On Break', value: counts.break, iconClass: 'stat-icon-revoked', icon: <Coffee size={20} /> },
-                                { label: 'Viewed', value: counts.used, iconClass: 'stat-icon-viewed', icon: <Eye size={20} /> },
-                                { label: 'Expired', value: counts.expired, iconClass: 'stat-icon-expired', icon: <Clock size={20} /> },
+                                { label: 'Completed cleanly', value: counts.used, iconClass: 'stat-icon-viewed', icon: <Eye size={20} /> },
+                                { label: 'Revoked / suspicious', value: counts.revoked, iconClass: 'stat-icon-expired', icon: <Clock size={20} /> },
                             ].map((stat) => (
                                 <div key={stat.label} className="stat-card-premium">
                                     <div className={`stat-icon-wrapper ${stat.iconClass}`}>
@@ -245,6 +251,30 @@ export default function VendorDashboardClient({
                                                                 }}>
                                                                     <Coffee size={12} />
                                                                     On Break
+                                                                </span>
+                                                            )}
+                                                            {(link.status === 'revoked' || link.status === 'suspicious') && (
+                                                                <span style={{
+                                                                    padding: '4px 10px', borderRadius: '12px', fontSize: '0.75rem',
+                                                                    fontWeight: 600, background: 'rgba(239, 68, 68, 0.15)', color: '#dc2626',
+                                                                }}>
+                                                                    {link.status === 'suspicious' ? 'Suspicious — access denied' : 'Revoked'}
+                                                                </span>
+                                                            )}
+                                                            {link.status === 'completed' && (
+                                                                <span style={{
+                                                                    padding: '4px 10px', borderRadius: '12px', fontSize: '0.75rem',
+                                                                    fontWeight: 600, background: 'rgba(34, 197, 94, 0.15)', color: '#16a34a',
+                                                                }}>
+                                                                    Completed cleanly
+                                                                </span>
+                                                            )}
+                                                            {link.status === 'expired' && (
+                                                                <span style={{
+                                                                    padding: '4px 10px', borderRadius: '12px', fontSize: '0.75rem',
+                                                                    fontWeight: 600, background: '#F3F4F6', color: '#4B5563',
+                                                                }}>
+                                                                    Expired
                                                                 </span>
                                                             )}
                                                             {isLive(link.status) && getTimeRemaining(link.expiresAt) && (

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useRef } from 'react';
+import React from 'react';
 import { SecurityShield } from './SecurityShield';
 import { SuddenExitGuard } from './SuddenExitGuard';
 
@@ -11,38 +11,15 @@ interface SecureViewWrapperProps {
 }
 
 /**
- * SecureViewWrapper — Wraps the secure view content with SecurityShield protections.
- * 
- * Handles:
- * - Tab switch limit enforcement
- * - Session termination callbacks
- * - Passes viewer identity to watermark
+ * Wraps secure view/editor content with screenshot and session protections.
+ * Suspicious activity terminates the vendor session inside SecurityShield
+ * (no reload — that would restore decrypted data if revoke is still in flight).
  */
 export function SecureViewWrapper({ token, viewerEmail, children }: SecureViewWrapperProps) {
-    const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    useEffect(() => () => {
-        if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
-    }, []);
-
-    const handleSessionTerminate = useCallback((reason: string) => {
-        if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
-        reloadTimerRef.current = setTimeout(() => {
-            window.location.reload();
-        }, 5000);
-    }, []);
-
-    const handleTabSwitch = useCallback((count: number) => {
-        // Parent can implement additional logic here
-        // e.g., call a server action to flag the session
-    }, []);
-
     return (
         <SecurityShield
             token={token}
             viewerEmail={viewerEmail}
-            onTabSwitch={handleTabSwitch}
-            onSessionTerminate={handleSessionTerminate}
-            maxTabSwitches={3}
             enableWatermark={true}
         >
             <SuddenExitGuard token={token} />
