@@ -26,14 +26,27 @@ import React, {
     memo,
     useMemo,
 } from 'react';
+import {
+    FORENSIC_WATERMARK_ROWS,
+    buildForensicWatermark,
+} from '@/lib/security/forensic-watermark';
 
 interface SecurityShieldProps {
     token: string;
     viewerEmail?: string;
+    /** Short device fingerprint for forensic watermark attribution. */
+    deviceHash?: string;
     onTabSwitch?: (count: number) => void;
     onSessionTerminate?: (reason: string) => void;
     maxTabSwitches?: number;
     enableWatermark?: boolean;
+    /**
+     * When true, ordinary window blur also triggers first-hit revoke
+     * (high-sensitivity shares). Default false — blur still hides content.
+     */
+    strictCaptureMode?: boolean;
+    /** Blank cover after this many ms idle (0 disables). Default 45000. */
+    idleCoverMs?: number;
     children?: React.ReactNode;
 }
 
@@ -147,10 +160,13 @@ function toAuditAction(action: SecurityEvent): string {
 export const SecurityShield = memo(function SecurityShield({
     token,
     viewerEmail,
+    deviceHash,
     onTabSwitch,
     onSessionTerminate,
     maxTabSwitches = 1,
     enableWatermark = true,
+    strictCaptureMode = false,
+    idleCoverMs = 45_000,
     children,
 }: SecurityShieldProps) {
     const [tabSwitchCount, setTabSwitchCount] = useState(0);
@@ -471,6 +487,9 @@ export const SecurityShield = memo(function SecurityShield({
         }
     }, []);
 
+    const strictCaptureModeRef = useRef(strictCaptureMode);
+    strictCaptureModeRef.current = strictCaptureMode;
+
     activatePrivacyCoverRef.current = activatePrivacyCover;
     deactivatePrivacyCoverRef.current = deactivatePrivacyCover;
     flashWarningRef.current = flashWarning;
@@ -709,6 +728,11 @@ export const SecurityShield = memo(function SecurityShield({
                 reportSuspiciousRevokeRef.current('os-snip-blur', 'screenshot');
                 return;
             }
+            if (strictCaptureModeRef.current) {
+                logSecurityEventRef.current('SCREENSHOT_ATTEMPT', { via: 'strict-blur' });
+                reportSuspiciousRevokeRef.current('strict-blur', 'screenshot');
+                return;
+            }
             markWindowLeft('blur');
         };
 
@@ -771,6 +795,23 @@ export const SecurityShield = memo(function SecurityShield({
             window.removeEventListener('pagehide', handlePageHide);
         };
     }, [sessionTerminated, maxTabSwitches, markWindowLeft]);
+
+    // Screen-share / getDisplayMedia — browsers cannot block OS capture, but if
+    // the page itself is asked to share the display, treat it as capture intent.
+    useEffect(() => {
+        if (sessionTerminated) return;
+        const md = navigator.mediaDevices;
+        if (!md || typeof md.getDisplayMedia !== 'function') return;
+        const original = md.getDisplayMedia.bind(md);
+        md.getDisplayMedia = ((...args: Parameters<typeof md.getDisplayMedia>) => {
+            logSecurityEventRef.current('SCREENSHOT_ATTEMPT', { via: 'getDisplayMedia' });
+            reportSuspiciousRevokeRef.current('getDisplayMedia', 'screenshot');
+            return Promise.reject(new DOMException('Screen capture is blocked by Secure Protocol.', 'NotAllowedError'));
+        }) as typeof md.getDisplayMedia;
+        return () => {
+            md.getDisplayMedia = original;
+        };
+    }, [sessionTerminated]);
 
     // ═══════════════════════════════════════════════════════════════
     // CLIPBOARD
@@ -953,11 +994,43 @@ export const SecurityShield = memo(function SecurityShield({
         };
     }, [flushEvents]);
 
+    // Idle auto-cover — reduces phone-camera / unattended screen exposure
+    useEffect(() => {
+        if (sessionTerminated || idleCoverMs <= 0) return;
+        let timer: ReturnType<typeof setTimeout> | null = null;
+        const arm = () => {
+            if (timer) clearTimeout(timer);
+            timer = setTimeout(() => {
+                if (sessionTerminatedRef.current) return;
+                activatePrivacyCoverRef.current('idle-timeout');
+            }, idleCoverMs);
+        };
+        const opts: AddEventListenerOptions = { capture: true, passive: true };
+        const events = ['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart'] as const;
+        for (const ev of events) window.addEventListener(ev, arm, opts);
+        arm();
+        return () => {
+            if (timer) clearTimeout(timer);
+            for (const ev of events) window.removeEventListener(ev, arm, opts);
+        };
+    }, [sessionTerminated, idleCoverMs]);
+
+    const [watermarkTick, setWatermarkTick] = useState(0);
+    useEffect(() => {
+        if (!enableWatermark || sessionTerminated) return;
+        const id = setInterval(() => setWatermarkTick((n) => n + 1), 60_000);
+        return () => clearInterval(id);
+    }, [enableWatermark, sessionTerminated]);
+
     const watermarkText = useMemo(() => {
-        const email = viewerEmail || 'Protected Session';
-        const time = new Date().toISOString().split('T')[0];
-        return `${email} • ${time} • ${token.substring(0, 8)}`;
-    }, [viewerEmail, token]);
+        void watermarkTick;
+        return buildForensicWatermark({
+            viewerEmail,
+            token,
+            deviceHash,
+            at: new Date(),
+        }).line;
+    }, [viewerEmail, token, deviceHash, watermarkTick]);
 
     const warningGradient =
         warningLevel === 'critical'
@@ -995,7 +1068,7 @@ export const SecurityShield = memo(function SecurityShield({
                         visibility: hidden !important;
                     }
                     body::after {
-                        content: 'PRINTING IS DISABLED — This document is protected by Data Guardian.';
+                        content: 'PRINTING IS DISABLED — This document is protected by Secure Protocol.';
                         display: block !important;
                         visibility: visible !important;
                         font-size: 24px;
@@ -1096,27 +1169,28 @@ export const SecurityShield = memo(function SecurityShield({
                         opacity: isProtected ? 0 : 1,
                     }}
                 >
-                    {Array.from({ length: 6 }).map((_, i) => (
+                    {Array.from({ length: FORENSIC_WATERMARK_ROWS }).map((_, i) => (
                         <div
                             key={i}
                             style={{
                                 position: 'absolute',
-                                top: `${i * 18}%`,
-                                left: `${(i % 2) * 15}px`,
-                                width: '100%',
-                                transform: 'rotate(-25deg)',
+                                top: `${(i * 100) / FORENSIC_WATERMARK_ROWS}%`,
+                                left: `${(i % 3) * 8}px`,
+                                width: '140%',
+                                transform: 'rotate(-28deg)',
                                 whiteSpace: 'nowrap',
-                                color: 'rgba(255,255,255,0.04)',
-                                fontSize: '13px',
+                                color: 'rgba(15, 23, 42, 0.11)',
+                                fontSize: '11px',
                                 fontWeight: 600,
-                                letterSpacing: '1px',
-                                fontFamily: 'monospace',
+                                letterSpacing: '0.5px',
+                                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
                                 userSelect: 'none',
                             }}
                         >
                             {watermarkText}
-                            <span style={{ margin: '0 60px' }}>{watermarkText}</span>
-                            <span style={{ margin: '0 60px' }}>{watermarkText}</span>
+                            <span style={{ margin: '0 36px' }}>{watermarkText}</span>
+                            <span style={{ margin: '0 36px' }}>{watermarkText}</span>
+                            <span style={{ margin: '0 36px' }}>{watermarkText}</span>
                         </div>
                     ))}
                 </div>

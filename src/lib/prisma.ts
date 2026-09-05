@@ -154,7 +154,18 @@ function createPrismaClient(): PrismaClient {
     query: {
       async $allOperations({ model, operation, args, query }) {
         if (model === 'AuditLog' && operation === 'create') {
-          const data = (args as { data?: { ownerId?: string | null; linkId?: string | null } }).data;
+          const data = (args as {
+            data?: {
+              ownerId?: string | null;
+              linkId?: string | null;
+              action?: string;
+              reason?: string | null;
+              metadata?: string | null;
+              timestamp?: Date;
+              prevHash?: string | null;
+              entryHash?: string | null;
+            };
+          }).data;
           if (data && !data.ownerId && data.linkId) {
             const cached = getCachedOwnerId(data.linkId);
             if (cached) {
@@ -168,6 +179,32 @@ function createPrismaClient(): PrismaClient {
                 data.ownerId = link.ownerId;
                 cacheOwnerId(data.linkId, link.ownerId);
               }
+            }
+          }
+          if (data && !data.entryHash) {
+            try {
+              const { hashAuditEntry } = await import('@/lib/security/audit-chain');
+              const last = await client.auditLog.findFirst({
+                orderBy: { timestamp: 'desc' },
+                select: { entryHash: true },
+              });
+              const prevHash = last?.entryHash || '0'.repeat(64);
+              const timestamp = (data.timestamp instanceof Date
+                ? data.timestamp
+                : new Date()
+              ).toISOString();
+              data.prevHash = prevHash;
+              data.entryHash = hashAuditEntry({
+                prevHash,
+                action: String(data.action || ''),
+                timestamp,
+                linkId: String(data.linkId || ''),
+                ownerId: String(data.ownerId || ''),
+                reason: String(data.reason || ''),
+                metadata: String(data.metadata || ''),
+              });
+            } catch {
+              // Tests / missing HMAC secret: write the row without a chain.
             }
           }
         }

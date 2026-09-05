@@ -155,7 +155,7 @@ function emailShell(opts: {
           </tr>
           <tr>
             <td style="background:#f8fafc;padding:20px 28px;border-top:1px solid #e5e7eb;text-align:center;">
-              <p style="margin:0;color:#94a3b8;font-size:12px;">Data Guardian · AES-256 · OTP protected</p>
+              <p style="margin:0;color:#94a3b8;font-size:12px;">Secure Protocol · AES-256 · OTP protected</p>
             </td>
           </tr>
         </table>
@@ -184,7 +184,7 @@ export async function sendOTPEmail(
         process.env.NEXT_PUBLIC_BASE_URL ||
         'http://localhost:3000';
     const shareLink = `${appUrl}/share/${token}`;
-    const senderName = process.env.EMAIL_FROM_NAME || 'Data Guardian Security';
+    const senderName = process.env.EMAIL_FROM_NAME || 'Secure Protocol Security';
     const { from, user } = readEmailEnv();
     const validity = formatValidity(expiresMinutes);
     const otpDisplay = formatOtpDisplay(otp);
@@ -232,7 +232,7 @@ export async function sendOTPEmail(
         getTransporter().sendMail({
             from: `"${senderName}" <${from || user}>`,
             to: vendorEmail,
-            subject: 'Data Guardian: Secure access OTP',
+            subject: 'Secure Protocol: Secure access OTP',
             text: `You have been granted temporary access to secure data.\n\nOTP: ${otp}\nValid for ${validity}.\nDo not share this OTP with anyone.`,
             html: emailShell({
                 title: 'Secure Access',
@@ -261,7 +261,7 @@ export async function sendCompletedWorkEmail(
     purpose: string,
     attachments: FileAttachment[],
 ): Promise<void> {
-    const senderName = process.env.EMAIL_FROM_NAME || 'Data Guardian Security';
+    const senderName = process.env.EMAIL_FROM_NAME || 'Secure Protocol Security';
     const fileCount = attachments.length;
     const { from, user } = readEmailEnv();
     const safeVendor = escapeHtml(vendorEmail);
@@ -301,7 +301,7 @@ export async function sendCompletedWorkEmail(
         getTransporter().sendMail({
             from: `"${senderName}" <${from || user}>`,
             to: ownerEmail,
-            subject: `Data Guardian: Work delivered (${fileCount} file${fileCount === 1 ? '' : 's'})`,
+            subject: `Secure Protocol: Work delivered (${fileCount} file${fileCount === 1 ? '' : 's'})`,
             text: `Work completed & delivered\n\nVendor: ${vendorEmail}\nPurpose: ${purpose || 'N/A'}\nFiles (${fileCount}):\n${attachments.map((a) => `- ${a.filename}`).join('\n')}\n\nFiles are attached to this email.`,
             html: emailShell({
                 title: 'Work Delivered',
@@ -329,7 +329,7 @@ export async function sendNotificationEmail(
     html: string,
     text: string,
 ): Promise<void> {
-    const senderName = process.env.EMAIL_FROM_NAME || 'Data Guardian Security';
+    const senderName = process.env.EMAIL_FROM_NAME || 'Secure Protocol Security';
     const { from, user } = readEmailEnv();
 
     await sendWithTimeout(

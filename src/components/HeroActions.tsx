@@ -1,24 +1,26 @@
 'use client';
 
 import Link from 'next/link';
-import { useSession } from 'next-auth/react';
 import { ArrowRight, Shield } from 'lucide-react';
+import { useDeferredMarketingSession } from '@/components/useDeferredMarketingSession';
+import { canCreateSecureLinks, dashboardPathForRole, normalizeRole, roleDisplayName } from '@/lib/security/role-helpers';
 
 /**
  * Light-theme hero CTA.
- * New users → join + role select. Signed-in users → their dashboard.
- * Existing logged-out users use header Sign In.
+ * New users → join + role select. Signed-in users → their dashboard
+ * after a deferred session check (no SessionProvider on the landing tree).
  */
 export default function HeroActions() {
-    const { data: session, status } = useSession();
+    const { session, status } = useDeferredMarketingSession();
     const isAuthed = status === 'authenticated' && session?.user;
-    const isOwner = session?.user?.role === 'OWNER';
+    const role = normalizeRole(session?.user?.role);
     const onboardingDone =
         session?.user?.onboardingStep === 'COMPLETE' ||
         (session?.user?.onboardingStep == null && session?.user?.roleSelected);
 
     if (isAuthed && onboardingDone) {
-        const href = isOwner ? '/dashboard/owner' : '/dashboard/vendor';
+        const href = dashboardPathForRole(role);
+        const label = roleDisplayName(role).toLowerCase();
         return (
             <div className="hero-actions">
                 <Link href={href} className="dg-launch">
@@ -27,7 +29,9 @@ export default function HeroActions() {
                     </span>
                     <span className="dg-launch-copy">
                         <span className="dg-launch-label">Welcome back</span>
-                        <span className="dg-launch-title">Open your {isOwner ? 'owner' : 'vendor'} dashboard</span>
+                        <span className="dg-launch-title">
+                            Open your {canCreateSecureLinks(role) ? 'team leader' : label} dashboard
+                        </span>
                     </span>
                     <span className="dg-launch-go" aria-hidden="true">
                         <ArrowRight size={18} />
@@ -44,7 +48,7 @@ export default function HeroActions() {
                     <Shield size={20} strokeWidth={2.2} />
                 </span>
                 <span className="dg-launch-copy">
-                    <span className="dg-launch-label">New to Data Guardian</span>
+                    <span className="dg-launch-label">New to Secure Protocol</span>
                     <span className="dg-launch-title">Start sharing your data</span>
                 </span>
                 <span className="dg-launch-go" aria-hidden="true">

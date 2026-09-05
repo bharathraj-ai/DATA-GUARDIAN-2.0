@@ -207,14 +207,14 @@ describe('production source contracts', () => {
     );
     expect(src).toMatch(/from 'next\/server'/);
     expect(src).toMatch(/runAfterResponse/);
-    const emailIdx = src.indexOf('sendOTPEmail(');
+    expect(src).toMatch(/enqueueOtpEmails/);
+    const processIdx = src.indexOf('processDueJobs');
     const afterIdx = src.indexOf('runAfterResponse');
     const returnIdx = src.indexOf('success: true');
-    expect(emailIdx).toBeGreaterThan(afterIdx);
+    expect(processIdx).toBeGreaterThan(afterIdx);
     expect(returnIdx).toBeGreaterThan(-1);
     expect(src).toMatch(/prisma\.secureLink\.create/);
     expect(src).not.toMatch(/\$transaction\(\[/);
-    expect(src).toMatch(/Promise\.allSettled/);
     expect(src).toMatch(/createSecureLinkFromJson/);
     expect(src).toMatch(/loadStagedFiles/);
     const stageSrc = await fs.readFile(
@@ -222,7 +222,7 @@ describe('production source contracts', () => {
       'utf8',
     );
     expect(stageSrc).toMatch(/encryptBuffer/);
-    expect(stageSrc).toMatch(/uploadToMongo/);
+    expect(stageSrc).toMatch(/putStagedCiphertext/);
     const mongoOps = await fs.readFile(
       path.join(process.cwd(), 'src/lib/mongo/operations.ts'),
       'utf8',
@@ -253,9 +253,10 @@ describe('production source contracts', () => {
     );
     expect(src).toMatch(/from 'next\/server'/);
     expect(src).toMatch(/runAfterResponse/);
-    const emailIdx = src.indexOf('sendOTPEmail(');
+    expect(src).toMatch(/enqueueOtpEmails/);
+    const processIdx = src.indexOf('processDueJobs');
     const afterIdx = src.indexOf('runAfterResponse');
-    expect(emailIdx).toBeGreaterThan(afterIdx);
+    expect(processIdx).toBeGreaterThan(afterIdx);
   });
 
   it('GridFS upload uses 1MiB chunks and skips post-upload checksum update', async () => {

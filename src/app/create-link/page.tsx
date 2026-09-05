@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation';
 import { auth } from '@/lib/auth';
 import { listVendorOptions } from '@/lib/vendor-options';
 import { ownerHasActiveLink } from '@/actions/dashboard';
-import { getDbUserRole } from '@/lib/security/roles';
+import { getDbUserRole, dashboardPathForRole } from '@/lib/security/roles';
 import { getOnboardingStep } from '@/lib/onboarding';
 import CreateLinkClient from './CreateLinkClient';
 import { isMongoConfigured, warmMongoConnection } from '@/lib/mongo/client';
@@ -36,7 +36,7 @@ export default async function CreateLinkPage() {
     }
 
     if (dbUser.role !== 'OWNER') {
-        redirect('/dashboard/vendor');
+        redirect(dashboardPathForRole(dbUser.role));
     }
 
     const [initialVendors, hasActiveLink] = await Promise.all([

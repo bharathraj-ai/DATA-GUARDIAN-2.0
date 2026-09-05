@@ -73,6 +73,11 @@ export default function OwnerDashboardClient({
     const [auditLoaded, setAuditLoaded] = useState(false);
     const [auditLoading, setAuditLoading] = useState(false);
     const [auditFilter, setAuditFilter] = useState({ search: '', type: 'ALL', severity: 'ALL' });
+    const [auditVisible, setAuditVisible] = useState(40);
+
+    useEffect(() => {
+        setAuditVisible(40);
+    }, [auditFilter]);
 
     // Lazy-load the heavy audit query only when that tab is opened
     useEffect(() => {
@@ -292,6 +297,7 @@ export default function OwnerDashboardClient({
         }
         return true;
     });
+    const visibleAuditLogs = filteredAuditLogs.slice(0, auditVisible);
 
     // Combined stats: links (active data) + sendHistory (preserved records)
     // sendHistory only contains expired/revoked/cleaned records
@@ -507,7 +513,7 @@ export default function OwnerDashboardClient({
                                             </div>
                                         ) : (
                                             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                                {filteredAuditLogs.map(log => {
+                                                {visibleAuditLogs.map(log => {
                                                     const isCritical = log.severity === 'CRITICAL';
                                                     const isWarning = log.severity === 'WARNING';
                                                     return (
@@ -533,6 +539,16 @@ export default function OwnerDashboardClient({
                                                         </div>
                                                     );
                                                 })}
+                                                {filteredAuditLogs.length > visibleAuditLogs.length && (
+                                                    <button
+                                                        type="button"
+                                                        className="btn btn-secondary btn-sm"
+                                                        onClick={() => setAuditVisible((n) => n + 40)}
+                                                        style={{ alignSelf: 'center', marginTop: '8px' }}
+                                                    >
+                                                        Show more ({filteredAuditLogs.length - visibleAuditLogs.length} remaining)
+                                                    </button>
+                                                )}
                                             </div>
                                         )}
                                     </div>
@@ -1017,6 +1033,7 @@ export default function OwnerDashboardClient({
                                                                             </span>
                                                                             <span style={{ color: '#6B7280', fontSize: '0.72rem' }}>
                                                                                 {formatFileSize(file.fileSize)}
+                                                                                {typeof file.viewCount === 'number' ? ` · ${file.viewCount} view${file.viewCount === 1 ? '' : 's'}` : ''}
                                                                             </span>
                                                                         </div>
                                                                     ))}

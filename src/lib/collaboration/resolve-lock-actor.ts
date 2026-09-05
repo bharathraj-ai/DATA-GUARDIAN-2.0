@@ -8,12 +8,6 @@ export function sanitizeClientInstanceId(raw: unknown, fallbackSessionId: string
     return trimmed;
 }
 
-export function clampReservationSeconds(requested: unknown, fallback: number, max: number): number {
-    const n = typeof requested === 'number' ? requested : typeof requested === 'string' ? parseInt(requested, 10) : NaN;
-    if (!Number.isFinite(n)) return fallback;
-    return Math.min(max, Math.max(60, Math.trunc(n)));
-}
-
 type VendorRow = { id?: string; email: string; level?: number };
 
 export function resolveLockActor(input: {

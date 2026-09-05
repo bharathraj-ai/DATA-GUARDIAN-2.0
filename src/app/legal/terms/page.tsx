@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
     title: 'Terms of Service',
-    description: 'Data Guardian Terms of Service. Understand your rights and responsibilities when using our secure data sharing platform.',
+    description: 'Secure Protocol Terms of Service. Understand your rights and responsibilities when using our secure data sharing platform.',
 };
 
 export default function TermsPage() {
@@ -16,7 +16,7 @@ export default function TermsPage() {
                     <section className="legal-section">
                         <h2>1. Acceptance of Terms</h2>
                         <p>
-                            By accessing or using Data Guardian, you agree to be bound by these Terms of Service.
+                            By accessing or using Secure Protocol, you agree to be bound by these Terms of Service.
                             If you do not agree, you may not use the platform.
                         </p>
                     </section>
@@ -24,7 +24,7 @@ export default function TermsPage() {
                     <section className="legal-section">
                         <h2>2. Service Description</h2>
                         <p>
-                            Data Guardian provides a secure data sharing platform that enables users to share
+                            Secure Protocol provides a secure data sharing platform that enables users to share
                             sensitive information through encrypted, time-limited, OTP-protected links.
                         </p>
                     </section>
@@ -54,7 +54,7 @@ export default function TermsPage() {
                     <section className="legal-section">
                         <h2>5. Data Ownership</h2>
                         <p>
-                            You retain full ownership of all data you share through Data Guardian. We do not
+                            You retain full ownership of all data you share through Secure Protocol. We do not
                             claim any intellectual property rights over your content. Data is encrypted and
                             we cannot access its contents.
                         </p>
@@ -63,7 +63,7 @@ export default function TermsPage() {
                     <section className="legal-section">
                         <h2>6. Limitation of Liability</h2>
                         <p>
-                            Data Guardian is provided &quot;as is&quot; without warranty of any kind. We shall not be
+                            Secure Protocol is provided &quot;as is&quot; without warranty of any kind. We shall not be
                             liable for any indirect, incidental, or consequential damages arising from use
                             of the platform.
                         </p>

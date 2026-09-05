@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { decryptBuffer, decryptDek } from '@/lib/crypto';
+import { decryptBuffer } from '@/lib/crypto';
+import { unwrapDek } from '@/lib/security/kms';
 import { authorizeSecureLink } from '@/lib/linkAuthorization';
-import { downloadFromMongo } from '@/lib/mongo/operations';
+import { downloadLiveObject } from '@/lib/blob-store';
 import { extractRequestInfo } from '@/lib/security/auditLog';
 import { logger } from '@/lib/logger';
 import { incrementAndCheckLimit } from '@/lib/limits';
@@ -74,7 +75,7 @@ export async function GET(
         // Priority: inline encrypted content (draft saves) → GridFS (original upload)
         if (fileRecord.encryptedContent) {
             try {
-                const dek = fileRecord.encryptedDek ? decryptDek(fileRecord.encryptedDek) : undefined;
+                const dek = fileRecord.encryptedDek ? await unwrapDek(fileRecord.encryptedDek) : undefined;
                 buffer = decryptBuffer(
                     fileRecord.encryptedContent,
                     fileRecord.iv!,
@@ -98,10 +99,10 @@ export async function GET(
                     );
                 }
 
-                const downloadedBuffer = await downloadFromMongo(gridFSId, fileRecord.fileSize);
+                const downloadedBuffer = await downloadLiveObject(gridFSId, fileRecord.fileSize);
 
                 if (fileRecord.iv && fileRecord.authTag) {
-                    const dek = fileRecord.encryptedDek ? decryptDek(fileRecord.encryptedDek) : undefined;
+                    const dek = fileRecord.encryptedDek ? await unwrapDek(fileRecord.encryptedDek) : undefined;
                     buffer = decryptBuffer(
                         downloadedBuffer,
                         fileRecord.iv,

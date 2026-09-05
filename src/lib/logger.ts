@@ -1,127 +1,139 @@
 /**
- * Centralized logging utility for Data Guardian.
- * Implements production-safe logging standards and sensitive data redaction
- * in compliance with OWASP Logging Cheat Sheet (A09:2021).
+ * Centralized logging for Secure Protocol.
+ * Production: one JSON object per line (stdout/stderr) so log drains can parse it.
+ * Development: human-readable lines. Request IDs come from AsyncLocalStorage
+ * (proxy.ts x-request-id) or meta.requestId.
+ * Redaction follows OWASP Logging Cheat Sheet (A09:2021).
+ *
+ * This file must stay Edge-safe (used by proxy CSRF). Do not import Node-only
+ * modules here — request ALS is read from globalThis when Node has bound it.
  */
 
-// ============================================
-// REDACTION HELPERS
-// ============================================
+type RequestAls = { getStore: () => { requestId?: string } | undefined };
 
-/**
- * Redacts an email address (e.g., john.doe@example.com -> j***@example.com)
- */
+function getRequestId(): string | undefined {
+    try {
+        const als = (globalThis as { __DG_REQUEST_ALS?: RequestAls }).__DG_REQUEST_ALS;
+        return als?.getStore()?.requestId;
+    } catch {
+        return undefined;
+    }
+}
+
 export function redactEmail(email: string | null | undefined): string {
     if (!email) return 'unknown';
     const parts = email.split('@');
-    if (parts.length !== 2) return '***'; // Invalid format, redact entirely
+    if (parts.length !== 2) return '***';
     const [local, domain] = parts;
     if (local.length <= 1) return `*@${domain}`;
     return `${local.charAt(0)}***@${domain}`;
 }
 
-/**
- * Redacts an IP address (e.g., 192.168.1.100 -> 192.168.xxx.xxx)
- */
 export function redactIp(ip: string | null | undefined): string {
     if (!ip) return 'unknown';
-    
-    // IPv4
+
     if (ip.includes('.')) {
         const parts = ip.split('.');
         if (parts.length === 4) {
             return `${parts[0]}.${parts[1]}.xxx.xxx`;
         }
     }
-    
-    // IPv6
+
     if (ip.includes(':')) {
         const parts = ip.split(':');
         if (parts.length > 2) {
             return `${parts[0]}:${parts[1]}:xxxx:xxxx:xxxx:xxxx:xxxx:xxxx`;
         }
     }
-    
+
     return '***.***.***.***';
 }
 
-/**
- * Redacts a token (e.g., a uuid or secure link token)
- * Shows only the first 4 characters.
- */
 export function redactToken(token: string | null | undefined): string {
     if (!token) return 'unknown';
     return token.substring(0, 4) + '***';
 }
 
-/**
- * Redacts a session ID, showing only the first 6 characters.
- */
 export function redactSessionId(sessionId: string | null | undefined): string {
     if (!sessionId) return 'unknown';
     return sessionId.substring(0, 6) + '***';
 }
 
-// ============================================
-// LOGGER IMPL
-// ============================================
+type LogLevel = 'INFO' | 'WARN' | 'ERROR' | 'SECURITY' | 'DEBUG';
 
-const formatMessage = (level: string, message: string, meta?: any) => {
-    const timestamp = new Date().toISOString();
-    const requestId = typeof meta?.requestId === 'string' ? meta.requestId : undefined;
-    const rest = meta && typeof meta === 'object' ? { ...meta } : meta;
-    if (rest && typeof rest === 'object' && 'requestId' in rest) {
-        delete (rest as { requestId?: string }).requestId;
+function splitMeta(meta?: unknown): { requestId?: string; rest: unknown } {
+    const requestIdFromAls = getRequestId();
+    if (!meta || typeof meta !== 'object') {
+        return { requestId: requestIdFromAls, rest: meta };
     }
+    const copy = { ...(meta as Record<string, unknown>) };
+    const requestId =
+        typeof copy.requestId === 'string' ? copy.requestId : requestIdFromAls;
+    delete copy.requestId;
+    return {
+        requestId,
+        rest: Object.keys(copy).length > 0 ? copy : undefined,
+    };
+}
+
+function emit(level: LogLevel, message: string, meta?: unknown) {
+    const { requestId, rest } = splitMeta(meta);
+    const jsonLogs = process.env.NODE_ENV === 'production';
+
+    if (jsonLogs) {
+        const payload: Record<string, unknown> = {
+            ts: new Date().toISOString(),
+            level,
+            msg: message,
+        };
+        if (requestId) payload.requestId = requestId;
+        if (rest !== undefined) payload.meta = rest;
+        const line = JSON.stringify(payload) + '\n';
+        if (level === 'ERROR') process.stderr.write(line);
+        else process.stdout.write(line);
+        return;
+    }
+
+    const timestamp = new Date().toISOString();
     let out = `[${timestamp}] [${level}]${requestId ? ` [${requestId}]` : ''} ${message}`;
-    if (rest && !(typeof rest === 'object' && Object.keys(rest).length === 0)) {
+    if (rest !== undefined) {
         try {
             out += ` | ${JSON.stringify(rest)}`;
         } catch {
             out += ` | [Unserializable Metadata]`;
         }
     }
-    return out;
-};
+    if (level === 'ERROR') console.error(out);
+    else if (level === 'WARN' || level === 'SECURITY') console.warn(out);
+    else console.log(out);
+}
 
 export const logger = {
-    /**
-     * General business events and operational flow.
-     */
-    info: (message: string, meta?: any) => {
-        console.log(formatMessage('INFO', message, meta));
+    info: (message: string, meta?: unknown) => {
+        emit('INFO', message, meta);
     },
-    
-    /**
-     * Suspicious activity, potential attacks, CSRF blocks, rate limits.
-     */
-    warn: (message: string, meta?: any) => {
-        console.warn(formatMessage('WARN', message, meta));
+
+    warn: (message: string, meta?: unknown) => {
+        emit('WARN', message, meta);
     },
-    
-    /**
-     * Critical failures, unhandled exceptions, database connection drops.
-     */
-    error: (message: string, error?: any, meta?: any) => {
+
+    error: (message: string, error?: unknown, meta?: unknown) => {
         const errMsg = error instanceof Error ? error.message : error;
-        console.error(formatMessage('ERROR', message, { error: errMsg, ...meta }));
-    },
-    
-    /**
-     * Security specific events (e.g., replay attacks, BOLA attempts).
-     */
-    security: (message: string, meta?: any) => {
-        // We log security events as WARN in production so they stand out in typical console streams
-        console.warn(formatMessage('SECURITY', message, meta));
-    },
-    
-    /**
-     * Development and debugging logs. Only printed when NODE_ENV is development.
-     * NEVER use this for secrets in production, but it safely ignores them in prod.
-     */
-    debug: (message: string, meta?: any) => {
-        if (process.env.NODE_ENV === 'development') {
-            console.log(formatMessage('DEBUG', message, meta));
+        emit('ERROR', message, { error: errMsg, ...(meta && typeof meta === 'object' ? meta : {}) });
+        if (typeof window === 'undefined' && error && process.env.SENTRY_DSN) {
+            void import('@/lib/sentry').then(({ captureException }) => {
+                captureException(error, { message });
+            }).catch(() => {});
         }
-    }
+    },
+
+    security: (message: string, meta?: unknown) => {
+        emit('SECURITY', message, meta);
+    },
+
+    debug: (message: string, meta?: unknown) => {
+        if (process.env.NODE_ENV === 'development') {
+            emit('DEBUG', message, meta);
+        }
+    },
 };

@@ -21,6 +21,7 @@ export async function cleanupExpiredData(): Promise<CleanupResult> {
                 deletedFiles: 0,
                 deletedAuditLogs: 0,
                 deletedMongoFiles: 0,
+                deletedStaleStaging: 0,
                 error: 'Forbidden',
             };
         }
@@ -35,6 +36,7 @@ export async function cleanupExpiredData(): Promise<CleanupResult> {
             deletedFiles: 0,
             deletedAuditLogs: 0,
             deletedMongoFiles: 0,
+            deletedStaleStaging: 0,
             error: 'Cleanup failed',
         };
     }

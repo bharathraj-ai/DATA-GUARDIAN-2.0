@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { decryptBuffer, decryptDek } from '@/lib/crypto';
+import { decryptBuffer } from '@/lib/crypto';
+import { unwrapDek } from '@/lib/security/kms';
 import { authorizeApiRequest } from '@/lib/api-auth';
 
 function bytesToDataUrl(bytes: Buffer, mimeType: string): string {
@@ -26,10 +27,10 @@ export async function GET(
     const token = req.nextUrl.searchParams.get('token');
     if (!token) return NextResponse.json({ error: 'Missing token' }, { status: 401 });
 
-    // Full base64 data-URL is download-equivalent. Editors without download still load bytes.
+    // Full data-URL is download-equivalent — require download, not edit-as-bypass.
     const authResult = await authorizeApiRequest(fileId, token, {
       httpMethod: req.method,
-      action: 'download_or_edit',
+      action: 'download',
       includeContent: true,
     });
     if (authResult.errorResponse) {
@@ -42,15 +43,15 @@ export async function GET(
 
     let encryptedBytes = file.encryptedContent;
     if (!encryptedBytes && (file as any).mongoFile?.gridFSId) {
-        const { downloadFromMongo } = await import('@/lib/mongo/operations');
-        encryptedBytes = await downloadFromMongo((file as any).mongoFile.gridFSId);
+        const { downloadLiveObject } = await import('@/lib/blob-store');
+        encryptedBytes = await downloadLiveObject((file as any).mongoFile.gridFSId);
     }
 
     if (!encryptedBytes) {
         return NextResponse.json({ error: 'File content not found in any storage backend' }, { status: 404 });
     }
 
-    const dek = (file as any).encryptedDek ? decryptDek((file as any).encryptedDek) : undefined;
+    const dek = (file as any).encryptedDek ? await unwrapDek((file as any).encryptedDek) : undefined;
     const decrypted = decryptBuffer(
       encryptedBytes,
       file.iv!,

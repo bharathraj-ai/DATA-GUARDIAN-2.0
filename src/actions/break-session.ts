@@ -217,6 +217,9 @@ export async function takeBreak(
         const remainingMs = secureLink.expiresAt.getTime() - Date.now();
         const validityMinutes = Math.max(1, Math.min(10, Math.floor(remainingMs / 60000)));
 
+        const { enqueueOtpEmails } = await import('@/lib/jobs');
+        await enqueueOtpEmails([{ email: vendorEmail, otp: newOtp }], token, validityMinutes);
+
         runAfterResponse(async () => {
             if (endingSessionId) {
                 try {
@@ -231,13 +234,8 @@ export async function takeBreak(
             }
 
             try {
-                const { sendOTPEmail, isEmailConfigured } = await import('@/lib/email');
-                if (!isEmailConfigured()) {
-                    logger.error('[EMAIL] Not configured — break OTP email not sent');
-                    return;
-                }
-                await sendOTPEmail(vendorEmail, token, newOtp, validityMinutes);
-                logger.info(`Break OTP sent to ${redactEmail(vendorEmail)}`);
+                const { processDueJobs } = await import('@/lib/jobs');
+                await processDueJobs(5);
             } catch (err) {
                 logger.error(
                     'Failed to send break OTP email:',

@@ -41,6 +41,9 @@ export type MaskedUserData = {
     ownerName: string | null;
     ownerEmail: string | null;
     isOwner: boolean;
+    viewerEmail: string | null;
+    /** Short device fingerprint for forensic watermark (never full secret). */
+    deviceHashFragment: string | null;
     vendorStatus?: string;
     lastSavedWork?: any;
     resumePoint?: any;
@@ -143,6 +146,16 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
         // Derive owner info from the User relation already loaded by authorizeSecureLink
         const ownerUser = (secureLink as any).User;
 
+        let deviceHashFragment: string | null = null;
+        try {
+            const { headers } = await import('next/headers');
+            const { generateDeviceHash } = await import('@/lib/fingerprint');
+            const h = await headers();
+            deviceHashFragment = generateDeviceHash(h).slice(0, 8);
+        } catch {
+            deviceHashFragment = null;
+        }
+
         return {
             success: true,
             data: {
@@ -164,6 +177,8 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
                 ownerName: ownerUser?.name ?? null,
                 ownerEmail: ownerUser?.email || null,
                 isOwner: authResult.context.isOwner,
+                viewerEmail: authResult.context.effectiveEmail || ownerUser?.email || null,
+                deviceHashFragment,
                 vendorStatus: vendorAccess?.status,
                 lastSavedWork: vendorAccess?.lastSavedWork,
                 resumePoint: vendorAccess?.resumePoint,

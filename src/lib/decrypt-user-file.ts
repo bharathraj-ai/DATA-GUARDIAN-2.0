@@ -1,5 +1,6 @@
-import { decryptBuffer, decryptDek } from '@/lib/crypto';
-import { downloadFromMongo } from '@/lib/mongo/operations';
+import { decryptBuffer } from '@/lib/crypto';
+import { unwrapDek } from '@/lib/security/kms';
+import { downloadLiveObject } from '@/lib/blob-store';
 import { gridFsIdForFile, type UserFileContentRow } from '@/lib/security/resource-ownership';
 
 type DecryptableFile = {
@@ -17,7 +18,7 @@ function asBuffer(data: Buffer | Uint8Array): Buffer {
 /** Decrypt a UserFile row (inline BYTEA draft or GridFS ciphertext). */
 export async function decryptUserFileBytes(fileRecord: DecryptableFile): Promise<Buffer> {
     if (fileRecord.encryptedContent && fileRecord.iv && fileRecord.authTag) {
-        const dek = fileRecord.encryptedDek ? decryptDek(fileRecord.encryptedDek) : undefined;
+        const dek = fileRecord.encryptedDek ? await unwrapDek(fileRecord.encryptedDek) : undefined;
         return decryptBuffer(
             asBuffer(fileRecord.encryptedContent),
             fileRecord.iv,
@@ -31,9 +32,9 @@ export async function decryptUserFileBytes(fileRecord: DecryptableFile): Promise
         throw new Error('File has no content available');
     }
 
-    const downloaded = await downloadFromMongo(gridFSId, fileRecord.fileSize ?? undefined);
+    const downloaded = await downloadLiveObject(gridFSId, fileRecord.fileSize ?? undefined);
     if (fileRecord.iv && fileRecord.authTag) {
-        const dek = fileRecord.encryptedDek ? decryptDek(fileRecord.encryptedDek) : undefined;
+        const dek = fileRecord.encryptedDek ? await unwrapDek(fileRecord.encryptedDek) : undefined;
         return decryptBuffer(downloaded, fileRecord.iv, fileRecord.authTag, dek);
     }
     return downloaded;

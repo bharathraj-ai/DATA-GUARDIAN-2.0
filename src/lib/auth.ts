@@ -1,23 +1,25 @@
 import { cache } from 'react';
 import { NextAuthOptions, getServerSession } from 'next-auth';
 import GoogleProvider from 'next-auth/providers/google';
+import type { OAuthConfig } from 'next-auth/providers/oauth';
 import { prisma } from '@/lib/prisma';
 import { createRaceSafePrismaAdapter } from '@/lib/auth-adapter';
 import { normalizeRole } from '@/lib/security/roles';
 import { getOnboardingStep } from '@/lib/onboarding';
 import { logger, redactEmail } from '@/lib/logger';
+import { assertEmailAllowedForHostedDomain, attachUserToMatchingOrg } from '@/lib/tenant';
+import { acceptPendingOrgInvites } from '@/lib/org-invites';
 
 /**
- * NextAuth Configuration for Data Guardian (v4 Compatible)
+ * NextAuth Configuration for Secure Protocol (v4 Compatible)
  *
  * Session strategy is JWT so /api/auth/session does not hit Postgres on every
  * page navigation (database sessions were adding 2–4s latency via Neon).
  * User/Account records still live in Prisma via the adapter.
  *
  * Post-login routing: OAuth always lands on /auth/continue, which reads DB
- * onboarding state and redirects to /dashboard/owner or /dashboard/vendor
- * (COMPLETE) or /auth/role-select (ROLE_SELECTION). Completed users never
- * visit role-select.
+ * onboarding state and redirects by role hierarchy (COMPLETE) or
+ * /auth/role-select (ROLE_SELECTION).
  */
 const useSecureCookies = process.env.NEXTAUTH_URL?.startsWith('https://') ?? false;
 const cookiePrefix = useSecureCookies ? '__Secure-' : '';
@@ -28,6 +30,35 @@ function postLoginContinueUrl(canonicalBase: string, callbackPath?: string | nul
     }
     return `${canonicalBase}/auth/continue`;
 }
+
+function oidcProvider(): OAuthConfig<Record<string, string>> | null {
+    const issuer = process.env.OIDC_ISSUER?.trim().replace(/\/$/, '');
+    const clientId = process.env.OIDC_CLIENT_ID?.trim();
+    const clientSecret = process.env.OIDC_CLIENT_SECRET?.trim();
+    if (!issuer || !clientId || !clientSecret) return null;
+    return {
+        id: 'oidc',
+        name: process.env.OIDC_NAME?.trim() || 'SSO',
+        type: 'oauth',
+        wellKnown: `${issuer}/.well-known/openid-configuration`,
+        clientId,
+        clientSecret,
+        authorization: { params: { scope: 'openid email profile' } },
+        idToken: true,
+        checks: ['pkce', 'state'],
+        profile(profile) {
+            return {
+                id: profile.sub,
+                name: profile.name ?? profile.preferred_username ?? profile.email,
+                email: profile.email,
+                image: profile.picture,
+            };
+        },
+    };
+}
+
+const oidc = oidcProvider();
+const hostedDomain = process.env.GOOGLE_HOSTED_DOMAIN?.trim();
 
 export const authOptions: NextAuthOptions = {
     adapter: createRaceSafePrismaAdapter(prisma),
@@ -41,9 +72,11 @@ export const authOptions: NextAuthOptions = {
             authorization: {
                 params: {
                     prompt: 'select_account',
+                    ...(hostedDomain ? { hd: hostedDomain } : {}),
                 },
             },
         }),
+        ...(oidc ? [oidc] : []),
     ],
     useSecureCookies,
     cookies: {
@@ -109,6 +142,17 @@ export const authOptions: NextAuthOptions = {
     },
     callbacks: {
         async signIn({ user, account }) {
+            if (!assertEmailAllowedForHostedDomain(user.email)) {
+                logger.warn(
+                    `[SSO] Rejected email domain email=${redactEmail(user.email)} provider=${account?.provider}`,
+                );
+                return false;
+            }
+            if (user.id) {
+                await attachUserToMatchingOrg(user.id, user.email).catch(() => undefined);
+                await acceptPendingOrgInvites(user.id, user.email).catch(() => undefined);
+
+            }
             const roleSelected = Boolean(
                 (user as { roleSelected?: boolean }).roleSelected
             );
@@ -177,8 +221,13 @@ export const authOptions: NextAuthOptions = {
                 token.role = normalizeRole((user as { role?: string }).role);
                 token.roleSelected = roleSelected;
                 token.onboardingStep = getOnboardingStep(roleSelected);
+                const orgRow = await prisma.user.findUnique({
+                    where: { id: user.id },
+                    select: { organizationId: true },
+                });
+                token.organizationId = orgRow?.organizationId ?? null;
                 logger.info(
-                    `[Google OAuth] JWT issued userId=${user.id} onboardingStep=${token.onboardingStep}`
+                    `[OAuth] JWT issued userId=${user.id} onboardingStep=${token.onboardingStep}`
                 );
             }
 
@@ -187,12 +236,13 @@ export const authOptions: NextAuthOptions = {
             if (trigger === 'update' && token.id) {
                 const dbUser = await prisma.user.findUnique({
                     where: { id: token.id as string },
-                    select: { role: true, roleSelected: true },
+                    select: { role: true, roleSelected: true, organizationId: true },
                 });
                 if (dbUser) {
                     token.role = normalizeRole(dbUser.role);
                     token.roleSelected = dbUser.roleSelected ?? false;
                     token.onboardingStep = getOnboardingStep(dbUser.roleSelected);
+                    token.organizationId = dbUser.organizationId ?? null;
                 }
             }
 
@@ -211,6 +261,7 @@ export const authOptions: NextAuthOptions = {
                 session.user.onboardingStep = getOnboardingStep(
                     Boolean(token.roleSelected)
                 );
+                session.user.organizationId = (token.organizationId as string | null) ?? null;
             }
             return session;
         },
@@ -235,8 +286,13 @@ export const authOptions: NextAuthOptions = {
     events: {
         async createUser({ user }) {
             logger.info(
-                `[Google OAuth] New user created email=${redactEmail(user.email)} Existing user: false onboardingStep=ROLE_SELECTION`
+                `[OAuth] New user created email=${redactEmail(user.email)} Existing user: false onboardingStep=ROLE_SELECTION`
             );
+            if (user.id) {
+                await attachUserToMatchingOrg(user.id, user.email).catch(() => undefined);
+                await acceptPendingOrgInvites(user.id, user.email).catch(() => undefined);
+
+            }
         },
     },
 };

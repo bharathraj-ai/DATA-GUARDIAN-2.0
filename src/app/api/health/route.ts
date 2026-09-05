@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isRedisConfigured } from '@/lib/redis-helpers';
+import { isProductionRuntime } from '@/lib/security/env-validation';
 
 /**
  * Liveness: GET /api/health
@@ -50,10 +51,12 @@ export async function GET(req: NextRequest) {
         } catch {
             checks.redis = 'error';
         }
+    } else if (isProductionRuntime()) {
+        checks.redis = 'error';
     }
 
     payload.checks = checks;
-    payload.status = checks.db === 'ok' ? 'healthy' : 'unhealthy';
+    payload.status = checks.db === 'ok' && checks.redis !== 'error' ? 'healthy' : 'unhealthy';
     return NextResponse.json(payload, {
         status: payload.status === 'healthy' ? 200 : 503,
         headers,

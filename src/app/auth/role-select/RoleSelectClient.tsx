@@ -13,6 +13,8 @@ import { Session } from 'next-auth';
 import { ArrowRight, KeyRound, Link2, Shield } from 'lucide-react';
 import styles from './role-select.module.css';
 
+type SelfServePick = 'OWNER' | 'VENDOR';
+
 interface RoleSelectClientProps {
     callbackUrl: string | null;
     session: Session | null;
@@ -23,7 +25,7 @@ export default function RoleSelectClient({ callbackUrl, session, onSetRole }: Ro
     const router = useRouter();
     const { update } = useSession();
     const [isLoading, setIsLoading] = useState(false);
-    const [selected, setSelected] = useState<'OWNER' | 'VENDOR' | null>(null);
+    const [selected, setSelected] = useState<SelfServePick | null>(null);
     const [error, setError] = useState('');
     const committingRef = useRef(false);
 
@@ -32,7 +34,7 @@ export default function RoleSelectClient({ callbackUrl, session, onSetRole }: Ro
         return dashboardPathForRole(role);
     };
 
-    const commitRole = async (role: 'OWNER' | 'VENDOR') => {
+    const commitRole = async (role: SelfServePick) => {
         if (committingRef.current) return;
         committingRef.current = true;
         setIsLoading(true);
@@ -64,6 +66,7 @@ export default function RoleSelectClient({ callbackUrl, session, onSetRole }: Ro
     };
 
     const firstName = session?.user?.name?.split(' ')[0];
+    const leaderLabel = 'Owner';
 
     return (
         <main className={styles.page}>
@@ -74,7 +77,7 @@ export default function RoleSelectClient({ callbackUrl, session, onSetRole }: Ro
                         {firstName ? `${firstName}, where do you sit in the protocol?` : 'Where do you sit in the protocol?'}
                     </h1>
                     <p className={styles.sub}>
-                        Owner issues the encrypted share. Vendor receives it. Pick one — it stays with this account.
+                        Owners issue encrypted shares. Vendors receive them.
                     </p>
                     {error ? <p className={styles.error}>{error}</p> : null}
                 </header>
@@ -97,9 +100,9 @@ export default function RoleSelectClient({ callbackUrl, session, onSetRole }: Ro
                                 <div className={`${styles.art} ${styles.ownerArt}`}>
                                     <Shield size={32} strokeWidth={1.8} />
                                 </div>
-                                <span className={styles.role}>Owner</span>
+                                <span className={styles.role}>{leaderLabel}</span>
                                 <span className={styles.blurb}>
-                                    You hold the vault. Create the link, set expiry, and revoke the moment you need to.
+                                    You own the share. Create the link, set expiry, and revoke the moment you need to.
                                 </span>
                                 <ul className={styles.facts}>
                                     <li><span className={`${styles.tick} ${styles.ownerTick}`}>✓</span> Encrypt and share files</li>
@@ -157,7 +160,7 @@ export default function RoleSelectClient({ callbackUrl, session, onSetRole }: Ro
                     {selected ? (
                         <>
                             <p>
-                                Selected <strong>{selected === 'OWNER' ? 'Owner' : 'Vendor'}</strong>. This identity is
+                                Selected <strong>{selected === 'OWNER' ? leaderLabel : 'Vendor'}</strong>. This identity is
                                 permanent for this Google account.
                             </p>
                             <button
@@ -166,7 +169,9 @@ export default function RoleSelectClient({ callbackUrl, session, onSetRole }: Ro
                                 onClick={() => commitRole(selected)}
                                 disabled={isLoading}
                             >
-                                {isLoading ? 'Assigning…' : `Continue as ${selected === 'OWNER' ? 'Owner' : 'Vendor'}`}
+                                {isLoading
+                                    ? 'Assigning…'
+                                    : `Continue as ${selected === 'OWNER' ? leaderLabel : 'Vendor'}`}
                                 {!isLoading && <ArrowRight size={16} />}
                             </button>
                         </>

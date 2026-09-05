@@ -24,7 +24,7 @@ export interface DashboardLink {
     otpVerifiedAt: Date | null;
     fileCount: number;
     vendors: { vendorEmail: string; level: number }[];
-    files: { id: string; fileName: string; fileSize: number; fileType: string; status: string }[];
+    files: { id: string; fileName: string; fileSize: number; fileType: string; status: string; viewCount?: number }[];
     auditLogs: { action: string; timestamp: Date; reason: string | null }[];
     /** True when files/auditLogs were loaded via getLinkDetails */
     detailsLoaded?: boolean;
@@ -244,10 +244,9 @@ function mergeVendorInbox(links: DashboardLink[], records: SendHistoryRecord[], 
 }
 
 async function fetchVendorSendHistory(email: string): Promise<SendHistoryRecord[]> {
+    const { vendorEmailEqualsWhere } = await import('@/lib/send-record');
     return prisma.sendRecord.findMany({
-        where: {
-            vendorEmail: { contains: email, mode: 'insensitive' },
-        },
+        where: vendorEmailEqualsWhere(email),
         orderBy: { createdAt: 'desc' },
         take: 100,
         select: {
@@ -355,9 +354,19 @@ export async function getLinkDetails(linkId: string): Promise<{
 
         if (!link) return { success: false, error: 'Not found' };
 
+        const views = await prisma.fileViewEvent.groupBy({
+            by: ['fileId'],
+            where: { linkId },
+            _count: { _all: true },
+        });
+        const countByFile = new Map(views.map((v) => [v.fileId, v._count._all]));
+
         return {
             success: true,
-            files: link.UserFile as DashboardLink['files'],
+            files: link.UserFile.map((file) => ({
+                ...file,
+                viewCount: countByFile.get(file.id) ?? 0,
+            })),
             auditLogs: link.AuditLog,
         };
     } catch (error) {

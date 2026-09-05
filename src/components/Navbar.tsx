@@ -5,11 +5,53 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import { useSession, signOut } from 'next-auth/react';
 import Image from 'next/image';
+import { isMarketingPath } from '@/lib/marketing-paths';
+import { useDeferredMarketingSession } from '@/components/useDeferredMarketingSession';
+import {
+    canCreateSecureLinks,
+    dashboardPathForRole,
+    normalizeRole,
+    roleDisplayName,
+} from '@/lib/security/role-helpers';
+
+type NavSession = {
+    user?: {
+        name?: string | null;
+        image?: string | null;
+        role?: string | null;
+        onboardingStep?: string | null;
+        roleSelected?: boolean | null;
+        organizationId?: string | null;
+    } | null;
+} | null;
 
 export default function Navbar() {
     const pathname = usePathname();
-    const router = useRouter();
+    if (isMarketingPath(pathname)) {
+        return <MarketingNavbar />;
+    }
+    return <AppNavbar />;
+}
+
+function MarketingNavbar() {
+    const { session, status } = useDeferredMarketingSession();
+    return <NavbarView session={session} status={status} />;
+}
+
+function AppNavbar() {
     const { data: session, status } = useSession();
+    return <NavbarView session={session} status={status} />;
+}
+
+function NavbarView({
+    session,
+    status,
+}: {
+    session: NavSession;
+    status: string;
+}) {
+    const pathname = usePathname();
+    const router = useRouter();
     const [isScrolled, setIsScrolled] = useState(false);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const [hasMounted, setHasMounted] = useState(false);
@@ -52,11 +94,12 @@ export default function Navbar() {
         router.prefetch('/how-it-works');
         router.prefetch('/services');
         if (!roleReady) return;
-        if (role === 'OWNER') {
-            router.prefetch('/dashboard/owner');
+        const path = dashboardPathForRole(role);
+        router.prefetch(path);
+        router.prefetch('/settings');
+        router.prefetch('/help');
+        if (canCreateSecureLinks(role)) {
             router.prefetch('/create-link');
-        } else if (role === 'VENDOR') {
-            router.prefetch('/dashboard/vendor');
         }
     }, [status, session, router]);
 
@@ -70,10 +113,15 @@ export default function Navbar() {
     const onboardingComplete =
         session?.user?.onboardingStep === 'COMPLETE' ||
         (session?.user?.onboardingStep == null && Boolean(session?.user?.roleSelected));
-    const userRole = session?.user?.role;
-    const isOwnerSide = onboardingComplete && userRole === 'OWNER';
+    const userRole = normalizeRole(session?.user?.role);
+    const dashHref = dashboardPathForRole(userRole);
     const isVendorSide = onboardingComplete && userRole === 'VENDOR';
-    const roleLabel = isOwnerSide ? 'Owner' : isVendorSide ? 'Vendor' : null;
+    const isLeaderSide = onboardingComplete && canCreateSecureLinks(userRole);
+    const roleLabel = onboardingComplete ? roleDisplayName(userRole) : null;
+    const dashLabel =
+        userRole === 'VENDOR'
+            ? 'Dashboard'
+            : 'Owner';
 
     return (
         <nav className={`navbar ${isScrolled ? 'navbar-scrolled' : ''}`}>
@@ -97,22 +145,16 @@ export default function Navbar() {
 
                     {isAuthenticated ? (
                             <>
-                                {isOwnerSide && (
+                                {(isLeaderSide || isVendorSide) && (
                                     <Link
-                                        href="/dashboard/owner"
-                                        className={`nav-link ${pathname?.startsWith('/dashboard/owner') ? 'active' : ''}`}
+                                        href={dashHref}
+                                        className={`nav-link ${pathname?.startsWith('/dashboard') ? 'active' : ''}`}
                                     >
-                                        Owner
+                                        {dashLabel}
                                     </Link>
                                 )}
-                                {isVendorSide && (
-                                    <Link
-                                        href="/dashboard/vendor"
-                                        className={`nav-link ${pathname?.startsWith('/dashboard/vendor') ? 'active' : ''}`}
-                                    >
-                                        Dashboard
-                                    </Link>
-                                )}
+
+
                                 {/* Profile Badge with Role */}
                                 <div className="navbar-profile-wrapper">
                                     <div className="navbar-profile-badge">
@@ -132,7 +174,7 @@ export default function Navbar() {
                                             </div>
                                         )}
                                         {roleLabel ? (
-                                            <span className={`navbar-role-tag ${isOwnerSide ? 'navbar-role-tag--owner' : 'navbar-role-tag--vendor'}`}>
+                                            <span className={`navbar-role-tag ${isLeaderSide ? 'navbar-role-tag--owner' : 'navbar-role-tag--vendor'}`}>
                                                 {roleLabel}
                                             </span>
                                         ) : pathname !== '/auth/role-select' ? (
@@ -226,24 +268,24 @@ export default function Navbar() {
 
                     {isAuthenticated && (
                         <>
-                            {isOwnerSide && (
+                            {(isLeaderSide || isVendorSide) && (
                                 <Link
-                                    href="/dashboard/owner"
-                                    className={`nav-link-mobile ${pathname?.startsWith('/dashboard/owner') ? 'active' : ''}`}
+                                    href={dashHref}
+                                    className={`nav-link-mobile ${pathname?.startsWith('/dashboard') ? 'active' : ''}`}
                                     onClick={() => setIsMobileMenuOpen(false)}
                                 >
-                                    Owner Dashboard
+                                    {dashLabel}
                                 </Link>
                             )}
-                            {isVendorSide && (
-                                <Link
-                                    href="/dashboard/vendor"
-                                    className={`nav-link-mobile ${pathname?.startsWith('/dashboard/vendor') ? 'active' : ''}`}
-                                    onClick={() => setIsMobileMenuOpen(false)}
-                                >
-                                    Dashboard
-                                </Link>
-                            )}
+
+
+                            <Link
+                                href="/help"
+                                className="nav-link-mobile"
+                                onClick={() => setIsMobileMenuOpen(false)}
+                            >
+                                Help
+                            </Link>
                         </>
                     )}
 
@@ -286,10 +328,10 @@ export default function Navbar() {
                                                 fontSize: '0.65rem', fontWeight: '700', textTransform: 'uppercase',
                                                 letterSpacing: '0.5px',
                                                 padding: '2px 6px', borderRadius: '6px',
-                                                background: isOwnerSide
+                                                background: isLeaderSide
                                                     ? 'linear-gradient(135deg, rgba(99,102,241,0.25), rgba(139,92,246,0.25))'
                                                     : 'rgba(20, 184, 166, 0.2)',
-                                                color: isOwnerSide ? '#a78bfa' : '#14b8a6',
+                                                color: isLeaderSide ? '#a78bfa' : '#14b8a6',
                                             }}>
                                                 {roleLabel}
                                             </span>

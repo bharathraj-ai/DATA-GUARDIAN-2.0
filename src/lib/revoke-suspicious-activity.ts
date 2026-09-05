@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/prisma';
 import { logger, redactEmail } from '@/lib/logger';
 import { isRedisConfigured } from '@/lib/redis-helpers';
+import { buildForensicWatermark } from '@/lib/security/forensic-watermark';
 
 export const SUSPICIOUS_REVOKE_REASONS = ['screenshot', 'devtools', 'tab_switch', 'copy'] as const;
 export type SuspiciousRevokeReason = (typeof SUSPICIOUS_REVOKE_REASONS)[number];
@@ -21,6 +22,7 @@ export type SuspiciousRevokeResult = {
         linkId: string;
         vendorEmail: string | null;
         reason: SuspiciousRevokeReason;
+        forensicWatermark: string;
     };
     tokenToPurge?: string;
 };
@@ -108,6 +110,11 @@ export async function revokeForSuspiciousActivity(options: {
                     reason,
                     vendorEmail: vendorNorm ? redactEmail(vendorNorm) : null,
                     sessionId: sessionId.substring(0, 8) + '...',
+                    forensicWatermark: buildForensicWatermark({
+                        viewerEmail: vendorNorm || null,
+                        token,
+                        deviceHash: sessionId,
+                    }).line,
                 }),
             },
         });
@@ -132,6 +139,11 @@ export async function revokeForSuspiciousActivity(options: {
     });
 
     const notifyEmail = secureLink.notificationEmail || secureLink.User?.email || null;
+    const forensicWatermark = buildForensicWatermark({
+        viewerEmail: vendorNorm || null,
+        token,
+        deviceHash: sessionId,
+    }).line;
 
     return {
         success: true,
@@ -142,6 +154,7 @@ export async function revokeForSuspiciousActivity(options: {
                   linkId: secureLink.id,
                   vendorEmail: vendorNorm || null,
                   reason,
+                  forensicWatermark,
               }
             : undefined,
     };

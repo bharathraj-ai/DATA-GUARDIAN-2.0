@@ -4,6 +4,7 @@ import { canCreateSecureLinks } from '@/lib/security/role-helpers';
 import { checkUploadRateLimit, extractClientIP, formatRateLimitError } from '@/lib/rate-limit';
 import { headers } from 'next/headers';
 import { logger } from '@/lib/logger';
+import { blobStoreEnabled } from '@/lib/blob-store';
 import { isMongoConfigured, isTransientMongoError, mongoFriendlyError, warmMongoConnection } from '@/lib/mongo/client';
 import { MAX_SINGLE_FILE_SIZE, stagePlainFile } from '@/lib/create-link-stage';
 
@@ -13,9 +14,14 @@ export const maxDuration = 60;
 
 /**
  * Encrypt + GridFS while the owner is still filling the form.
- * Generate then only writes Postgres (~5s) instead of waiting on Atlas again.
  */
 export async function POST(request: NextRequest) {
+    if (!blobStoreEnabled()) {
+        return NextResponse.json(
+            { success: false, error: 'Object storage is not configured. Set MONGODB_URI.' },
+            { status: 503 },
+        );
+    }
     if (isMongoConfigured()) {
         void warmMongoConnection().catch(() => {});
     }

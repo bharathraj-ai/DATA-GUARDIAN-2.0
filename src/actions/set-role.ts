@@ -12,7 +12,7 @@ import { logger, redactEmail } from '@/lib/logger';
 
 /**
  * First-time onboarding only.
- * Any new user can pick OWNER or VENDOR — this choice is permanent.
+ * New users pick OWNER or VENDOR — this choice is permanent.
  * Uses an atomic updateMany guard so concurrent requests cannot double-set.
  */
 export async function setUserRole(role: AppRole): Promise<SetUserRoleResult> {
@@ -24,12 +24,10 @@ export async function setUserRole(role: AppRole): Promise<SetUserRoleResult> {
 
   const normalized = normalizeRole(role);
 
-  // Only OWNER and VENDOR are valid choices
   if (!SELF_SERVICE_ROLES.includes(normalized)) {
     return { success: false, error: 'Invalid role selection' };
   }
 
-  // Atomic: only update if onboarding is still incomplete
   const updated = await prisma.user.updateMany({
     where: {
       id: session.user.id,

@@ -1,7 +1,8 @@
 'use server';
 
 import { prisma } from '@/lib/prisma';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
+import { Readable } from 'stream';
 import { authorizeSecureLink } from '@/lib/linkAuthorization';
 import { checkDownloadRateLimit, extractClientIP, formatRateLimitError } from '@/lib/rate-limit';
 import { headers } from 'next/headers';
@@ -77,15 +78,9 @@ export async function getFilePreview(token: string, fileId: string): Promise<Fil
         }
 
         const caps = authResult.context.capabilities;
-        // Full base64 export is download-equivalent; editors may still load for edit UX
-        if (!caps.canDownload && !caps.canEdit) {
-            return {
-                success: false,
-                error: 'Preview export blocked: download is disabled for this link. Use the in-app viewer.',
-                restricted: true,
-                restrictionType: 'download_disabled',
-            };
-        }
+        // Full file export (image/PDF data URIs) requires download or edit.
+        // Spreadsheet/text/word in-app snippets are allowed for view-only links.
+        const allowFullExport = caps.canDownload || caps.canEdit;
 
         const requestHeaders = await headers();
         const clientIP = extractClientIP(requestHeaders);
@@ -130,8 +125,16 @@ export async function getFilePreview(token: string, fileId: string): Promise<Fil
             });
         };
 
-        // A. Images -> Base64 Data URI (V2.1: Full image, no scaling in first release)
+        // A. Images -> Base64 Data URI (download-equivalent)
         if (mime.startsWith('image/')) {
+            if (!allowFullExport) {
+                return {
+                    success: false,
+                    error: 'Image export is disabled. Open the in-app viewer instead.',
+                    restricted: true,
+                    restrictionType: 'download_disabled',
+                };
+            }
             const base64 = buffer.toString('base64');
             // Note: Image scaling can be added in future V2.2 if needed
             return {
@@ -142,8 +145,16 @@ export async function getFilePreview(token: string, fileId: string): Promise<Fil
             };
         }
 
-        // B. PDF -> Base64 Data URI (V2.1: Full PDF, page restriction coming in V2.2)
+        // B. PDF -> Base64 Data URI (download-equivalent)
         if (mime === 'application/pdf') {
+            if (!allowFullExport) {
+                return {
+                    success: false,
+                    error: 'PDF export is disabled. Open the in-app viewer instead.',
+                    restricted: true,
+                    restrictionType: 'download_disabled',
+                };
+            }
             const base64 = buffer.toString('base64');
             // Note: First-page-only restriction requires PDF parsing library
             // Can be implemented in V2.2 with pdf-lib or similar
@@ -190,16 +201,37 @@ export async function getFilePreview(token: string, fileId: string): Promise<Fil
         }
 
         if (looksSpreadsheet) {
-            const workbook = XLSX.read(buffer, { type: 'buffer', sheetRows: PREVIEW_ROW_LIMIT });
-            const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+            if (fileNameLower.endsWith('.xls') && !fileNameLower.endsWith('.xlsx')) {
+                return {
+                    success: false,
+                    error: 'Legacy .xls previews are disabled. Re-save as .xlsx or .csv.',
+                };
+            }
+            const workbook = new ExcelJS.Workbook();
+            const isCsv =
+                fileNameLower.endsWith('.csv') || mimeLowerEarly.includes('csv');
+            if (isCsv) {
+                await workbook.csv.read(Readable.from(buffer));
+            } else {
+                // ExcelJS typings conflict with Node Buffer generics across versions
+                await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer);
+            }
+            const firstSheet = workbook.worksheets[0];
             if (!firstSheet) {
                 return { success: false, error: 'Spreadsheet has no readable sheets' };
             }
-            const rawRows = (XLSX.utils.sheet_to_json(firstSheet, { header: 1 }) as unknown[][]) || [];
+            const rawRows: unknown[][] = [];
+            firstSheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+                if (rowNumber > PREVIEW_ROW_LIMIT) return;
+                const values = Array.isArray(row.values) ? row.values.slice(1) : [];
+                rawRows.push(values);
+            });
             const previewRows = rawRows
                 .slice(0, PREVIEW_ROW_LIMIT)
                 .map((row) => (Array.isArray(row) ? row.map(cellPreviewValue) : []));
-            const restricted = previewRows.length >= PREVIEW_ROW_LIMIT;
+            const restricted =
+                firstSheet.rowCount > PREVIEW_ROW_LIMIT ||
+                previewRows.length >= PREVIEW_ROW_LIMIT;
 
             if (restricted) {
                 await logRestriction('excel_rows', previewRows.length);

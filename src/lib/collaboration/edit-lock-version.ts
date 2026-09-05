@@ -30,11 +30,16 @@ export async function snapshotForPriorityTakeover(options: {
             select: {
                 id: true,
                 version: true,
+                fileName: true,
                 encryptedContent: true,
                 iv: true,
                 authTag: true,
                 encryptedDek: true,
                 fileSize: true,
+                mongoFileId: true,
+                mongoFile: {
+                    select: { gridFSId: true, isDeleted: true },
+                },
             },
         });
 
@@ -42,13 +47,16 @@ export async function snapshotForPriorityTakeover(options: {
             return { success: false, error: 'File not found' };
         }
 
-        if (!file.encryptedContent || !file.iv || !file.authTag) {
+        const { buildVersionSnapshot, createFileVersionRow } = await import('@/lib/file-version-store');
+        const snapshot = await buildVersionSnapshot(file, { moveLiveObject: false });
+
+        if (!snapshot) {
             await logEditLockAudit('AUTO_SAVE_BEFORE_TAKEOVER', linkId, {
                 actorUserId: createdBy,
                 documentId: fileId,
                 sessionId: actorSessionId,
                 reason: PRIORITY_TAKEOVER_REASON,
-                note: 'No inline ciphertext to snapshot; continuing takeover',
+                note: 'No ciphertext to snapshot; continuing takeover',
             });
             return { success: true, previousVersionId: null };
         }
@@ -67,21 +75,15 @@ export async function snapshotForPriorityTakeover(options: {
 
         const nextNumber = Math.max(file.version, (agg._max.versionNumber ?? 0) + 1, (latest?.versionNumber ?? 0) + 1);
 
-        const created = await prisma.fileVersion.create({
-            data: {
-                fileId,
-                versionNumber: nextNumber,
-                encryptedContent: file.encryptedContent,
-                iv: file.iv,
-                authTag: file.authTag,
-                encryptedDek: file.encryptedDek,
-                fileSize: file.fileSize,
-                changeType: PRIORITY_TAKEOVER_REASON,
-                changeDescription: `Priority takeover checkpoint by ${createdBy}`,
-                createdBy,
-                reason: PRIORITY_TAKEOVER_REASON,
-                previousVersionId: latest?.id ?? null,
-            },
+        const created = await createFileVersionRow({
+            fileId,
+            versionNumber: nextNumber,
+            snapshot,
+            changeType: PRIORITY_TAKEOVER_REASON,
+            changeDescription: `Priority takeover checkpoint by ${createdBy}`,
+            createdBy,
+            reason: PRIORITY_TAKEOVER_REASON,
+            previousVersionId: latest?.id ?? null,
         });
 
         await logEditLockAudit('DOCUMENT_VERSION_CREATED', linkId, {

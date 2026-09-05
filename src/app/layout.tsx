@@ -1,9 +1,10 @@
 import type { Metadata, Viewport } from "next";
+import { headers } from "next/headers";
 import { Inter } from 'next/font/google';
 import "./globals.css";
 import "./anthropic.css";
 import "./responsive.css";
-import Providers from "@/components/Providers";
+import AppSessionGate from "@/components/AppSessionGate";
 import ClientAppShell from "@/components/ClientAppShell";
 import SiteFooter from "@/components/SiteFooter";
 
@@ -29,7 +30,7 @@ export const metadata: Metadata = {
     default: "Secure Protocol - Enterprise Data Security",
     template: "%s | Secure Protocol",
   },
-  description: "Protect your sensitive data with military-grade encryption, ephemeral sessions, and complete access control. Share securely with OTP protection and instant revocation.",
+  description: "Zero-trust data sharing: every request is re-verified. AES-256-GCM at rest, OTP sessions, and instant revocation.",
   keywords: ["data protection", "encryption", "secure sharing", "privacy", "cybersecurity", "OTP", "self-destructing links", "zero trust"],
   authors: [{ name: "Secure Protocol" }],
   creator: "Secure Protocol",
@@ -42,20 +43,21 @@ export const metadata: Metadata = {
     locale: "en_US",
     siteName: "Secure Protocol",
     title: "Secure Protocol - Enterprise Secure Data Sharing",
-    description: "Share sensitive data with military-grade AES-256 encryption, OTP protection, and instant revocation. Zero-knowledge architecture ensures complete privacy.",
+    description: "Share sensitive data with zero-trust access, AES-256-GCM encryption at rest, OTP protection, and instant revocation.",
   },
   twitter: {
     card: "summary_large_image",
     title: "Secure Protocol - Secure Data Protection",
-    description: "Military-grade encryption. OTP protection. Instant revocation. Share sensitive data with confidence.",
+    description: "AES-256-GCM encryption at rest. OTP protection. Instant revocation. Share sensitive data with time-limited access.",
   },
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const nonce = (await headers()).get('x-nonce') ?? undefined;
   return (
     <html lang="en" className={inter.variable}>
       <head>
@@ -63,13 +65,13 @@ export default function RootLayout({
         <link rel="dns-prefetch" href="//accounts.google.com" />
         <link rel="preconnect" href="https://accounts.google.com" crossOrigin="anonymous" />
       </head>
-      <body className={inter.className}>
+      <body className={inter.className} data-csp-nonce={nonce || undefined}>
         <a href="#main-content" className="skip-to-content">Skip to main content</a>
-        <Providers>
+        <AppSessionGate>
           <ClientAppShell footer={<SiteFooter />}>
             {children}
           </ClientAppShell>
-        </Providers>
+        </AppSessionGate>
       </body>
     </html>
   );

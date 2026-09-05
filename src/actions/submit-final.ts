@@ -2,9 +2,8 @@
 
 import { prisma } from '@/lib/prisma';
 import { authorizeSecureLink } from '@/lib/linkAuthorization';
-import { encryptBuffer, generateDek, encryptDek } from '@/lib/crypto';
+import { encryptBuffer, generateDek } from '@/lib/crypto';
 import { validateMimeType, ALLOWED_EXTENSIONS } from '@/lib/security/file-validator';
-import { uploadToMongo } from '@/lib/mongo/operations';
 import path from 'path';
 import { logger, redactEmail } from '@/lib/logger';
 
@@ -92,7 +91,7 @@ export async function submitFinal(
         logger.info(`FileId: ${fileId}, Vendor: ${redactEmail(vendorEmail)}, FileName: ${uploadedFile.name}, Storage: ${isMongoBacked ? 'Mongo' : 'inline'}`);
 
         if (isMongoBacked) {
-            // ── Mongo path: encrypt then upload ciphertext to GridFS ─────
+            // Encrypt then store ciphertext in GridFS.
             const mongoFile = await prisma.mongoFile.findUnique({
                 where: { id: (fileRecord as any).mongoFileId },
                 select: { folder: true, uploadedBy: true, projectId: true, vendorId: true },
@@ -104,24 +103,28 @@ export async function submitFinal(
 
             const dek = generateDek();
             const { iv, authTag, encryptedContent } = encryptBuffer(fileBuffer, dek);
-            const encryptedDek = encryptDek(dek);
+            const { wrapDekForLink } = await import('@/lib/security/kms');
+            const encryptedDek = await wrapDekForLink(dek, authResult.context.secureLink.id);
 
-            const mongoUpload = await uploadToMongo({
-                buffer: encryptedContent,
-                originalFileName: fileRecord.fileName,
-                mimeType: mimeValidation.mimeType!,
-                fileExtension: ext.replace('.', ''),
-                folder: 'final-submissions',
+            const { putCiphertext, mongoPointerFromStorageKey, FINAL_FOLDER } = await import('@/lib/blob-store');
+            const storageKey = await putCiphertext(encryptedContent, {
+                fileName: fileRecord.fileName,
+                folder: FINAL_FOLDER,
                 uploadedBy: mongoFile.uploadedBy,
             });
+            const pointer = storageKey ? mongoPointerFromStorageKey(storageKey) : null;
+            if (!pointer) {
+                return { success: false, error: 'Object storage is not configured.' };
+            }
+            const checksum = (await import('crypto')).createHash('sha256').update(encryptedContent).digest('hex');
 
             await prisma.mongoFile.update({
                 where: { id: (fileRecord as any).mongoFileId },
                 data: {
-                    gridFSId: mongoUpload.gridFSId,
+                    gridFSId: pointer,
                     mimeType: mimeValidation.mimeType!,
                     fileSize: uploadedFile.size,
-                    checksum: mongoUpload.checksum,
+                    checksum,
                     folder: 'final-submissions',
                     status: 'submitted',
                 },
@@ -146,7 +149,8 @@ export async function submitFinal(
             // ── Legacy path: encrypt and store inline ────────────────
             const dek = generateDek();
             const { iv, authTag, encryptedContent } = encryptBuffer(fileBuffer, dek);
-            const encryptedDek = encryptDek(dek);
+            const { wrapDekForLink } = await import('@/lib/security/kms');
+            const encryptedDek = await wrapDekForLink(dek, authResult.context.secureLink.id);
 
             await prisma.userFile.update({
                 where: { id: fileId },

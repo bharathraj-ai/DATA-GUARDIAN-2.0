@@ -31,9 +31,9 @@ export function generateOTP(): string {
  * - HMAC with a secret key provides sufficient security
  */
 export function hashOTPSync(otp: string): string {
-    const secret = process.env.OTP_HMAC_SECRET || process.env.ENCRYPTION_KEY;
+    const secret = process.env.OTP_HMAC_SECRET;
     if (!secret) {
-        throw new Error('OTP_HMAC_SECRET or ENCRYPTION_KEY is required for OTP hashing');
+        throw new Error('OTP_HMAC_SECRET is required for OTP hashing');
     }
     return crypto.createHmac('sha256', secret).update(otp).digest('hex');
 }
@@ -53,25 +53,19 @@ export async function verifyOTPHash(otp: string, hash: string): Promise<boolean>
         return bcrypt.compare(otp, hash);
     }
 
-    // Prefer dedicated OTP secret; also accept legacy ENCRYPTION_KEY hashes
-    const secrets = [
-        process.env.OTP_HMAC_SECRET,
-        process.env.ENCRYPTION_KEY,
-    ].filter((s): s is string => Boolean(s));
-
-    if (secrets.length === 0) {
-        throw new Error('OTP_HMAC_SECRET or ENCRYPTION_KEY is required for OTP verification');
+    // Prefer dedicated OTP secret only. ENCRYPTION_KEY must never verify OTPs.
+    const secret = process.env.OTP_HMAC_SECRET;
+    if (!secret) {
+        throw new Error('OTP_HMAC_SECRET is required for OTP verification');
     }
 
     const hashBuf = Buffer.from(hash);
-    for (const secret of secrets) {
-        const computedHash = crypto.createHmac('sha256', secret).update(otp).digest('hex');
-        const computedBuf = Buffer.from(computedHash);
-        if (computedBuf.length === hashBuf.length && crypto.timingSafeEqual(computedBuf, hashBuf)) {
-            return true;
-        }
+    const computedHash = crypto.createHmac('sha256', secret).update(otp).digest('hex');
+    const computedBuf = Buffer.from(computedHash);
+    if (computedBuf.length !== hashBuf.length) {
+        return false;
     }
-    return false;
+    return crypto.timingSafeEqual(computedBuf, hashBuf);
 }
 
 /**

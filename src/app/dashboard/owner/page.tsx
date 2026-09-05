@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { auth } from '@/lib/auth';
 import { getOwnerDashboardData } from '@/actions/dashboard';
 import { getOnboardingStep } from '@/lib/onboarding';
-import { normalizeRole } from '@/lib/security/roles';
+import { normalizeRole, dashboardPathForRole } from '@/lib/security/roles';
 import OwnerDashboardClient from './OwnerDashboardClient';
 import DashboardSkeleton from '../DashboardSkeleton';
 
@@ -49,6 +49,7 @@ export default async function OwnerDashboardPage({
     if (normalizeRole(session.user.role) === 'VENDOR') {
         redirect('/dashboard/vendor');
     }
+
 
     const sp = await searchParams;
 

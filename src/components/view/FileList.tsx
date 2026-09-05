@@ -58,6 +58,7 @@ export const FileList = memo(function FileList({ token, files, isOwner }: FileLi
     const [previewData, setPreviewData] = useState<FilePreviewResult | null>(null);
     const [previewMeta, setPreviewMeta] = useState<{ fileName: string; fileType: string } | null>(null);
     const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
+    const [pdfPage, setPdfPage] = useState(1);
     const [isPreviewLoading, setIsPreviewLoading] = useState(false);
     const [isDownloadLoading, setIsDownloadLoading] = useState<string | null>(null);
     const pdfBlobUrlRef = useRef<string | null>(null);
@@ -68,6 +69,24 @@ export const FileList = memo(function FileList({ token, files, isOwner }: FileLi
     useEffect(() => () => {
         const url = pdfBlobUrlRef.current;
         if (url?.startsWith('blob:')) URL.revokeObjectURL(url);
+    }, []);
+
+    // Capture-resistant: drop in-memory preview blobs when the tab hides
+    // so a snip/camera frame is less likely to include a lingering object URL.
+    useEffect(() => {
+        const onVis = () => {
+            if (!document.hidden) return;
+            const url = pdfBlobUrlRef.current;
+            if (url?.startsWith('blob:')) {
+                URL.revokeObjectURL(url);
+                pdfBlobUrlRef.current = null;
+            }
+            setPdfBlobUrl(null);
+            setPreviewData(null);
+            setPreviewMeta(null);
+        };
+        document.addEventListener('visibilitychange', onVis);
+        return () => document.removeEventListener('visibilitychange', onVis);
     }, []);
 
     const handleEdit = useCallback(async (fileId: string) => {
@@ -81,6 +100,7 @@ export const FileList = memo(function FileList({ token, files, isOwner }: FileLi
         if (!capabilities.canPreview) return;
         setPreviewMeta({ fileName, fileType });
         setIsPreviewLoading(true);
+        setPdfPage(1);
         try {
             setPdfBlobUrl((prev) => {
                 if (prev?.startsWith('blob:')) URL.revokeObjectURL(prev);
@@ -104,12 +124,24 @@ export const FileList = memo(function FileList({ token, files, isOwner }: FileLi
                     content: blobUrl,
                     restricted: false,
                 });
+                void fetch('/api/analytics/view', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ token, fileId, pageNumber: 1 }),
+                }).catch(() => undefined);
                 return;
             }
 
             const res = await getFilePreview(token, fileId);
             if (res.success) {
                 setPreviewData(res);
+                void fetch('/api/analytics/view', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ token, fileId, pageNumber: 1 }),
+                }).catch(() => undefined);
             } else {
                 alert(res.error || 'Failed to open preview');
                 setPreviewMeta(null);
@@ -149,6 +181,7 @@ export const FileList = memo(function FileList({ token, files, isOwner }: FileLi
         });
         setPreviewData(null);
         setPreviewMeta(null);
+        setPdfPage(1);
     }, []);
 
     const previewOpen = Boolean(previewMeta);
@@ -328,10 +361,31 @@ export const FileList = memo(function FileList({ token, files, isOwner }: FileLi
                         )}
                         {previewData?.type === 'pdf' && (
                             pdfBlobUrl ? (
-                                <iframe
-                                    src={`${pdfBlobUrl}#toolbar=0&navpanes=0&scrollbar=1&view=FitH`}
-                                    title={previewMeta?.fileName || 'PDF preview'}
-                                />
+                                <>
+                                    <div className={styles.pageBar}>
+                                        <button
+                                            type="button"
+                                            className={styles.pageBtn}
+                                            disabled={pdfPage <= 1}
+                                            onClick={() => setPdfPage((p) => Math.max(1, p - 1))}
+                                        >
+                                            Previous page
+                                        </button>
+                                        <span className={styles.pageLabel}>Page {pdfPage}</span>
+                                        <button
+                                            type="button"
+                                            className={styles.pageBtn}
+                                            onClick={() => setPdfPage((p) => p + 1)}
+                                        >
+                                            Next page
+                                        </button>
+                                    </div>
+                                    <iframe
+                                        key={`${pdfBlobUrl}-p${pdfPage}`}
+                                        src={`${pdfBlobUrl}#page=${pdfPage}&toolbar=0&navpanes=0&scrollbar=0&view=FitH`}
+                                        title={previewMeta?.fileName || 'PDF preview'}
+                                    />
+                                </>
                             ) : (
                                 <div className={styles.viewerLoading}>Preparing PDF…</div>
                             )

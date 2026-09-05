@@ -6,7 +6,7 @@ export const dynamic = 'force-static';
 
 export const metadata: Metadata = {
     title: 'Services',
-    description: 'Explore Secure Protocol services: AES-256 encrypted sharing, self-destructing links, OTP protection, instant revocation, priority collaboration, and zero-knowledge architecture.',
+    description: 'Explore Secure Protocol services: zero-trust access, AES-256-GCM encrypted sharing, self-destructing links, OTP protection, instant revocation, and priority collaboration.',
 };
 
 export default function ServicesPage() {
@@ -75,12 +75,12 @@ export default function ServicesPage() {
                                 </div>
                                 <h3 className="srv-card-title">Secure File Sharing</h3>
                                 <p className="srv-card-desc">
-                                    Share sensitive documents, images, and files with military-grade encryption.
+                                    Share sensitive documents, images, and files with AES-256-GCM encryption at rest.
                                 </p>
                                 <ul className="srv-card-features">
                                     <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"></polyline></svg>Up to 15MB per file</li>
                                     <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"></polyline></svg>Multiple file formats supported</li>
-                                    <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"></polyline></svg>End-to-end encryption</li>
+                                    <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"></polyline></svg>Encryption at rest (AES-256-GCM)</li>
                                 </ul>
                             </div>
                         </ScrollReveal>
@@ -188,14 +188,14 @@ export default function ServicesPage() {
                                         </svg>
                                     </div>
                                 </div>
-                                <h3 className="srv-card-title">Zero-Knowledge Architecture</h3>
+                                <h3 className="srv-card-title">Encryption at Rest</h3>
                                 <p className="srv-card-desc">
-                                    We never store your unencrypted data. All encryption happens on your device before transmission.
+                                    Files are encrypted with AES-256-GCM before storage. After a zero-trust session check, the server unwraps keys for that request only. This is not zero-knowledge encryption.
                                 </p>
                                 <ul className="srv-card-features">
-                                    <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"></polyline></svg>Client-side encryption</li>
-                                    <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"></polyline></svg>No plaintext storage</li>
-                                    <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"></polyline></svg>GDPR compliant</li>
+                                    <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"></polyline></svg>Per-file data keys</li>
+                                    <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"></polyline></svg>No plaintext in object storage</li>
+                                    <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"></polyline></svg>TLS in transit</li>
                                 </ul>
                             </div>
                         </ScrollReveal>

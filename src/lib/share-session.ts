@@ -13,19 +13,18 @@ import crypto from 'crypto';
 import { generateSessionId } from '@/lib/crypto';
 
 function getSessionSecret(): string {
-  // Prefer dedicated secret; fall back for migration (never use ENCRYPTION_KEY alone long-term)
-  const secret =
-    process.env.SESSION_HMAC_SECRET ||
-    process.env.NEXTAUTH_SECRET ||
-    process.env.ENCRYPTION_KEY;
-  if (!secret) {
-    throw new Error('SESSION_HMAC_SECRET, NEXTAUTH_SECRET, or ENCRYPTION_KEY is required for share sessions');
+  if (process.env.SESSION_HMAC_SECRET) {
+    return process.env.SESSION_HMAC_SECRET;
   }
-  return secret;
+  throw new Error('SESSION_HMAC_SECRET is required for share sessions');
 }
 
-function sign(payload: string): string {
-  return crypto.createHmac('sha256', getSessionSecret()).update(payload).digest('hex');
+function sign(payload: string, secret = getSessionSecret()): string {
+  return crypto.createHmac('sha256', secret).update(payload).digest('hex');
+}
+
+function macMatches(payload: string, mac: string): boolean {
+  return timingSafeEqualHex(mac, sign(payload));
 }
 
 function timingSafeEqualHex(a: string, b: string): boolean {
@@ -111,8 +110,7 @@ export function verifyShareSession(
     }
 
     const emailNorm = decodeEmailPart(emailPart);
-    const expected = sign(`${shareToken}:${sessionId}:${expiresAt}:${emailNorm}`);
-    if (!timingSafeEqualHex(mac, expected)) {
+    if (!macMatches(`${shareToken}:${sessionId}:${expiresAt}:${emailNorm}`, mac)) {
       return { valid: false };
     }
 
@@ -131,10 +129,10 @@ export function verifyShareSession(
       return { valid: false };
     }
 
-    const expected = sign(`${shareToken}:${sessionId}:${expiresAt}`);
-    // Also accept MAC that includes empty email (new signer with legacy cookie)
-    const expectedWithEmptyEmail = sign(`${shareToken}:${sessionId}:${expiresAt}:`);
-    if (!timingSafeEqualHex(mac, expected) && !timingSafeEqualHex(mac, expectedWithEmptyEmail)) {
+    if (
+      !macMatches(`${shareToken}:${sessionId}:${expiresAt}`, mac) &&
+      !macMatches(`${shareToken}:${sessionId}:${expiresAt}:`, mac)
+    ) {
       return { valid: false };
     }
 

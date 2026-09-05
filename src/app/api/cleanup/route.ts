@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { executeCleanup } from '@/lib/cleanup-core';
 import { authorizeCronRequest } from '@/lib/security/cron-auth';
+import { bindRequestIdFromHeaders } from '@/lib/request-context';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,6 +10,7 @@ export const dynamic = 'force-dynamic';
  * Both require Authorization: Bearer CRON_SECRET.
  */
 async function runCleanup(request: Request) {
+  await bindRequestIdFromHeaders();
   const cron = authorizeCronRequest(request);
   if (!cron.ok) {
     return NextResponse.json(
@@ -33,6 +35,7 @@ async function runCleanup(request: Request) {
         deletedUserData: result.deletedUserData,
         deletedFiles: result.deletedFiles,
         deletedMongoFiles: result.deletedMongoFiles,
+        deletedStaleStaging: result.deletedStaleStaging,
         deletedAuditLogs: result.deletedAuditLogs,
       },
       { headers },

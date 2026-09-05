@@ -19,7 +19,7 @@ export const dynamic = 'force-static';
 export const metadata: Metadata = {
     title: 'How It Works | Secure Protocol',
     description:
-        'Learn how Secure Protocol secures your data in three simple steps — military-grade encryption, OTP authentication and instant revocation.',
+        'Learn how Secure Protocol applies zero-trust access in three steps — AES-256-GCM at rest, OTP authentication, and instant revocation.',
 };
 
 const STEPS = [
@@ -27,7 +27,7 @@ const STEPS = [
         num: '01',
         tag: 'Create',
         title: 'Enter your information',
-        desc: 'Add recipient details and the files you need to share. Everything is encrypted before it leaves your device.',
+        desc: 'Add recipient details and the files you need to share. The server encrypts each file with AES-256-GCM before it is stored.',
         icon: FileText,
         tone: 'blue',
         items: [
@@ -55,12 +55,12 @@ const STEPS = [
         num: '03',
         tag: 'Share',
         title: 'Share and stay in control',
-        desc: 'Send the link through any channel and the OTP separately. Revoke access instantly, even before expiry.',
+        desc: 'Send the share link on any channel. The OTP is emailed separately — revoke anytime.',
         icon: Share2,
         tone: 'purple',
         items: [
-            'Email, SMS, WhatsApp, or any app',
-            'OTP on a different channel',
+            'Share link via email or chat',
+            'OTP delivered by email only',
             'Auto-expires after the set duration',
             'One-click revocation anytime',
         ],
@@ -70,8 +70,8 @@ const STEPS = [
 const SECURITY = [
     {
         color: 'blue',
-        label: 'AES-256 Encryption',
-        desc: 'Military-grade encryption protects data in transit and at rest — no extra setup.',
+        label: 'AES-256 at rest',
+        desc: 'Files are stored as AES-256-GCM ciphertext. Keys unwrap only after a zero-trust session check.',
         icon: Shield,
     },
     {
@@ -94,14 +94,14 @@ const SECURITY = [
     },
     {
         color: 'pink',
-        label: 'Zero knowledge',
-        desc: 'We never see your unencrypted data. Complete privacy, by design.',
+        label: 'Encrypted at rest',
+        desc: 'Files are stored as AES-256-GCM ciphertext. The server unwraps keys only for authorized OTP sessions.',
         icon: EyeOff,
     },
     {
         color: 'cyan',
-        label: 'Secure by default',
-        desc: 'Every protection is on from the start. No configuration required.',
+        label: 'Zero-trust access',
+        desc: 'Every request is re-verified. OTP, signed session, and capabilities — never a client-supplied role.',
         icon: ShieldCheck,
     },
 ] as const;
@@ -123,12 +123,12 @@ export default function HowItWorksPage() {
                     <header className="hiw-map-intro">
                         <p className="hiw-map-kicker">The sharing protocol</p>
                         <h1 className="hiw-map-title">
-                            Owner encrypts. Vault holds.
+                            Team leader encrypts. Vault holds.
                             <br />
                             Vendor unlocks.
                         </h1>
                         <p className="hiw-map-lead">
-                            One sealed path from issue to session. Expiry, OTP, and revoke stay in your hands after send.
+                            Company → Manager → Team leader → Vendor. Expiry, emailed OTP, and revoke stay in your hands after send.
                         </p>
                     </header>
 
@@ -173,8 +173,8 @@ export default function HowItWorksPage() {
                         <span className="hiw-stat-label">AES encryption</span>
                     </div>
                     <div className="hiw-stat-item">
-                        <span className="hiw-stat-num gradient-text">100%</span>
-                        <span className="hiw-stat-label">Zero knowledge</span>
+                        <span className="hiw-stat-num gradient-text">Always</span>
+                        <span className="hiw-stat-label">Zero-trust access</span>
                     </div>
                     <div className="hiw-stat-item">
                         <span className="hiw-stat-num gradient-text">&lt; 60s</span>

@@ -16,11 +16,11 @@ function ErrorContent() {
         HostMismatch: {
             title: 'Open the app on port 3000',
             description:
-                'Google sign-in is bound to http://localhost:3000, but this tab used a different port. Another local app was occupying 3000. Restart Data Guardian, then sign in at http://localhost:3000.',
+                'Google sign-in is bound to http://localhost:3000, but this tab used a different port. Another local app was occupying 3000. Restart Secure Protocol, then sign in at http://localhost:3000.',
         },
         AccessDenied: {
             title: 'Access Denied',
-            description: 'You do not have permission to access this resource.',
+            description: 'You do not have permission to access this resource. Use an authorized company account if SSO or a hosted domain is required.',
         },
         Verification: {
             title: 'Verification Error',

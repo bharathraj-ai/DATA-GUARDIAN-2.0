@@ -41,6 +41,9 @@ export async function GET(
         );
         const caps = authResult.capabilities;
 
+        const { generateDeviceHash } = await import('@/lib/fingerprint');
+        const deviceFrag = generateDeviceHash(req.headers).slice(0, 8);
+
         return new NextResponse(new Uint8Array(bytes), {
             status: 200,
             headers: {
@@ -56,6 +59,10 @@ export async function GET(
                 'X-Can-Preview': caps.canPreview ? '1' : '0',
                 'X-Can-Comment': caps.canComment ? '1' : '0',
                 'X-Can-Download': caps.canDownload ? '1' : '0',
+                'X-Device-Hash': deviceFrag,
+                ...(authResult.effectiveEmail
+                    ? { 'X-Viewer-Email': encodeURIComponent(authResult.effectiveEmail) }
+                    : {}),
             },
         });
     } catch (err) {

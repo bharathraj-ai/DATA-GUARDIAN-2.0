@@ -13,6 +13,7 @@ export type RawFileData = {
     myAssignedLevel?: number;
     capabilities?: { canEdit: boolean; canPreview: boolean; canComment: boolean; canDownload: boolean };
     remainingSeconds?: number;
+    viewerEmail?: string | null;
     error?: string;
 };
 
@@ -71,6 +72,7 @@ export async function getRawFileForEdit(token: string, fileId: string): Promise<
                 0,
                 Math.floor((secureLink.expiresAt.getTime() - Date.now()) / 1000),
             ),
+            viewerEmail: authResult.context.effectiveEmail || null,
         };
 
     } catch (error) {

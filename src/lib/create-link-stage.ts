@@ -2,10 +2,9 @@ import 'server-only';
 
 import path from 'path';
 import { ObjectId } from 'mongodb';
-import { encryptBuffer, encryptDek, generateDek } from '@/lib/crypto';
+import { encryptBuffer, generateDek } from '@/lib/crypto';
 import { ALLOWED_EXTENSIONS, validateMimeType } from '@/lib/security/file-validator';
 import { getMongoDb, withMongoRetry } from '@/lib/mongo/client';
-import { uploadToMongo } from '@/lib/mongo/operations';
 
 export const LINK_STAGING_FOLDER = 'link-staging';
 export const MAX_SINGLE_FILE_SIZE = 15 * 1024 * 1024;
@@ -24,6 +23,7 @@ export type PreparedLinkFile = {
     iv: string;
     authTag: string;
     encryptedDek: string;
+    scanStatus: string;
 };
 
 export function assertSafeUploadName(fileName: string): string {
@@ -66,31 +66,43 @@ export async function stagePlainFile(params: {
         throw new Error(`File "${sanitizedName}": ${mimeCheck.error}`);
     }
     const trustedMimeType = mimeCheck.mimeType!;
+    const { scanUploadBuffer, assertScanAllowed } = await import('@/lib/security/malware-scan');
+    const scan = await scanUploadBuffer(params.buffer, sanitizedName);
+    assertScanAllowed(scan, sanitizedName);
+
     const dek = generateDek();
     const { iv, authTag, encryptedContent } = encryptBuffer(params.buffer, dek);
-    const encryptedDek = encryptDek(dek);
+    const { wrapDek, kmsHttpEnabled } = await import('@/lib/security/kms');
+    let keyId: string | null = null;
+    if (kmsHttpEnabled()) {
+        const { kmsKeyIdForUser } = await import('@/lib/tenant');
+        keyId = await kmsKeyIdForUser(params.uploadedBy);
+    }
+    const encryptedDek = await wrapDek(dek, keyId);
 
-    const uploadResult = await uploadToMongo({
-        buffer: encryptedContent,
+    const { putStagedCiphertext } = await import('@/lib/blob-store');
+    const uploaded = await putStagedCiphertext(encryptedContent, {
         originalFileName: sanitizedName,
         mimeType: trustedMimeType,
         fileExtension: ext.replace('.', ''),
-        folder: LINK_STAGING_FOLDER,
-        uploadedBy: params.uploadedBy,
-        classification: 'INTERNAL',
-        extraMetadata: { iv, authTag, encryptedDek, originalFileName: sanitizedName },
-    });
-
-    return {
-        gridFSId: uploadResult.gridFSId,
-        fileName: sanitizedName,
-        fileType: trustedMimeType,
-        fileSize: uploadResult.fileSize,
-        fileExtension: ext.replace('.', ''),
-        checksum: uploadResult.checksum,
         iv,
         authTag,
         encryptedDek,
+        uploadedBy: params.uploadedBy,
+        scanStatus: scan.status,
+    });
+
+    return {
+        gridFSId: uploaded.pointer,
+        fileName: sanitizedName,
+        fileType: trustedMimeType,
+        fileSize: uploaded.fileSize,
+        fileExtension: ext.replace('.', ''),
+        checksum: uploaded.checksum,
+        iv,
+        authTag,
+        encryptedDek,
+        scanStatus: scan.status,
     };
 }
 
@@ -103,6 +115,7 @@ export async function loadStagedFiles(
         throw new Error(`Too many files. Maximum ${MAX_FILES} files allowed.`);
     }
     const unique = [...new Set(gridFSIds)];
+
     if (unique.some((id) => !OBJECT_ID_RE.test(id))) {
         throw new Error('Invalid staged file id.');
     }
@@ -140,12 +153,13 @@ export async function loadStagedFiles(
             iv: meta.iv,
             authTag: meta.authTag,
             encryptedDek: meta.encryptedDek,
+            scanStatus: String(meta.scanStatus || 'pending'),
         };
     });
 }
 
-export async function markStagedFilesLinked(gridFSIds: string[]): Promise<void> {
-    if (gridFSIds.length === 0) return;
+export async function markStagedFilesLinked(gridFSIds: string[]): Promise<string[]> {
+    if (gridFSIds.length === 0) return [];
     await withMongoRetry(async () => {
         const db = await getMongoDb();
         await db.collection('uploads.files').updateMany(
@@ -153,4 +167,44 @@ export async function markStagedFilesLinked(gridFSIds: string[]): Promise<void> 
             { $set: { 'metadata.folder': 'vendor-uploads' } },
         );
     });
+    return gridFSIds;
+}
+
+export const STAGING_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Delete GridFS objects left in `link-staging` after an aborted create-link.
+ * Linked files are moved to `vendor-uploads` and are not touched.
+ */
+export async function reapStaleStagedFiles(options?: {
+    maxAgeMs?: number;
+    limit?: number;
+}): Promise<number> {
+    const { isMongoConfigured } = await import('@/lib/mongo/client');
+    if (!isMongoConfigured()) return 0;
+
+    const maxAgeMs = options?.maxAgeMs ?? STAGING_MAX_AGE_MS;
+    const limit = Math.min(500, Math.max(1, options?.limit ?? 100));
+    const cutoff = new Date(Date.now() - maxAgeMs);
+
+    const stale = await withMongoRetry(async () => {
+        const db = await getMongoDb();
+        return db
+            .collection('uploads.files')
+            .find({
+                'metadata.folder': LINK_STAGING_FOLDER,
+                uploadDate: { $lt: cutoff },
+            })
+            .project({ _id: 1 })
+            .limit(limit)
+            .toArray();
+    });
+
+    if (stale.length === 0) return 0;
+
+    const { deleteFromMongo } = await import('@/lib/mongo/operations');
+    const results = await Promise.allSettled(
+        stale.map((doc) => deleteFromMongo(String(doc._id))),
+    );
+    return results.filter((r) => r.status === 'fulfilled').length;
 }

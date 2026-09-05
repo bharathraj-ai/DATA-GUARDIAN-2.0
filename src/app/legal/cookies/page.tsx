@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
     title: 'Cookie Policy',
-    description: 'Data Guardian Cookie Policy. Learn about the minimal cookies we use for authentication and security.',
+    description: 'Secure Protocol Cookie Policy. Learn about the minimal cookies we use for authentication and security.',
 };
 
 export default function CookiePolicyPage() {
@@ -24,7 +24,7 @@ export default function CookiePolicyPage() {
 
                     <section className="legal-section">
                         <h2>2. Cookies We Use</h2>
-                        <p>Data Guardian uses only essential cookies required for the platform to function:</p>
+                        <p>Secure Protocol uses only essential cookies required for the platform to function:</p>
 
                         <div className="cookie-table-wrapper">
                             <table className="cookie-table">
@@ -60,7 +60,7 @@ export default function CookiePolicyPage() {
                         <h2>3. No Tracking Cookies</h2>
                         <p>
                             We do <strong>not</strong> use any analytics, advertising, or tracking cookies.
-                            Data Guardian does not track your browsing behavior across other websites.
+                            Secure Protocol does not track your browsing behavior across other websites.
                         </p>
                     </section>
 
@@ -69,7 +69,7 @@ export default function CookiePolicyPage() {
                         <p>
                             You can control and delete cookies through your browser settings. Please note
                             that disabling essential cookies will prevent you from using authenticated
-                            features of Data Guardian.
+                            features of Secure Protocol.
                         </p>
                     </section>
 

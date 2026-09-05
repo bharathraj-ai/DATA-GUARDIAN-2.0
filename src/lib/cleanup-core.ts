@@ -7,6 +7,7 @@ export type CleanupResult = {
     deletedFiles: number;
     deletedAuditLogs: number;
     deletedMongoFiles: number;
+    deletedStaleStaging: number;
     error?: string;
 };
 
@@ -24,17 +25,18 @@ type LinkCleanupRow = {
         id: string;
         mongoFileId: string | null;
         mongoFile: { id: string; gridFSId: string } | null;
+        FileVersion?: { storageKey: string | null }[];
     }[];
 };
 
 async function deleteGridFSFiles(gridFSIds: string[]) {
     if (gridFSIds.length === 0) return;
     try {
-        const { deleteFromMongo } = await import('@/lib/mongo/operations');
-        await Promise.allSettled(gridFSIds.map((id) => deleteFromMongo(id)));
-        console.log(`[CLEANUP] Batch: deleted ${gridFSIds.length} GridFS file(s)`);
+        const { deleteLiveObjects } = await import('@/lib/blob-store');
+        await deleteLiveObjects(gridFSIds);
+        console.log(`[CLEANUP] Batch: deleted ${gridFSIds.length} object-store file(s)`);
     } catch (err) {
-        console.error('[CLEANUP] Batch GridFS deletion error (non-blocking):', err);
+        console.error('[CLEANUP] Batch object-store deletion error (non-blocking):', err);
     }
 }
 
@@ -52,9 +54,7 @@ async function stampSurvivingRecords(links: LinkCleanupRow[], now: Date) {
 
             const status = link.isRevoked ? 'revoked' : 'expired';
             const vendorEmail =
-                link.LinkAccess.length > 1
-                    ? link.LinkAccess.map((a) => a.vendorEmail).join(', ')
-                    : (link.LinkAccess[0]?.vendorEmail || null);
+                link.LinkAccess.map((a) => a.vendorEmail).filter(Boolean).join(', ') || null;
 
             try {
                 const { stampSendRecord } = await import('@/lib/send-record');
@@ -152,6 +152,16 @@ async function purgeLinkRows(ids: {
 
 export async function executeCleanup(options?: { ownerId?: string }): Promise<CleanupResult> {
     try {
+        try {
+            const { processDueJobs } = await import('@/lib/jobs');
+            await processDueJobs(25);
+        } catch (err) {
+            console.warn(
+                '[CLEANUP] job drain skipped:',
+                err instanceof Error ? err.message : err,
+            );
+        }
+
         const now = new Date();
         const ownerFilter = options?.ownerId ? { ownerId: options.ownerId } : {};
 
@@ -159,6 +169,7 @@ export async function executeCleanup(options?: { ownerId?: string }): Promise<Cl
         let totalDeletedUserData = 0;
         let totalDeletedFiles = 0;
         let totalDeletedMongoFiles = 0;
+        let totalDeletedStaleStaging = 0;
         const totalDeletedAuditLogs = 0; // Audit logs are preserved
 
         let hasMore = true;
@@ -194,6 +205,9 @@ export async function executeCleanup(options?: { ownerId?: string }): Promise<Cl
                             mongoFile: {
                                 select: { id: true, gridFSId: true },
                             },
+                            FileVersion: {
+                                select: { storageKey: true },
+                            },
                         },
                     },
                     expiresAt: true,
@@ -208,15 +222,27 @@ export async function executeCleanup(options?: { ownerId?: string }): Promise<Cl
             }
 
             const allGridFSIds: string[] = [];
+            const versionKeys: string[] = [];
             for (const link of linksBatch) {
                 for (const file of link.UserFile) {
                     if (file.mongoFile?.gridFSId) {
                         allGridFSIds.push(file.mongoFile.gridFSId);
                     }
+                    for (const version of file.FileVersion ?? []) {
+                        if (version.storageKey) versionKeys.push(version.storageKey);
+                    }
                 }
             }
 
             await deleteGridFSFiles(allGridFSIds);
+            if (versionKeys.length > 0) {
+                const { deleteCiphertexts, storageKeyForPointer } = await import('@/lib/blob-store');
+                const live = new Set(
+                    allGridFSIds.map((id) => storageKeyForPointer(id)).filter((k): k is string => Boolean(k)),
+                );
+                await deleteCiphertexts(versionKeys.filter((key) => !live.has(key)));
+                totalDeletedMongoFiles += versionKeys.length;
+            }
             totalDeletedMongoFiles += allGridFSIds.length;
 
             await stampSurvivingRecords(linksBatch, now);
@@ -242,12 +268,26 @@ export async function executeCleanup(options?: { ownerId?: string }): Promise<Cl
             await new Promise((resolve) => setTimeout(resolve, 50));
         }
 
-        if (totalDeletedLinks > 0) {
+        // Global cron only — owner-scoped cleanup must not delete other users' staging uploads.
+        if (!options?.ownerId) {
+            try {
+                const { reapStaleStagedFiles } = await import('@/lib/create-link-stage');
+                totalDeletedStaleStaging = await reapStaleStagedFiles();
+            } catch (err) {
+                console.warn(
+                    '[CLEANUP] staging reap skipped:',
+                    err instanceof Error ? err.message : err,
+                );
+            }
+        }
+
+        if (totalDeletedLinks > 0 || totalDeletedStaleStaging > 0) {
             console.log(
                 `[CLEANUP] Purged ${totalDeletedLinks} links, ` +
                 `${totalDeletedUserData} encrypted records, ` +
                 `${totalDeletedFiles} files, ` +
                 `${totalDeletedMongoFiles} GridFS objects, ` +
+                `${totalDeletedStaleStaging} stale staging uploads, ` +
                 `${totalDeletedAuditLogs} audit logs`
             );
         }
@@ -259,6 +299,7 @@ export async function executeCleanup(options?: { ownerId?: string }): Promise<Cl
             deletedFiles: totalDeletedFiles,
             deletedAuditLogs: totalDeletedAuditLogs,
             deletedMongoFiles: totalDeletedMongoFiles,
+            deletedStaleStaging: totalDeletedStaleStaging,
         };
     } catch (error) {
         console.error('Cleanup error:', error instanceof Error ? error.message : 'Unknown');
@@ -269,6 +310,7 @@ export async function executeCleanup(options?: { ownerId?: string }): Promise<Cl
             deletedFiles: 0,
             deletedAuditLogs: 0,
             deletedMongoFiles: 0,
+            deletedStaleStaging: 0,
             error: 'Cleanup failed',
         };
     }
@@ -300,6 +342,9 @@ export async function executeSingleLinkCleanup(token: string): Promise<{ success
                         mongoFile: {
                             select: { id: true, gridFSId: true },
                         },
+                        FileVersion: {
+                            select: { storageKey: true },
+                        },
                     },
                 },
             },
@@ -317,13 +362,24 @@ export async function executeSingleLinkCleanup(token: string): Promise<{ success
         }
 
         const mongoGridFSIds: string[] = [];
+        const versionKeys: string[] = [];
         for (const file of secureLink.UserFile) {
             if (file.mongoFile?.gridFSId) {
                 mongoGridFSIds.push(file.mongoFile.gridFSId);
             }
+            for (const version of file.FileVersion ?? []) {
+                if (version.storageKey) versionKeys.push(version.storageKey);
+            }
         }
 
         await deleteGridFSFiles(mongoGridFSIds);
+        if (versionKeys.length > 0) {
+            const { deleteCiphertexts, storageKeyForPointer } = await import('@/lib/blob-store');
+            const live = new Set(
+                mongoGridFSIds.map((id) => storageKeyForPointer(id)).filter((k): k is string => Boolean(k)),
+            );
+            await deleteCiphertexts(versionKeys.filter((key) => !live.has(key)));
+        }
         await stampSurvivingRecords([secureLink], now);
 
         const mongoFileIds = secureLink.UserFile

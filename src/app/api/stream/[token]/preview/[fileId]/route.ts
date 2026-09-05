@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { decryptBuffer, decryptDek } from '@/lib/crypto';
+import { decryptBuffer } from '@/lib/crypto';
+import { unwrapDek } from '@/lib/security/kms';
 import { authorizeSecureLink } from '@/lib/linkAuthorization';
-import { downloadFromMongo } from '@/lib/mongo/operations';
+import { downloadLiveObject } from '@/lib/blob-store';
 import { logger } from '@/lib/logger';
 import { gridFsIdForFile } from '@/lib/security/resource-ownership';
 import { checkDownloadRateLimit, checkLinkRateLimit, extractClientIP } from '@/lib/rate-limit';
@@ -36,6 +37,10 @@ export async function GET(
             );
         }
 
+        const caps = authResult.context.capabilities;
+        if (!caps.canPreview) {
+            return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+        }
         const secureLink = authResult.context.secureLink;
         const { loadUserFileContentForLink } = await import('@/lib/security/resource-ownership');
         const fileRecord = await loadUserFileContentForLink(fileId, secureLink.id);
@@ -59,7 +64,7 @@ export async function GET(
         if (fileRecord.encryptedContent) {
             try {
                 const dek = fileRecord.encryptedDek
-                    ? decryptDek(fileRecord.encryptedDek)
+                    ? await unwrapDek(fileRecord.encryptedDek)
                     : undefined;
                 buffer = decryptBuffer(
                     fileRecord.encryptedContent,
@@ -81,11 +86,11 @@ export async function GET(
                     );
                 }
 
-                const downloadedBuffer = await downloadFromMongo(gridFSId, fileRecord.fileSize);
+                const downloadedBuffer = await downloadLiveObject(gridFSId, fileRecord.fileSize);
 
                 if (fileRecord.iv && fileRecord.authTag) {
                     const dek = fileRecord.encryptedDek
-                        ? decryptDek(fileRecord.encryptedDek)
+                        ? await unwrapDek(fileRecord.encryptedDek)
                         : undefined;
                     buffer = decryptBuffer(
                         downloadedBuffer,
@@ -115,7 +120,7 @@ export async function GET(
             headers: {
                 'Content-Type': mimeType,
                 'Content-Length': buffer.length.toString(),
-                'Content-Disposition': `inline; filename="${encodeURIComponent(fileRecord.fileName)}"`,
+                'Content-Disposition': 'inline',
                 'Cache-Control': 'no-store, no-cache, must-revalidate',
                 'X-Content-Type-Options': 'nosniff',
             },

@@ -56,7 +56,7 @@ function SignInContent() {
                 <p className={styles.kicker}>{isJoinFlow ? 'First session' : 'Returning session'}</p>
 
                 <h1 className={styles.title}>
-                    {isJoinFlow ? 'Start with Data Guardian' : 'Welcome back'}
+                    {isJoinFlow ? 'Start with Secure Protocol' : 'Welcome back'}
                 </h1>
 
                 <p className={styles.sub}>
@@ -87,6 +87,18 @@ function SignInContent() {
                     </svg>
                     Continue with Google
                 </button>
+
+                {process.env.NEXT_PUBLIC_SSO_NAME ? (
+                    <button
+                        type="button"
+                        onClick={() => signIn('oidc', { callbackUrl })}
+                        className={styles.google}
+                        style={{ marginTop: 12 }}
+                        suppressHydrationWarning
+                    >
+                        Continue with {process.env.NEXT_PUBLIC_SSO_NAME}
+                    </button>
+                ) : null}
 
                 <div className={styles.trust}>
                     <Shield size={16} strokeWidth={2} />

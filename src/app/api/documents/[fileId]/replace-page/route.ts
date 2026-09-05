@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { encryptBuffer, decryptBuffer, generateDek, encryptDek, decryptDek } from '@/lib/crypto';
+import { encryptBuffer, generateDek } from '@/lib/crypto';
 import { authorizeApiRequest } from '@/lib/api-auth';
+import { decryptUserFileBytes } from '@/lib/decrypt-user-file';
+import {
+  buildVersionSnapshot,
+  createFileVersionRow,
+  persistLiveCiphertext,
+} from '@/lib/file-version-store';
 export const dynamic = 'force-dynamic';
 
 /**
@@ -26,7 +32,6 @@ export async function POST(
       return NextResponse.json({ error: 'Missing fields' }, { status: 400 });
     }
 
-    // Auth (Zero-Trust Session + API Security)
     const authResult = await authorizeApiRequest(fileId, token, { httpMethod: req.method, action: 'edit', includeContent: true });
     if (authResult.errorResponse) {
       return authResult.errorResponse;
@@ -39,16 +44,8 @@ export async function POST(
       return NextResponse.json({ error: 'Page replacement only supported for PDFs' }, { status: 400 });
     }
 
-    // Decrypt existing PDF
-    const dek = (file as any).encryptedDek ? decryptDek((file as any).encryptedDek) : undefined;
-    const originalBytes = decryptBuffer(
-      file.encryptedContent!,
-      file.iv!,
-      file.authTag!,
-      dek
-    );
+    const originalBytes = await decryptUserFileBytes(file as never);
 
-    // Use pdf-lib to replace the page
     const { PDFDocument } = await import('pdf-lib');
     const originalDoc = await PDFDocument.load(originalBytes);
 
@@ -62,34 +59,34 @@ export async function POST(
     const newPdfBytes = await originalDoc.save();
     const newBuf = Buffer.from(newPdfBytes);
 
-    // Snapshot current → FileVersion
+    const snapshot = await buildVersionSnapshot(file as never, { moveLiveObject: true });
     const versionCount = await prisma.fileVersion.count({ where: { fileId } });
-    await prisma.fileVersion.create({
-      data: {
+    if (snapshot) {
+      await createFileVersionRow({
         fileId,
         versionNumber: versionCount + 1,
-        encryptedContent: file.encryptedContent!,
-        iv: file.iv!,
-        authTag: file.authTag!,
-        fileSize: file.fileSize,
+        snapshot,
         changeType: 'page_replace',
         changeDescription: `Replaced page ${pageNumber}`,
-      },
-    });
+      });
+    }
 
-    // Encrypt and save new bytes
     const newDek = generateDek();
     const encrypted = encryptBuffer(newBuf, newDek);
-    const encryptedDekStr = encryptDek(newDek);
-    await prisma.userFile.update({
-      where: { id: fileId },
-      data: {
-        encryptedContent: encrypted.encryptedContent,
-        iv: encrypted.iv,
-        authTag: encrypted.authTag,
-        encryptedDek: encryptedDekStr,
-        fileSize: newBuf.length,
-      },
+    const { wrapDekForLink } = await import('@/lib/security/kms');
+    const encryptedDekStr = await wrapDekForLink(newDek, authResult.secureLink.id);
+    const ext = (file.fileName || 'document.pdf').split('.').pop() || 'pdf';
+    await persistLiveCiphertext({
+      fileId,
+      fileName: file.fileName || 'document.pdf',
+      mimeType: file.fileType || 'application/pdf',
+      fileExtension: ext,
+      ciphertext: encrypted.encryptedContent,
+      iv: encrypted.iv,
+      authTag: encrypted.authTag,
+      encryptedDek: encryptedDekStr,
+      plaintextSize: newBuf.length,
+      existingMongoFileId: (file as { mongoFileId?: string | null }).mongoFileId,
     });
 
     return NextResponse.json({ success: true, newVersion: versionCount + 1 });

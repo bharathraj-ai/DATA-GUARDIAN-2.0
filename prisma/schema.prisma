@@ -39,12 +39,15 @@ model AuditLog {
   ownerId    String?
   metadata   String?
   reason     String?
+  prevHash   String?
+  entryHash  String?
   SecureLink SecureLink? @relation(fields: [linkId], references: [id], onDelete: SetNull)
   @@index([action])
   @@index([linkId])
   @@index([timestamp])
   @@index([linkId, action, timestamp])
   @@index([ownerId, timestamp])
+  @@index([entryHash])
 }
 
 model SecureLink {
@@ -72,19 +75,23 @@ model SecureLink {
   maxViews           Int?       // Null means unlimited
   maxDownloads       Int?       // Null means unlimited
   ownerId            String?
+  organizationId     String?
   AuditLog           AuditLog[]
   User               User?      @relation(fields: [ownerId], references: [id])
+  Organization       Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   UserData           UserData      @relation(fields: [userId], references: [id], onDelete: Cascade)
   UserFile           UserFile[]
   LinkAccess         LinkAccess[]
   ChatMessage        ChatMessage[]
   VendorAccess       VendorAccess[]
+  FileViewEvent      FileViewEvent[]
   @@index([expiresAt])
   @@index([ownerId])
   @@index([ownerId, createdAt])
   @@index([ownerId, isRevoked, expiresAt])
   @@index([isRevoked])
   @@index([allowedVendorEmail])
+  @@index([organizationId])
 }
 enum VendorStatus {
   active
@@ -172,23 +179,25 @@ model Session {
 }
 
 model User {
-  id            String       @id @default(cuid())
-  email         String       @unique
-  emailVerified DateTime?
-  name          String?
-  image         String?
-  role          String       @default("VENDOR")
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
-  roleSelected  Boolean      @default(false)
-  Account       Account[]
-  SecureLink    SecureLink[]
-  Session       Session[]
-  SendRecord    SendRecord[]
-  Document      Document[]
-  documentGrants DocumentGrant[] @relation("DocumentGrantee")
+  id             String       @id @default(cuid())
+  email          String       @unique
+  emailVerified  DateTime?
+  name           String?
+  image          String?
+  role           String       @default("VENDOR")
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  roleSelected   Boolean      @default(false)
+  organizationId String?
+  Account        Account[]
+  SecureLink     SecureLink[]
+  Session        Session[]
+  SendRecord     SendRecord[]
+  Organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  memberships    OrganizationMember[]
 
   @@index([role])
+  @@index([organizationId])
 }
 
 model UserData {
@@ -232,7 +241,8 @@ model FileVersion {
   id                String   @id @default(cuid())
   fileId            String
   versionNumber     Int
-  encryptedContent  Bytes
+  encryptedContent  Bytes?   // legacy inline ciphertext; new rows use storageKey
+  storageKey        String?  // gridfs:<oid> object-store pointer
   iv                String
   authTag           String
   encryptedDek      String?
@@ -250,6 +260,7 @@ model FileVersion {
   @@index([createdAt])
   @@index([createdBy])
   @@index([reason])
+  @@index([storageKey])
 }
 
 model VerificationToken {
@@ -366,87 +377,83 @@ model ChatMessage {
 }
 
 // ============================================
-// ONLYOFFICE DOCUMENT MANAGEMENT
+// TENANT + ANALYTICS
 // ============================================
 
-/// Secure document metadata for ONLYOFFICE-managed files.
-/// Actual files are stored on disk at storagePath — never publicly accessible.
-model Document {
-  id             String             @id @default(cuid())
-  fileName       String
-  fileType       String             // Extension: docx, xlsx, pptx, etc.
-  mimeType       String             @default("application/octet-stream")
-  storagePath    String             // Relative path inside secure-storage
-  fileSize       Int                @default(0)
-  ownerId        String
-  classification String             @default("INTERNAL") // PUBLIC | INTERNAL | CONFIDENTIAL | RESTRICTED
-  currentVersion Int                @default(1)
-  isDeleted      Boolean            @default(false)
-  createdAt      DateTime           @default(now())
-  updatedAt      DateTime           @updatedAt
-  owner          User               @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  versions       DocumentVersion[]
-  auditLogs      DocumentAuditLog[]
-  grants         DocumentGrant[]
+model Organization {
+  id            String               @id @default(cuid())
+  name          String
+  slug          String               @unique
+  allowedDomain String?
+  kmsKeyId      String?
+  /// FREE | TEAM | ENTERPRISE — plan limits enforced on create-link
+  plan          String               @default("FREE")
+  suspendedAt   DateTime?
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  members       OrganizationMember[]
+  invites       OrganizationInvite[]
+  users         User[]
+  links         SecureLink[]
 
-  @@index([ownerId])
-  @@index([classification])
-  @@index([createdAt])
-  @@index([isDeleted])
-  @@index([ownerId, isDeleted, createdAt])
+  @@index([allowedDomain])
+  @@index([plan])
 }
 
-/// Explicit grant for non-owner access to ONLYOFFICE-backed documents (deny-by-default).
-model DocumentGrant {
-  id          String   @id @default(cuid())
-  documentId  String
-  granteeId   String
-  permission  String   @default("view") // view | edit
-  createdAt   DateTime @default(now())
-  document    Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
-  grantee     User     @relation("DocumentGrantee", fields: [granteeId], references: [id], onDelete: Cascade)
+model OrganizationMember {
+  id             String       @id @default(cuid())
+  organizationId String
+  userId         String
+  /// OWNER
+  role           String       @default("OWNER")
+  /// Manager who oversees this team leader (userId of a MANAGER member)
+  managerUserId  String?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@unique([documentId, granteeId])
-  @@index([granteeId])
-}
-
-/// Version history entry — stores path to previous version on disk.
-model DocumentVersion {
-  id          String   @id @default(cuid())
-  documentId  String
-  version     Int
-  storagePath String   // e.g. /secure-storage/versions/{docId}/{version}.docx
-  fileSize    Int      @default(0)
-  changeType  String   @default("edit") // "edit" | "autosave" | "force_save" | "restore"
-  changedBy   String?  // userId who triggered the save
-  createdAt   DateTime @default(now())
-  document    Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
-
-  @@unique([documentId, version])
-  @@index([documentId])
-  @@index([createdAt])
-}
-
-/// Append-only audit log for every document event.
-model DocumentAuditLog {
-  id         String   @id @default(cuid())
-  documentId String
-  userId     String?
-  action     String   // "upload" | "view" | "edit" | "download" | "delete"
-  ipAddress  String?
-  userAgent  String?
-  metadata   String?  // JSON — extra context
-  createdAt  DateTime @default(now())
-  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
-
-  @@index([documentId])
+  @@unique([organizationId, userId])
   @@index([userId])
-  @@index([action])
-  @@index([createdAt])
-  @@index([documentId, createdAt])
+  @@index([managerUserId])
+  @@index([organizationId, role])
 }
 
-/// Real-time collaboration chat messages per document.
+/// Pending invite to join a company as OWNER.
+model OrganizationInvite {
+  id             String       @id @default(cuid())
+  organizationId String
+  email          String
+  /// OWNER
+  role           String
+  managerUserId  String?
+  invitedById    String
+  token          String       @unique @default(cuid())
+  acceptedAt     DateTime?
+  expiresAt      DateTime
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, email])
+  @@index([email])
+  @@index([token])
+  @@index([expiresAt])
+}
+
+model FileViewEvent {
+  id          String     @id @default(cuid())
+  linkId      String
+  fileId      String
+  viewerEmail String?
+  pageNumber  Int        @default(1)
+  createdAt   DateTime   @default(now())
+  SecureLink  SecureLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
+
+  @@index([linkId, createdAt])
+  @@index([fileId, createdAt])
+  @@index([linkId, fileId])
+}
+
+/// Real-time collaboration chat messages per file.
 model DocumentChatMessage {
   id         String   @id @default(cuid())
   fileId     String
@@ -467,10 +474,10 @@ model DocumentChatMessage {
 // MONGODB FILE MANAGEMENT
 // ============================================
 
-/// Mongo-stored file metadata. Actual files live in MongoDB GridFS.
+/// File metadata in Postgres. Ciphertext lives in MongoDB GridFS (24-hex ObjectId).
 model MongoFile {
   id               String        @id @default(cuid())
-  gridFSId         String        @unique    // GridFS file _id
+  gridFSId         String        @unique    // GridFS ObjectId
   originalFileName String                   // User-facing filename
   mimeType         String                   // Server-validated MIME type
   fileExtension    String                   // e.g. "pdf", "docx"
@@ -547,4 +554,21 @@ model MongoAccessLog {
   @@index([accessType])
   @@index([createdAt])
   @@index([revokedAt])
+}
+
+/// Durable background work (OTP email, blob GC). Drained by /api/cleanup and after().
+model Job {
+  id          String   @id @default(cuid())
+  type        String
+  payload     Json
+  status      String   @default("pending") // pending | processing | done | failed
+  attempts    Int      @default(0)
+  maxAttempts Int      @default(5)
+  runAfter    DateTime @default(now())
+  lastError   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([status, runAfter])
+  @@index([type, status])
 }

@@ -1,7 +1,7 @@
 'use server';
 
 import { prisma } from '@/lib/prisma';
-import { encryptBuffer, generateDek, encryptDek } from '@/lib/crypto';
+import { encryptBuffer, generateDek } from '@/lib/crypto';
 import { authorizeSecureLink } from '@/lib/linkAuthorization';
 import { validateMimeType, ALLOWED_EXTENSIONS } from '@/lib/security/file-validator';
 import path from 'path';
@@ -17,8 +17,8 @@ export type UpdateFileResult = {
 const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB
 
 /**
- * Save draft edits — always stores inline (encrypted in DB) for speed.
- * S3 upload only happens on final submission (submit-final.ts).
+ * Save draft edits. Ciphertext goes to object storage (GridFS) when Mongo is
+ * configured; otherwise encrypted BYTEA is used as a local fallback.
  */
 export async function updateFile(
     token: string,
@@ -123,33 +123,60 @@ export async function updateFile(
             return { success: false, error: message };
         }
 
-        // 7. Snapshot current version for rollback support (only if inline content exists)
-        if (fileRecord.encryptedContent) {
-            try {
-                await prisma.fileVersion.create({
-                    data: {
-                        fileId: fileRecord.id,
-                        versionNumber: fileRecord.version,
-                        encryptedContent: fileRecord.encryptedContent,
-                        iv: fileRecord.iv!,
-                        authTag: fileRecord.authTag!,
-                        encryptedDek: (fileRecord as any).encryptedDek,
-                        fileSize: fileRecord.fileSize,
-                        changeType: 'annotation',
-                        changeDescription: `Snapshot before update from version ${fileRecord.version}`,
-                    },
+        // 7. Snapshot current ciphertext into object storage (not Postgres BYTEA)
+        const {
+            buildVersionSnapshot,
+            createFileVersionRow,
+            uploadDraftBlob,
+            trimOldFileVersions,
+        } = await import('@/lib/file-version-store');
+        try {
+            const snapshot = await buildVersionSnapshot(fileRecord as never, { moveLiveObject: true });
+            if (snapshot) {
+                await createFileVersionRow({
+                    fileId: fileRecord.id,
+                    versionNumber: fileRecord.version,
+                    snapshot,
+                    changeType: 'annotation',
+                    changeDescription: `Snapshot before update from version ${fileRecord.version}`,
                 });
-            } catch (err: any) {
-                if (err.code !== 'P2002') throw err; // Ignore unique constraint if snapshot already taken
             }
+        } catch (err: unknown) {
+            const code = typeof err === 'object' && err !== null && 'code' in err ? (err as { code?: string }).code : '';
+            if (code !== 'P2002') throw err;
         }
 
         // 8. Encrypt new content with fresh DEK (per-file key rotation on every save)
-        //    Always store inline in DB for fast draft saves — S3 only on final submit
         const dek = generateDek();
         const { iv, authTag, encryptedContent } = encryptBuffer(fileBuffer, dek);
-        const encryptedDek = encryptDek(dek);
+        const { wrapDekForLink } = await import('@/lib/security/kms');
+        const encryptedDek = await wrapDekForLink(dek, secureLink.id);
         const newETag = crypto.randomUUID();
+        const draftBlob = await uploadDraftBlob({
+            fileName: fileRecord.fileName,
+            mimeType: trustedMimeType,
+            fileExtension: ext,
+            ciphertext: encryptedContent,
+        });
+        let mongoFileId = fileRecord.mongoFileId ?? null;
+        if (draftBlob && !mongoFileId) {
+            const created = await prisma.mongoFile.create({
+                data: {
+                    gridFSId: draftBlob.gridFSId,
+                    originalFileName: fileRecord.fileName,
+                    mimeType: trustedMimeType,
+                    fileExtension: ext.replace(/^\./, '') || 'bin',
+                    fileSize: uploadedFile.size,
+                    checksum: draftBlob.checksum,
+                    folder: 'file-drafts',
+                    uploadedBy: actor.userId,
+                    classification: 'RESTRICTED',
+                    scanStatus: 'pending',
+                },
+                select: { id: true },
+            });
+            mongoFileId = created.id;
+        }
 
         // 9. Atomic update with OCC.
         // Redis edit lock is the writer gate. Client expectedVersion can lag behind
@@ -162,12 +189,13 @@ export async function updateFile(
                     fileName: fileRecord.fileName, // Preserve original filename — do not trust client
                     fileType: trustedMimeType,
                     fileSize: uploadedFile.size,
-                    encryptedContent,
+                    encryptedContent: draftBlob ? null : encryptedContent,
                     iv,
                     authTag,
                     encryptedDek,
                     eTag: newETag,
                     version: { increment: 1 },
+                    ...(mongoFileId ? { mongoFileId } : {}),
                 },
             });
 
@@ -208,6 +236,20 @@ export async function updateFile(
         }
 
         const newVersion = matchedVersion + 1;
+
+        if (draftBlob && mongoFileId) {
+            await prisma.mongoFile.update({
+                where: { id: mongoFileId },
+                data: {
+                    gridFSId: draftBlob.gridFSId,
+                    mimeType: trustedMimeType,
+                    fileSize: uploadedFile.size,
+                    checksum: draftBlob.checksum,
+                    folder: 'file-drafts',
+                },
+            }).catch(() => undefined);
+        }
+        await trimOldFileVersions(fileId).catch(() => undefined);
 
         // 10. Immutable audit log
         await prisma.auditLog.create({

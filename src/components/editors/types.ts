@@ -32,6 +32,7 @@ export interface TableCellData {
   textColor?: string;
   bold?: boolean;
   italic?: boolean;
+  underline?: boolean;
   align?: "left" | "center" | "right";
 }
 

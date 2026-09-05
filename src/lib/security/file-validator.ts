@@ -174,12 +174,10 @@ export function validateMimeType(buffer: Buffer, ext: string): MimeValidationRes
     const isSpreadsheetExt = ext === '.xlsx' || ext === '.xls';
 
     if (sampleStr.startsWith('<?xml')) {
-        if (isSpreadsheetExt) return { valid: true, mimeType: 'application/vnd.ms-excel' };
         return { valid: false, error: `File appears to be an XML document but has a "${ext}" extension.` };
     }
     if (sampleStr.startsWith('<html') || sampleStr.startsWith('<!doctype html') || sampleStr.startsWith('<table')) {
-        if (isSpreadsheetExt) return { valid: true, mimeType: 'application/vnd.ms-excel' };
-        return { valid: false, error: `File appears to be an HTML document but has a "${ext}" extension.` };
+        return { valid: false, error: `HTML content is not allowed as "${ext}". Rename or export a real spreadsheet.` };
     }
     
     // Check if it's purely printable text (like a CSV)

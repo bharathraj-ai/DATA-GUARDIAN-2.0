@@ -4,7 +4,7 @@
  * Postgres + signed share-session cookies are authoritative for:
  *   create-link, OTP, revoke, expiry, session binding.
  *
- * Redis accelerates:
+ * Redis accelerates (REQUIRED in production — see env-validation.ts):
  *   kill-switch (revoked:{token}), ephemeral session TTL, rate limits.
  *
  * Return semantics:

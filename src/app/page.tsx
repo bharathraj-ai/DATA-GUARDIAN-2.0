@@ -17,22 +17,25 @@ export default function LandingPage() {
             '@context': 'https://schema.org',
             '@type': 'WebApplication',
             name: 'Secure Protocol',
-            description: 'Secure data sharing platform with military-grade AES-256 encryption, OTP protection, and instant revocation.',
+            description: 'Zero-trust data sharing with AES-256-GCM encryption at rest, OTP protection, and instant revocation.',
             applicationCategory: 'SecurityApplication',
             operatingSystem: 'Web',
             offers: {
               '@type': 'Offer',
               price: '0',
               priceCurrency: 'USD',
+              description: 'Free plan for solo team leaders',
             },
             featureList: [
+              'Zero-Trust Access',
               'AES-256-GCM Encryption',
               'One-Time Password Protection',
               'Self-Destructing Links',
               'Instant Revocation',
-              'Screenshot Detection',
+              'Screenshot Detection & Forensic Watermark',
               'Priority Collaboration',
-              'Zero-Knowledge Architecture',
+              'MongoDB GridFS ciphertext (not S3)',
+              'Server-side encryption at rest',
             ],
           }),
         }}
@@ -50,7 +53,7 @@ export default function LandingPage() {
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
               </svg>
-              <span>Enterprise-Grade Security</span>
+              <span>Zero-Trust Access</span>
             </div>
 
             {/* Main Heading */}
@@ -61,8 +64,9 @@ export default function LandingPage() {
             </h1>
 
             <p className="hero-subtitle">
-              Share sensitive information with encrypted links that expire on your terms —
-              by time, day count, or month. Complete control. Zero compromise.
+              Share sensitive files under zero-trust access: every request is
+              re-verified (OTP, session, capabilities). Encrypted links expire
+              on your terms — by time, day count, or month.
             </p>
 
             <HeroActions />
@@ -73,7 +77,7 @@ export default function LandingPage() {
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                   <path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2zm3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z" />
                 </svg>
-                <span>End-to-End Encrypted</span>
+                <span>Zero-Trust Access</span>
               </div>
               <div className="trust-badge">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
@@ -134,7 +138,7 @@ export default function LandingPage() {
             <div className="section-header">
               <h2 className="section-title">Why Choose Secure Protocol?</h2>
               <p className="section-subtitle">
-                Enterprise-grade security meets simplicity
+                Enterprise-grade security meets simplicity. Zero-trust access on every request.
               </p>
             </div>
           </ScrollReveal>
@@ -147,9 +151,9 @@ export default function LandingPage() {
                     <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
                   </svg>
                 </div>
-                <h3 className="feature-title">Military-Grade Encryption</h3>
+                <h3 className="feature-title">Zero-Trust Access</h3>
                 <p className="feature-description">
-                  Your data is encrypted with AES-256 encryption, the same standard used by governments and banks worldwide.
+                  Nothing is trusted by default. Each view, edit, and download is re-authorized against the share session, OTP identity, and capability flags — never a client-supplied role. Files stay encrypted at rest; the server decrypts only after that check. This is not zero-knowledge encryption.
                 </p>
               </div>
             </ScrollReveal>
@@ -210,7 +214,7 @@ export default function LandingPage() {
                 </div>
                 <h3 className="feature-title">File Attachments</h3>
                 <p className="feature-description">
-                  Securely share documents, images, and files up to 15MB. All files are encrypted in transit and at rest.
+                  Securely share documents, images, and files up to 15MB. Files are encrypted in transit (TLS) and at rest (AES-256-GCM).
                 </p>
               </div>
             </ScrollReveal>

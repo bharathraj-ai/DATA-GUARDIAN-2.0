@@ -19,6 +19,7 @@ interface DecryptedUserData {
 
 import { trySseAccessCheck, tryGetSessionTTL } from '@/lib/redis-helpers';
 import { verifyShareSession } from '@/lib/share-session';
+import { SSE_POLL_MS } from '@/lib/sse-poll';
 
 /**
  * SSE endpoint for streaming decrypted data.
@@ -259,7 +260,7 @@ export async function GET(
                 }
             };
 
-            // Heartbeat: Redis every 3s (kill-switch). Postgres every 5 ticks (~15s)
+            // Heartbeat: Redis every SSE_POLL_MS (kill-switch). Postgres every 5 ticks
             // so the stream does not exhaust the Neon pool during OTP / page loads.
             const heartbeatInterval = setInterval(async () => {
                 if (isStreamClosed) {
@@ -442,7 +443,7 @@ export async function GET(
                     safeClose();
                     await logSessionEnd('error');
                 }
-            }, 3000); // 3 second heartbeat for near-instant kill switch
+            }, SSE_POLL_MS);
 
             // Cleanup on abort
             request.signal.addEventListener('abort', async () => {

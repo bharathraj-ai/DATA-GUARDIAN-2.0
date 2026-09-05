@@ -6,6 +6,7 @@ import {
     getOnboardingStep,
     safeCallbackPath,
 } from '@/lib/onboarding';
+import { canCreateSecureLinks, normalizeRole } from '@/lib/security/role-helpers';
 import { setUserRole } from '@/actions/set-role';
 import { redirect } from 'next/navigation';
 import { Suspense } from 'react';
@@ -47,7 +48,8 @@ export default async function RoleSelectPage({ searchParams }: Props) {
     if (onboardingStep === 'COMPLETE') {
         // Prefer callback for OWNER only (preserves prior behavior for deep links)
         const destination =
-            dbUser.role === 'OWNER' && callbackUrl
+            (normalizeRole(dbUser.role) === 'OWNER' || canCreateSecureLinks(dbUser.role)) &&
+            callbackUrl
                 ? callbackUrl
                 : dashboardPathForRole(dbUser.role);
 

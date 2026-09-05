@@ -2,14 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authorizeEditLockCall, isUnavailable, lockPayload, lockUnavailableResponse } from '@/lib/collaboration/edit-lock-http';
 import { auditLockRequestOutcome, requestEditLock } from '@/lib/collaboration/edit-lock-service';
 import { getEditLockConfig } from '@/lib/collaboration/edit-lock-config';
-import { clampReservationSeconds } from '@/lib/collaboration/resolve-lock-actor';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /**
  * POST /api/documents/[fileId]/edit-lock/request
- * Body: { token, clientInstanceId?, reservationSeconds? }
+ * Body: { token, clientInstanceId? }
  *
  * Priority is derived server-side from VendorAccess.level (or owner → 1).
  * Client-supplied priority is ignored.
@@ -19,7 +18,7 @@ export async function POST(
     { params }: { params: Promise<{ fileId: string }> },
 ) {
     const { fileId } = await params;
-    let body: { token?: string; clientInstanceId?: string; reservationSeconds?: number; priority?: unknown } = {};
+    let body: { token?: string; clientInstanceId?: string; priority?: unknown } = {};
     try {
         body = await req.json();
     } catch {
@@ -30,19 +29,13 @@ export async function POST(
     if ('errorResponse' in gate) return gate.errorResponse;
 
     const config = getEditLockConfig();
-    const reservationSeconds = clampReservationSeconds(
-        body.reservationSeconds,
-        config.reservationSeconds,
-        config.maxReservationSeconds,
-    );
-    const actorConfig = { ...config, reservationSeconds };
 
     try {
         const outcome = await requestEditLock({
             documentId: gate.fileId,
             linkId: gate.linkId,
             actor: gate.actor,
-            config: actorConfig,
+            config,
         });
         await auditLockRequestOutcome(outcome, gate.linkId, gate.actor, gate.fileId);
 

@@ -33,7 +33,7 @@ class WorkbookBuilder {
     constructor(ExcelJSModule: any, doc: DocumentDataLike) {
         this.doc = doc;
         this.workbook = new ExcelJSModule.Workbook();
-        this.workbook.creator = 'Data Guardian';
+        this.workbook.creator = 'Secure Protocol';
         this.workbook.created = new Date();
     }
 

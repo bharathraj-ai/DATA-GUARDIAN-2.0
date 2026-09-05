@@ -7,6 +7,8 @@
  * On Vercel, /api/cleanup cron is the source of truth (isolates must not each run purge).
  */
 import { logger } from '@/lib/logger';
+import { assertRuntimeSecrets } from '@/lib/security/env-validation';
+import { initSentry } from '@/lib/sentry';
 
 async function warmMongo() {
     try {
@@ -21,6 +23,8 @@ async function warmMongo() {
 }
 
 export async function registerNode() {
+    assertRuntimeSecrets();
+    initSentry();
     void warmMongo();
 
     if (process.env.NODE_ENV === 'development') {

@@ -79,12 +79,16 @@ describe('revokeForSuspiciousActivity', () => {
         expect(result.success).toBe(true);
         expect(result.alreadyRevoked).toBeUndefined();
         expect(result.tokenToPurge).toBe('share-token');
-        expect(result.notify).toEqual({
-            email: 'owner@example.com',
-            linkId: 'link-1',
-            vendorEmail: 'vendor@example.com',
-            reason: 'screenshot',
-        });
+        expect(result.notify).toEqual(
+            expect.objectContaining({
+                email: 'owner@example.com',
+                linkId: 'link-1',
+                vendorEmail: 'vendor@example.com',
+                reason: 'screenshot',
+            }),
+        );
+        expect(result.notify?.forensicWatermark).toMatch(/vendor@example\.com/);
+        expect(result.notify?.forensicWatermark).toMatch(/share-to/);
         expect(mockUpdateMany).toHaveBeenCalledWith({
             where: { id: 'link-1', isRevoked: false },
             data: { isRevoked: true },

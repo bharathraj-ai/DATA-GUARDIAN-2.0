@@ -3,8 +3,9 @@
 import { prisma } from '@/lib/prisma';
 import { authorizeSecureLink } from '@/lib/linkAuthorization';
 import { loadUserFilesContentForLink, gridFsIdForFile } from '@/lib/security/resource-ownership';
-import { decryptBuffer, decryptDek } from '@/lib/crypto';
-import { downloadFromMongo } from '@/lib/mongo/operations';
+import { decryptBuffer } from '@/lib/crypto';
+import { unwrapDek } from '@/lib/security/kms';
+import { downloadLiveObject } from '@/lib/blob-store';
 import { sendCompletedWorkEmail, type FileAttachment } from '@/lib/email';
 import { logger, redactEmail } from '@/lib/logger';
 
@@ -58,7 +59,7 @@ export async function completeWork(token: string): Promise<CompleteWorkResult> {
                     if (file.encryptedContent) {
                         // Inline encrypted content (latest draft) — decrypt it
                         const dek = (file as any).encryptedDek
-                            ? decryptDek((file as any).encryptedDek)
+                            ? await unwrapDek((file as any).encryptedDek)
                             : undefined;
                         buffer = decryptBuffer(
                             file.encryptedContent,
@@ -68,11 +69,11 @@ export async function completeWork(token: string): Promise<CompleteWorkResult> {
                         );
                         logger.info(`Decrypted inline file ${file.fileName}: ${buffer.length} bytes`);
                     } else if (gridFSId) {
-                        const downloadedBuffer = await downloadFromMongo(gridFSId, file.fileSize);
+                        const downloadedBuffer = await downloadLiveObject(gridFSId, file.fileSize);
                         logger.info(`Downloaded GridFS file ${file.fileName}: ${downloadedBuffer.length} bytes, hasEncryption=${!!hasEncryption}`);
 
                         if (hasEncryption) {
-                            const dek = (file as any).encryptedDek ? decryptDek((file as any).encryptedDek) : undefined;
+                            const dek = (file as any).encryptedDek ? await unwrapDek((file as any).encryptedDek) : undefined;
                             buffer = decryptBuffer(
                                 downloadedBuffer,
                                 file.iv!,
@@ -184,9 +185,8 @@ export async function completeWork(token: string): Promise<CompleteWorkResult> {
                                             }
                                         }
                                         if (allRows.length > 0) {
-                                            const XLSXLib = await import('xlsx');
-                                            const worksheet = XLSXLib.utils.aoa_to_sheet(allRows);
-                                            const csvStr = XLSXLib.utils.sheet_to_csv(worksheet);
+                                            const { rowsToCsv } = await import('@/lib/csv-serialize');
+                                            const csvStr = rowsToCsv(allRows);
                                             finalBuffer = Buffer.from(csvStr, 'utf-8');
                                             finalContentType = 'text/csv';
                                         }

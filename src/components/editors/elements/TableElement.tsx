@@ -38,6 +38,9 @@ export const TableElement = React.memo(({ el, scale, onUpdate, selected, onSelec
 
   const [resizingCol, setResizingCol] = useState<{ c: number, startX: number, startW: number } | null>(null);
   const [liveWidth, setLiveWidth] = useState<number | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [clientHeight, setClientHeight] = useState(400);
 
   const handleMouseMove = useCallback((e: MouseEvent) => {
     if (!resizingCol) return;
@@ -100,6 +103,17 @@ export const TableElement = React.memo(({ el, scale, onUpdate, selected, onSelec
       if (editingCell) finishEditing();
     }
   }, [selected, editingCell, finishEditing]);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setClientHeight(el.clientHeight || 400);
+    const ro = new ResizeObserver(() => {
+      if (scrollRef.current) setClientHeight(scrollRef.current.clientHeight || 400);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const addRow = () => {
     const cols = rows[0] ? rows[0].length : 3;
@@ -207,6 +221,7 @@ export const TableElement = React.memo(({ el, scale, onUpdate, selected, onSelec
     const color = cell.textColor || (isHeader ? "#0f172a" : "#334155");
     const bold = cell.bold ?? isHeader;
     const italic = cell.italic ?? false;
+    const underline = cell.underline ?? false;
     const align = cell.align || "left";
 
     const isResizingThis = resizingCol?.c === c;
@@ -273,6 +288,7 @@ export const TableElement = React.memo(({ el, scale, onUpdate, selected, onSelec
               color: color,
               fontWeight: bold ? 600 : 400,
               fontStyle: italic ? "italic" : "normal",
+              textDecoration: underline ? "underline" : "none",
               textAlign: align,
               padding: `${2 * scale}px ${4 * scale}px`,
               fontSize: Math.max(16, 11 * scale),
@@ -288,6 +304,7 @@ export const TableElement = React.memo(({ el, scale, onUpdate, selected, onSelec
               color: color,
               fontWeight: bold ? 600 : 400,
               fontStyle: italic ? "italic" : "normal",
+              textDecoration: underline ? "underline" : "none",
               textAlign: align,
               padding: `${2 * scale}px ${4 * scale}px`,
               whiteSpace: isHeader ? "nowrap" : "pre-wrap",
@@ -324,6 +341,17 @@ export const TableElement = React.memo(({ el, scale, onUpdate, selected, onSelec
     ? colWidths.reduce((a, b) => a + b, 0)
     : (rows[0]?.length || 0) * colW;
 
+  const scaledRowH = rowH * scale;
+  const overscan = 8;
+  let startIndex = Math.max(0, Math.floor(scrollTop / scaledRowH) - overscan);
+  const endIndex = Math.min(rows.length - 1, Math.floor((scrollTop + clientHeight) / scaledRowH) + overscan);
+  const virtualize = rows.length > 80;
+  const visibleRows = virtualize
+    ? rows.slice(startIndex, endIndex + 1).map((row, i) => ({ row, r: startIndex + i }))
+    : rows.map((row, r) => ({ row, r }));
+  const topSpacer = virtualize ? startIndex * scaledRowH : 0;
+  const bottomSpacer = virtualize ? Math.max(0, rows.length - 1 - endIndex) * scaledRowH : 0;
+
   return (
     <div
       style={{
@@ -339,14 +367,28 @@ export const TableElement = React.memo(({ el, scale, onUpdate, selected, onSelec
         onSelect();
       }}
     >
-      <div style={{ width: "100%", height: "100%", overflow: "auto" }}>
+      <div
+        ref={scrollRef}
+        onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+        style={{ width: "100%", height: "100%", overflow: "auto" }}
+      >
         <table style={{ borderCollapse: "collapse", fontSize: 11 * scale, width: totalTableWidth * scale, tableLayout: "fixed" }}>
           <tbody>
-            {rows.map((row, r) => (
+            {virtualize && (
+              <tr style={{ height: topSpacer }}>
+                <td colSpan={rows[0]?.length || 1} style={{ padding: 0, border: "none" }} />
+              </tr>
+            )}
+            {visibleRows.map(({ row, r }) => (
               <tr key={r}>
                 {row.map((cell, c) => renderCell(cell, r, c))}
               </tr>
             ))}
+            {virtualize && (
+              <tr style={{ height: bottomSpacer }}>
+                <td colSpan={rows[0]?.length || 1} style={{ padding: 0, border: "none" }} />
+              </tr>
+            )}
           </tbody>
         </table>
       </div>

@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { auth } from '@/lib/auth';
 import { getReceivedLinks } from '@/actions/dashboard';
 import { getOnboardingStep } from '@/lib/onboarding';
-import { normalizeRole } from '@/lib/security/roles';
+import { normalizeRole, dashboardPathForRole } from '@/lib/security/roles';
 import VendorDashboardClient from './VendorDashboardClient';
 import DashboardSkeleton from '../DashboardSkeleton';
 
@@ -26,8 +26,8 @@ export default async function VendorDashboardPage() {
         redirect('/auth/role-select?callbackUrl=/dashboard/vendor');
     }
 
-    if (normalizeRole(session.user.role) === 'OWNER') {
-        redirect('/dashboard/owner');
+    if (normalizeRole(session.user.role) !== 'VENDOR') {
+        redirect(dashboardPathForRole(session.user.role));
     }
 
     return (

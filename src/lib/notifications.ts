@@ -1,5 +1,5 @@
 /**
- * Data Guardian V2.1 - Notification System
+ * Secure Protocol V2.1 - Notification System
  * 
  * Privacy-first notification delivery for access transparency.
  * All notifications are privacy-safe with NO PII in email content.
@@ -37,6 +37,7 @@ interface NotificationPayload {
         vendorEmail?: string;       // for VENDOR_SUBMITTED / SUSPICIOUS_ACTIVITY
         fileName?: string;          // for VENDOR_SUBMITTED
         suspiciousReason?: string;  // for SUSPICIOUS_ACTIVITY
+        forensicWatermark?: string; // leak-attribution overlay ID
     };
 }
 
@@ -59,7 +60,7 @@ function createEmailTemplate(payload: NotificationPayload): { subject: string; h
 
     switch (event) {
         case 'ACCESS':
-            subject = '🔓 Data Guardian: Link Accessed';
+            subject = '🔓 Secure Protocol: Link Accessed';
             heading = 'Your Secure Link Was Accessed';
             message = `Someone accessed your shared data link at ${formattedTime}.`;
             iconColor = '#10b981'; // green
@@ -69,7 +70,7 @@ function createEmailTemplate(payload: NotificationPayload): { subject: string; h
             break;
 
         case 'SESSION_END':
-            subject = '⏱️ Data Guardian: Session Ended';
+            subject = '⏱️ Secure Protocol: Session Ended';
             heading = 'Viewing Session Ended';
             const duration = metadata?.sessionDuration
                 ? `${Math.floor(metadata.sessionDuration / 60)} minutes`
@@ -79,28 +80,28 @@ function createEmailTemplate(payload: NotificationPayload): { subject: string; h
             break;
 
         case 'EXPIRED':
-            subject = ' Data Guardian: Link Expired';
+            subject = ' Secure Protocol: Link Expired';
             heading = 'Your Secure Link Has Expired';
             message = `Your shared data link expired automatically at ${formattedTime}. All data has been securely deleted.`;
             iconColor = '#6b7280'; // gray
             break;
 
         case 'REVOKED':
-            subject = 'Data Guardian: Link Revoked';
+            subject = 'Secure Protocol: Link Revoked';
             heading = 'Link Successfully Revoked';
             message = `Your shared link was revoked at ${formattedTime}. Access is now permanently blocked.`;
             iconColor = '#ef4444'; // red
             break;
 
         case 'DEVICE_MISMATCH':
-            subject = '⚠️ Data Guardian: Suspicious Access Attempt';
+            subject = '⚠️ Secure Protocol: Suspicious Access Attempt';
             heading = 'Device Mismatch Detected';
             message = `Someone attempted to access your secure link from a different device/browser at ${formattedTime}. Access was DENIED for security.`;
             iconColor = '#f59e0b'; // amber/warning
             break;
 
         case 'FAILED_ATTEMPTS':
-            subject = '🚨 Data Guardian: Invalid OTP - Link Revoked';
+            subject = '🚨 Secure Protocol: Invalid OTP - Link Revoked';
             heading = 'Link Revoked Due to Invalid OTP';
             const attempts = metadata?.failedAttempts || 1;
             message = `Your secure link was permanently revoked after ${attempts} invalid OTP attempt${attempts === 1 ? '' : 's'} at ${formattedTime}. This is a security measure to prevent unauthorized access.`;
@@ -108,7 +109,7 @@ function createEmailTemplate(payload: NotificationPayload): { subject: string; h
             break;
 
         case 'FORWARDED_LINK':
-            subject = '🚫 Data Guardian: Forwarded Link Detected';
+            subject = '🚫 Secure Protocol: Forwarded Link Detected';
             heading = 'Forwarded Link Access Attempt';
             const intended = metadata?.intendedRecipient || 'the intended recipient';
             message = `Someone tried to access your secure link at ${formattedTime}, but their email didn't match the intended recipient (${intended}). Access was DENIED to protect your data.`;
@@ -116,7 +117,7 @@ function createEmailTemplate(payload: NotificationPayload): { subject: string; h
             break;
 
         case 'VENDOR_SUBMITTED':
-            subject = '✅ Data Guardian: Document Submitted';
+            subject = '✅ Secure Protocol: Document Submitted';
             heading = 'Vendor Submitted Edited Document';
             const vendorLabel = metadata?.vendorEmail || 'A vendor';
             const fileLabel = metadata?.fileName || 'a document';
@@ -125,10 +126,13 @@ function createEmailTemplate(payload: NotificationPayload): { subject: string; h
             break;
 
         case 'SUSPICIOUS_ACTIVITY':
-            subject = '🚨 Data Guardian: Suspicious Activity — Access Denied';
+            subject = '🚨 Secure Protocol: Suspicious Activity — Access Denied';
             heading = 'Vendor Access Revoked';
             const actor = metadata?.vendorEmail || 'A vendor';
-            message = `${actor} attempted suspicious activity (such as a screenshot or screen capture) on your shared data at ${formattedTime}. We immediately terminated their session, revoked access, and closed the share link. They can no longer view or edit the files.`;
+            const forensic = metadata?.forensicWatermark
+                ? ` Forensic watermark on screen: ${metadata.forensicWatermark}.`
+                : '';
+            message = `${actor} attempted suspicious activity (such as a screenshot or screen capture) on your shared data at ${formattedTime}. We immediately terminated their session, revoked access, and closed the share link. They can no longer view or edit the files.${forensic}`;
             iconColor = '#dc2626';
             break;
     }
@@ -172,7 +176,7 @@ function createEmailTemplate(payload: NotificationPayload): { subject: string; h
     <!-- Footer -->
     <div style="background-color: #f9fafb; padding: 24px; border-top: 1px solid #e5e7eb; text-align: center;">
       <p style="margin: 0; color: #9ca3af; font-size: 12px;">
-        Data Guardian V2.1 - Enterprise Secure Sharing<br>
+        Secure Protocol V2.1 - Enterprise Secure Sharing<br>
         <span style="color: #d1d5db;">•</span> Privacy-First <span style="color: #d1d5db;">•</span> Zero-Trust <span style="color: #d1d5db;">•</span> Audit-Ready
       </p>
     </div>
@@ -194,7 +198,7 @@ Event Time: ${formattedTime}
 Privacy Notice: This notification contains no sensitive data. It's sent for transparency and security monitoring.
 
 ---
-Data Guardian V2.1 - Enterprise Secure Sharing
+Secure Protocol V2.1 - Enterprise Secure Sharing
   `.trim();
 
     return { subject, html, text };
@@ -399,7 +403,8 @@ export async function notifySuspiciousActivity(
     email: string,
     tokenId: string,
     vendorEmail: string | null,
-    suspiciousReason: string
+    suspiciousReason: string,
+    forensicWatermark?: string,
 ): Promise<void> {
     await sendAccessNotification({
         email,
@@ -409,6 +414,7 @@ export async function notifySuspiciousActivity(
         metadata: {
             vendorEmail: vendorEmail || undefined,
             suspiciousReason,
+            forensicWatermark,
         },
     });
 }

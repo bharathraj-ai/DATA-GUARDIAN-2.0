@@ -140,30 +140,7 @@ export async function authorizeSecureLink(
       action === 'download' ||
       action === 'preview');
 
-  const cookieStore = await cookies();
-  const sessionCookie = cookieStore.get('session_id')?.value;
-  const verified = verifyShareSession(sessionCookie, token);
-  if (!verified.valid) {
-    return { success: false, status: 401, error: 'Unauthorized: Missing or invalid session' };
-  }
-  const sessionId = verified.sessionId;
-  const signedVendorEmail = normalizeEmail(verified.vendorEmail);
-
-  try {
-    const access = await trySseAccessCheck(token, sessionId);
-    if (access === 'revoked') {
-      console.warn('[SECURITY] Access blocked: token confirmed revoked in Redis cache');
-      return { success: false, status: 403, error: 'Forbidden: Access revoked' };
-    }
-    if (access === 'invalid') {
-      console.warn('[SECURITY] Access blocked: session explicitly invalid in Redis cache');
-      return { success: false, status: 401, error: 'Unauthorized: Session invalid or expired' };
-    }
-  } catch (err) {
-    console.error('[SECURITY] Exception during session validation:', err);
-    return { success: false, status: 401, error: 'Authentication infrastructure unavailable' };
-  }
-
+  // Fetch secureLink first to check ownership
   const secureLink = await prisma.secureLink.findUnique({
     where: { token },
     select: {
@@ -247,12 +224,41 @@ export async function authorizeSecureLink(
     return { success: false, status: 404, error: 'Invalid secure link' };
   }
 
+  const authSession = await auth();
+  const sessionEmail = normalizeEmail(authSession?.user?.email);
+  const isOwner = authSession?.user?.id !== undefined && authSession.user.id === secureLink.ownerId;
+
+  const cookieStore = await cookies();
+  const sessionCookie = cookieStore.get('session_id')?.value;
+  const verified = verifyShareSession(sessionCookie, token);
+  
+  if (!isOwner && !verified.valid) {
+    return { success: false, status: 401, error: 'Unauthorized: Missing or invalid session' };
+  }
+  const sessionId = verified.valid ? verified.sessionId : 'owner_session';
+  const signedVendorEmail = verified.valid ? normalizeEmail(verified.vendorEmail) : null;
+
+  try {
+    if (!isOwner) {
+      const access = await trySseAccessCheck(token, sessionId);
+      if (access === 'revoked') {
+        console.warn('[SECURITY] Access blocked: token confirmed revoked in Redis cache');
+        return { success: false, status: 403, error: 'Forbidden: Access revoked' };
+      }
+      if (access === 'invalid') {
+        console.warn('[SECURITY] Access blocked: session explicitly invalid in Redis cache');
+        return { success: false, status: 401, error: 'Unauthorized: Session invalid or expired' };
+      }
+    }
+  } catch (err) {
+    console.error('[SECURITY] Exception during session validation:', err);
+    return { success: false, status: 401, error: 'Authentication infrastructure unavailable' };
+  }
+
   if (secureLink.isRevoked || secureLink.expiresAt < new Date()) {
     return { success: false, status: 403, error: 'Forbidden: Link has expired or been revoked' };
   }
 
-  const authSession = await auth();
-  const sessionEmail = normalizeEmail(authSession?.user?.email);
   // Identity: prefer MAC-bound email from share session; never accept plaintext vendor_email cookie.
   // Encrypted vendor_email cookie is legacy fallback only when decrypt succeeds.
   const rawCookieEmail = cookieStore.get('vendor_email')?.value;
@@ -267,7 +273,6 @@ export async function authorizeSecureLink(
     }
   }
   const effectiveEmail = signedVendorEmail || cookieEmail || sessionEmail;
-  const isOwner = authSession?.user?.id !== undefined && authSession.user.id === secureLink.ownerId;
 
   // Active session binding: if any vendor holds an activeSessionId, cookie must match
   // (prevents reuse of pre-break / superseded signed cookies when Redis is absent).

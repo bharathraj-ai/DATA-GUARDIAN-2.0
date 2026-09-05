@@ -74,6 +74,7 @@ export async function POST(request: NextRequest) {
                             notify.linkId,
                             notify.vendorEmail,
                             notify.reason,
+                            notify.forensicWatermark,
                         ),
                     )
                     .catch((err) => {

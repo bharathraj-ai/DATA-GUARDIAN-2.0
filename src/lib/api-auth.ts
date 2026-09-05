@@ -1,3 +1,7 @@
+/**
+ * Zero-trust API gate: every mutating file request re-verifies share session,
+ * identity, CSRF, rate limit, and capability. Client-supplied role/priority is ignored.
+ */
 import { cookies, headers } from 'next/headers';
 import { prisma } from '@/lib/prisma';
 import { auth } from '@/lib/auth';
@@ -11,6 +15,7 @@ import { logger, redactToken, redactEmail } from '@/lib/logger';
 import { isRedisConfigured } from '@/lib/redis-helpers';
 import { verifyShareSession } from '@/lib/share-session';
 import { decryptData } from '@/lib/crypto';
+import { bindRequestIdFromHeaders } from '@/lib/request-context';
 
 async function getRedisClient() {
     if (!isRedisConfigured()) {
@@ -53,7 +58,7 @@ async function logSecurityEvent(
     }
 }
 
-export type ApiCapability = 'view' | 'preview' | 'edit' | 'download' | 'comment' | 'download_or_edit';
+export type ApiCapability = 'view' | 'preview' | 'edit' | 'download' | 'comment';
 
 export type CapabilityFlags = {
     canEdit: boolean;
@@ -94,10 +99,6 @@ function resolveCapabilities(
 }
 
 function denyCapability(action: ApiCapability, capabilities: CapabilityFlags): string | null {
-    if (action === 'download_or_edit') {
-        if (!capabilities.canDownload && !capabilities.canEdit) return 'Forbidden: Access denied';
-        return null;
-    }
     if (action === 'edit' && !capabilities.canEdit) return 'Forbidden: Edit access denied';
     if (action === 'preview' && !capabilities.canPreview) return 'Forbidden: Preview access denied';
     if (action === 'download' && !capabilities.canDownload) return 'Forbidden: Download access denied';
@@ -117,6 +118,8 @@ export async function authorizeApiRequest(
     options: AuthorizeApiOptions,
 ) {
     const action: ApiCapability = options.action ?? 'view';
+
+    await bindRequestIdFromHeaders();
 
     if (!token || !fileId) {
         return { errorResponse: NextResponse.json({ error: 'Zero-Trust Violation: Missing parameters' }, { status: 400 }) };

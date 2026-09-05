@@ -14,10 +14,11 @@ import {
 import { userDataSchema } from '@/lib/validations';
 import { auth } from '@/lib/auth';
 import { canCreateSecureLinks } from '@/lib/security/role-helpers';
-import { checkUploadRateLimit, extractClientIP, formatRateLimitError, type RateLimitResult } from '@/lib/rate-limit';
+import { checkUploadRateLimit, extractClientIP, formatRateLimitError } from '@/lib/rate-limit';
 import { headers } from 'next/headers';
 import { after } from 'next/server';
-import { logger, redactToken, redactEmail } from '@/lib/logger';
+import { logger, redactToken } from '@/lib/logger';
+import { bindRequestIdFromHeaders } from '@/lib/request-context';
 import { isEmailConfigured, warmEmailTransport } from '@/lib/email';
 import { isMongoConfigured, warmMongoConnection } from '@/lib/mongo/client';
 import type { CreateSecureLinkResult } from '@/lib/create-link-result';
@@ -25,11 +26,11 @@ import type { CreateLinkJson } from '@/lib/create-link-payload';
 import {
     loadStagedFiles,
     markStagedFilesLinked,
-    MAX_FILES,
-    MAX_TOTAL_SIZE,
     stagePlainFile,
     type PreparedLinkFile,
 } from '@/lib/create-link-stage';
+import { countActiveLinksForOwner, resolvePlanLimitsForUser } from '@/lib/plan-limits';
+import { formatBytes, type PlanLimits } from '@/lib/plans';
 
 export type { CreateSecureLinkResult };
 
@@ -52,16 +53,17 @@ function warmCreateLinkDeps() {
 }
 
 async function gateCreateLink(): Promise<
-    | { ok: true; session: SessionUser; clientIP: string }
+    | { ok: true; session: SessionUser; clientIP: string; plan: PlanLimits }
     | { ok: false; error: string }
 > {
     warmCreateLinkDeps();
     const [session, requestHeaders] = await Promise.all([auth(), headers()]);
+    await bindRequestIdFromHeaders();
     if (!session?.user?.id) {
         return { ok: false, error: 'Authentication required.' };
     }
     if (!canCreateSecureLinks(session.user.role)) {
-        return { ok: false, error: 'You do not have permission to create secure links.' };
+        return { ok: false, error: 'Only team leaders can create secure links.' };
     }
     if (!isEmailConfigured()) {
         return {
@@ -69,25 +71,33 @@ async function gateCreateLink(): Promise<
             error: 'Email is not configured on the server. Set EMAIL_USER and EMAIL_PASS (or SMTP_USER / SMTP_PASS) so the OTP can be delivered.',
         };
     }
+
+    let plan: PlanLimits;
+    try {
+        plan = await resolvePlanLimitsForUser(session.user.id);
+    } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : 'Plan check failed.' };
+    }
+
+    const active = await countActiveLinksForOwner(session.user.id);
+    if (active >= plan.maxActiveLinks) {
+        return {
+            ok: false,
+            error: `Your ${plan.label} plan allows ${plan.maxActiveLinks} active link(s). Revoke or wait for expiry, or request a plan upgrade.`,
+        };
+    }
+
     const clientIP = extractClientIP(requestHeaders);
-    const rateLimit = await Promise.race([
-        checkUploadRateLimit(clientIP),
-        new Promise<RateLimitResult>((resolve) =>
-            setTimeout(
-                () =>
-                    resolve({
-                        allowed: true,
-                        remaining: 1,
-                        resetAt: Date.now() + 3_600_000,
-                    }),
-                50,
-            ),
-        ),
-    ]);
+    const rateLimit = await checkUploadRateLimit(clientIP);
     if (!rateLimit.allowed) {
         return { ok: false, error: formatRateLimitError(rateLimit) };
     }
-    return { ok: true, session: { id: session.user.id, role: session.user.role }, clientIP };
+    return {
+        ok: true,
+        session: { id: session.user.id, role: session.user.role },
+        clientIP,
+        plan,
+    };
 }
 
 function parseVendors(input: unknown, vendorEmail?: string | null): { email: string; level: number }[] | string {
@@ -124,6 +134,7 @@ async function executeCreateLink(params: {
     preparedFiles: PreparedLinkFile[];
     filesMs: number;
     userDataId?: string;
+    plan: PlanLimits;
 }): Promise<CreateSecureLinkResult> {
     const {
         startedAt,
@@ -138,12 +149,27 @@ async function executeCreateLink(params: {
         preparedFiles,
         filesMs,
         userDataId,
+        plan,
     } = params;
 
     if (!isEmailConfigured()) {
         return {
             success: false,
             error: 'Email is not configured on the server. Set EMAIL_USER and EMAIL_PASS (or SMTP_USER / SMTP_PASS) so the OTP can be delivered.',
+        };
+    }
+
+    if (preparedFiles.length > plan.maxFilesPerLink) {
+        return {
+            success: false,
+            error: `Your ${plan.label} plan allows ${plan.maxFilesPerLink} files per link (${preparedFiles.length} selected).`,
+        };
+    }
+    const totalSize = preparedFiles.reduce((sum, f) => sum + f.fileSize, 0);
+    if (totalSize > plan.maxTotalBytesPerLink) {
+        return {
+            success: false,
+            error: `Your ${plan.label} plan allows ${formatBytes(plan.maxTotalBytesPerLink)} per link (${formatBytes(totalSize)} selected).`,
         };
     }
 
@@ -162,6 +188,13 @@ async function executeCreateLink(params: {
     const ownerToken = generateOwnerToken();
     const globalOtp = generateOTP();
     const expiresAt = calculateExpiryFromMode(expiryMode as ExpiryMode, expiryAmount);
+    const retentionMs = plan.maxRetentionDays * 24 * 60 * 60 * 1000;
+    if (expiresAt.getTime() - Date.now() > retentionMs) {
+        return {
+            success: false,
+            error: `Your ${plan.label} plan allows at most ${plan.maxRetentionDays} days of link retention.`,
+        };
+    }
     const validityMinutes = Math.max(1, Math.round((expiresAt.getTime() - Date.now()) / 60_000));
     const taskDurationHours = Math.max(1, Math.round(validityMinutes / 60));
     const allowedBreaks = Math.max(0, Math.floor(taskDurationHours / 2) - 1);
@@ -179,6 +212,17 @@ async function executeCreateLink(params: {
     const globalOtpHash = hashOTPSync(globalOtp);
     const encryptedUserData = encryptData(userData);
     const dataHash = generateDataHash(userData);
+
+    const { ensureOwnerOrganization } = await import('@/lib/tenant');
+    const ownerRow = await prisma.user.findUnique({
+        where: { id: ownerId },
+        select: { email: true, name: true },
+    });
+    const org = await ensureOwnerOrganization({
+        userId: ownerId,
+        email: ownerRow?.email,
+        name: ownerRow?.name,
+    });
 
     const dbStartedAt = Date.now();
     const userDataRecord = userDataId
@@ -200,6 +244,7 @@ async function executeCreateLink(params: {
             expiresAt,
             userId: userDataRecord.id,
             ownerId,
+            organizationId: org.organizationId || undefined,
             purpose: topic,
             purposeDetail: purposeDetail || undefined,
             notificationEmail: notificationEmail || undefined,
@@ -245,6 +290,7 @@ async function executeCreateLink(params: {
                       folder: 'vendor-uploads',
                       uploadedBy: ownerId,
                       classification: 'INTERNAL',
+                      scanStatus: file.scanStatus || 'pending',
                   })),
                   select: { id: true, gridFSId: true },
               }).then((mongoRows) => {
@@ -272,15 +318,6 @@ async function executeCreateLink(params: {
               }),
     ]);
 
-    const sendRecordPayload = {
-        ownerId,
-        topic,
-        vendorEmail: vendors.map((v) => v.email).join(', '),
-        fileCount: preparedFiles.length,
-        status: 'active' as const,
-        expiredAt: expiresAt,
-    };
-
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
     const shareUrl = `${baseUrl}/share/${token}`;
     const ownerUrl = `${baseUrl}/revoke/${ownerToken}`;
@@ -293,9 +330,23 @@ async function executeCreateLink(params: {
     const otpByEmail = new Map(vendorAccessData.map((v) => [v.email.toLowerCase(), v.otpHash]));
     const stagedIds = preparedFiles.map((f) => f.gridFSId);
 
+    if (otpVendors.length > 0) {
+        const { enqueueOtpEmails } = await import('@/lib/jobs');
+        await enqueueOtpEmails(otpVendors, token, validityMinutes);
+    }
+
     runAfterResponse(async () => {
         const stampWork = Promise.all([
-            prisma.sendRecord.create({ data: sendRecordPayload }).catch((err) =>
+            prisma.sendRecord.createMany({
+                data: vendors.map((v) => ({
+                    ownerId,
+                    topic,
+                    vendorEmail: v.email.toLowerCase(),
+                    fileCount: preparedFiles.length,
+                    status: 'active' as const,
+                    expiredAt: expiresAt,
+                })),
+            }).catch((err) =>
                 logger.warn('Failed to stamp send record:', err.message),
             ),
             prisma.auditLog.create({
@@ -328,27 +379,9 @@ async function executeCreateLink(params: {
             return;
         }
 
-        const { sendOTPEmail } = await import('@/lib/email');
-        const mailWork = Promise.allSettled(
-            otpVendors.map((v) =>
-                sendOTPEmail(v.email, token, v.otp, validityMinutes).then(() =>
-                    logger.info(`OTP sent to ${redactEmail(v.email)}`),
-                ),
-            ),
-        ).then((results) => {
-            const failed = results.filter((r) => r.status === 'rejected');
-            if (failed.length === results.length) {
-                const reason = failed[0].status === 'rejected' ? failed[0].reason : null;
-                logger.error(
-                    '[EMAIL FAILED] Could not send any OTP emails after link create',
-                    reason instanceof Error ? reason.message : reason,
-                );
-            } else if (failed.length > 0) {
-                logger.warn(`[EMAIL] ${failed.length}/${results.length} OTP emails failed after link create`);
-            }
-        });
-
-        await Promise.all([stampWork, mailWork]);
+        const { processDueJobs } = await import('@/lib/jobs');
+        await stampWork;
+        await processDueJobs(otpVendors.length + 5);
     });
 
     return {
@@ -407,10 +440,16 @@ export async function createSecureLinkFromJson(body: CreateLinkJson): Promise<Cr
             }),
         ]);
         const totalSize = preparedFiles.reduce((sum, f) => sum + f.fileSize, 0);
-        if (totalSize > MAX_TOTAL_SIZE) {
+        if (preparedFiles.length > gate.plan.maxFilesPerLink) {
             return {
                 success: false,
-                error: `Total file size exceeds 100MB limit (${(totalSize / 1024 / 1024).toFixed(1)}MB selected).`,
+                error: `Your ${gate.plan.label} plan allows ${gate.plan.maxFilesPerLink} files per link (${preparedFiles.length} selected).`,
+            };
+        }
+        if (totalSize > gate.plan.maxTotalBytesPerLink) {
+            return {
+                success: false,
+                error: `Your ${gate.plan.label} plan allows ${formatBytes(gate.plan.maxTotalBytesPerLink)} per link (${formatBytes(totalSize)} selected).`,
             };
         }
 
@@ -427,6 +466,7 @@ export async function createSecureLinkFromJson(body: CreateLinkJson): Promise<Cr
             preparedFiles,
             filesMs: Date.now() - filesStartedAt,
             userDataId: userDataRecord.id,
+            plan: gate.plan,
         });
     } catch (error) {
         return failCreateLink(error);
@@ -462,17 +502,17 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
         for (const entry of formData.getAll('files')) {
             if (entry instanceof File && entry.size > 0) files.push(entry);
         }
-        if (files.length > MAX_FILES) {
+        if (files.length > gate.plan.maxFilesPerLink) {
             return {
                 success: false,
-                error: `Too many files. Maximum ${MAX_FILES} files allowed (you selected ${files.length}).`,
+                error: `Your ${gate.plan.label} plan allows ${gate.plan.maxFilesPerLink} files per link (${files.length} selected).`,
             };
         }
         const totalSize = files.reduce((sum, f) => sum + f.size, 0);
-        if (totalSize > MAX_TOTAL_SIZE) {
+        if (totalSize > gate.plan.maxTotalBytesPerLink) {
             return {
                 success: false,
-                error: `Total file size exceeds 100MB limit (${(totalSize / 1024 / 1024).toFixed(1)}MB selected).`,
+                error: `Your ${gate.plan.label} plan allows ${formatBytes(gate.plan.maxTotalBytesPerLink)} per link (${formatBytes(totalSize)} selected).`,
             };
         }
 
@@ -515,6 +555,7 @@ export async function createSecureLinkWithFiles(formData: FormData): Promise<Cre
             vendors,
             preparedFiles,
             filesMs: Date.now() - filesStartedAt,
+            plan: gate.plan,
         });
     } catch (error) {
         return failCreateLink(error);

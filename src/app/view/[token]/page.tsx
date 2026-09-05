@@ -16,7 +16,7 @@ const FileList = dynamic(() => import('@/components/view/FileList').then((m) => 
 const ChatPanel = dynamic(() => import('@/components/view/ChatPanel').then((m) => m.ChatPanel));
 
 export const metadata = {
-    title: 'Secure View | Data Guardian',
+    title: 'Secure View | Secure Protocol',
 };
 
 export default async function ViewPage({ params }: { params: Promise<{ token: string }> }) {
@@ -73,7 +73,11 @@ export default async function ViewPage({ params }: { params: Promise<{ token: st
             initialRemainingSeconds={data.remainingSeconds}
             initialMyLevel={data.myAssignedLevel}
         >
-          <SecureViewWrapper token={cleanToken} viewerEmail={data.maskedEmail}>
+          <SecureViewWrapper
+            token={cleanToken}
+            viewerEmail={data.viewerEmail || data.maskedEmail}
+            deviceHash={data.deviceHashFragment || undefined}
+          >
             <main className={styles.desk}>
                 <div className={styles.wash} />
 

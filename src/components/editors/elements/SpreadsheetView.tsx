@@ -241,6 +241,7 @@ export const SpreadsheetView = React.memo(({ page, scale, initialState, onStateC
     const color = cell.textColor || (isHeader ? "#0f172a" : "#334155");
     const bold = cell.bold ?? isHeader;
     const italic = cell.italic ?? false;
+    const underline = cell.underline ?? false;
     const align = cell.align || "left";
 
     const isResizingThis = resizingCol?.c === c;
@@ -294,7 +295,9 @@ export const SpreadsheetView = React.memo(({ page, scale, initialState, onStateC
               width: "100%", height: "100%", minHeight: (rowH - 4) * scale,
               border: "none", outline: "none", resize: "none",
               background: "transparent", color, fontWeight: bold ? 600 : 400,
-              fontStyle: italic ? "italic" : "normal", textAlign: align,
+              fontStyle: italic ? "italic" : "normal",
+              textDecoration: underline ? "underline" : "none",
+              textAlign: align,
               padding: `${2 * scale}px ${4 * scale}px`,
               fontSize: Math.max(16, 11 * scale),
               fontFamily: "inherit", overflow: "hidden",
@@ -305,6 +308,7 @@ export const SpreadsheetView = React.memo(({ page, scale, initialState, onStateC
             style={{
               width: "100%", height: "100%", color,
               fontWeight: bold ? 600 : 400, fontStyle: italic ? "italic" : "normal",
+              textDecoration: underline ? "underline" : "none",
               textAlign: align, padding: `${2 * scale}px ${4 * scale}px`,
               whiteSpace: isHeader ? "nowrap" : "pre-wrap", wordBreak: "break-word",
             }}

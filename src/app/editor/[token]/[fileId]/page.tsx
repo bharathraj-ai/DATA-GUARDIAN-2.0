@@ -22,7 +22,12 @@ const WordEditor = dynamic(() => import('@/components/editors/word/WordEditor'),
     loading: () => <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', color: '#0F172A', background: '#f4f7fb' }}>Loading Word editor...</div>,
 });
 
-const SecureViewWrapper = dynamic<{ token: string; children: React.ReactNode }>(
+const SecureViewWrapper = dynamic<{
+    token: string;
+    viewerEmail?: string;
+    deviceHash?: string;
+    children: React.ReactNode;
+}>(
     () => import('@/components/view/SecureViewWrapper').then(mod => mod.SecureViewWrapper),
     { ssr: false }
 );
@@ -136,6 +141,8 @@ export default function EditorPage({ params }: EditorPageProps) {
         canDownload: false,
     });
     const [remainingSeconds, setRemainingSeconds] = useState(0);
+    const [viewerEmail, setViewerEmail] = useState<string | undefined>(undefined);
+    const [deviceHash, setDeviceHash] = useState<string | undefined>(undefined);
 
     useEffect(() => {
         let isMounted = true;
@@ -162,6 +169,22 @@ export default function EditorPage({ params }: EditorPageProps) {
                         canComment: rawRes.headers.get('X-Can-Comment') !== '0',
                         canDownload: rawRes.headers.get('X-Can-Download') === '1',
                     });
+                    const headerEmail = rawRes.headers.get('X-Viewer-Email');
+                    if (headerEmail) {
+                        try {
+                            setViewerEmail(decodeURIComponent(headerEmail));
+                        } catch {
+                            setViewerEmail(headerEmail);
+                        }
+                    }
+                    const deviceFrag = rawRes.headers.get('X-Device-Hash');
+                    if (deviceFrag) setDeviceHash(deviceFrag);
+                    void fetch('/api/analytics/view', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'include',
+                        body: JSON.stringify({ token, fileId, pageNumber: 1 }),
+                    }).catch(() => undefined);
                     return;
                 }
 
@@ -177,6 +200,13 @@ export default function EditorPage({ params }: EditorPageProps) {
                 if (typeof result.myAssignedLevel === 'number') setMyLevel(result.myAssignedLevel);
                 if (result.capabilities) setCapabilities(result.capabilities);
                 if (typeof result.remainingSeconds === 'number') setRemainingSeconds(result.remainingSeconds);
+                if (result.viewerEmail) setViewerEmail(result.viewerEmail);
+                void fetch('/api/analytics/view', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ token, fileId, pageNumber: 1 }),
+                }).catch(() => undefined);
             } catch (err) {
                 console.error('Edit load error:', err);
                 if (isMounted) setError('Error loading file for edit');
@@ -251,7 +281,11 @@ export default function EditorPage({ params }: EditorPageProps) {
             initialRemainingSeconds={remainingSeconds}
             initialMyLevel={myLevel}
         >
-            <SecureViewWrapper token={token}>
+            <SecureViewWrapper
+                token={token}
+                viewerEmail={viewerEmail}
+                deviceHash={deviceHash}
+            >
                 <EditLockProvider
                     token={token}
                     fileId={fileId}

@@ -1,0 +1,115 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  KEK_KEY: "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+  OTP_HMAC_SECRET: "test-otp-hmac-secret-min-32-chars!!!!"
+  SESSION_HMAC_SECRET: "test-session-hmac-secret-min-32-chars!!"
+  AUDIT_HMAC_SECRET: "test-audit-hmac-secret-min-32-chars!!!"
+  NEXTAUTH_SECRET: "test-nextauth-secret-min-32-chars!!!!"
+  CRON_SECRET: "cron-secret-at-least-thirty-two-chars!!"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+
+  typecheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci
+      - run: npx prisma validate
+      - run: npm run typecheck
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci
+      - run: npm run test:ci
+
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+        env:
+          DATABASE_URL: "postgresql://user:pass@localhost:5432/ci?schema=public"
+          NEXTAUTH_URL: "http://localhost:3000"
+
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci
+      - name: npm audit (high+)
+        run: npm audit --audit-level=high
+
+  secrets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Gitleaks secret scan
+        run: |
+          set -euo pipefail
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz" \
+            | tar -xz gitleaks
+          ./gitleaks detect --source . --verbose --redact
+
+  no-s3:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fail if S3 / MinIO object-store clients appear
+        run: |
+          set -euo pipefail
+          if grep -RInE --include='*.{ts,tsx,js,json}' \
+            '@aws-sdk/client-s3|s3Put|@/lib/s3|"minio"|prefersS3' \
+            src package.json 2>/dev/null; then
+            echo "S3/MinIO object-store references are not allowed (use GridFS)."
+            exit 1
+          fi
+          echo "OK: no S3/MinIO object-store clients."

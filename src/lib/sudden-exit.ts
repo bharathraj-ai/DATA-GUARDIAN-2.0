@@ -250,20 +250,15 @@ export async function suddenBrowserExit(
         }
 
         try {
-            const { sendOTPEmail, isEmailConfigured } = await import('@/lib/email');
-            if (isEmailConfigured()) {
-                const remainingMs = secureLink.expiresAt.getTime() - Date.now();
-                const validityMinutes = Math.max(1, Math.floor(remainingMs / 60000));
-                await sendOTPEmail(
-                    vendorEmail,
-                    token,
-                    newOtp,
-                    Math.min(validityMinutes, 10),
-                );
-                logger.info(`[sudden-exit] OTP sent to ${redactEmail(vendorEmail)}`);
-            } else {
-                logger.error('[EMAIL] Not configured — sudden-exit OTP email not sent');
-            }
+            const remainingMs = secureLink.expiresAt.getTime() - Date.now();
+            const validityMinutes = Math.max(1, Math.min(10, Math.floor(remainingMs / 60000)));
+            const { enqueueOtpEmails, processDueJobs } = await import('@/lib/jobs');
+            await enqueueOtpEmails(
+                [{ email: vendorEmail, otp: newOtp }],
+                token,
+                validityMinutes,
+            );
+            await processDueJobs(5);
         } catch (err) {
             logger.error(
                 '[sudden-exit] Failed to send OTP email',

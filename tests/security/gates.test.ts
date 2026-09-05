@@ -22,8 +22,10 @@ import { authorizeCronRequest } from '@/lib/security/cron-auth';
 import { timingSafeBearerMatch } from '@/lib/security/cron-auth';
 
 describe('1) DB role — JWT cannot escalate VENDOR→OWNER for create-link', () => {
-  it('normalizeRole never invents ADMIN; unknown → VENDOR', () => {
+  it('normalizeRole maps TEAM_LEADER/MANAGER→OWNER; unknown → VENDOR', () => {
     expect(normalizeRole('OWNER')).toBe('OWNER');
+    expect(normalizeRole('TEAM_LEADER')).toBe('OWNER');
+    expect(normalizeRole('MANAGER')).toBe('OWNER');
     expect(normalizeRole('VENDOR')).toBe('VENDOR');
     expect(normalizeRole('ADMIN')).toBe('VENDOR');
     expect(normalizeRole('SUPER_ADMIN')).toBe('VENDOR');

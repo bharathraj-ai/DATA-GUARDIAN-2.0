@@ -16,7 +16,7 @@ export interface UnifiedAuditLog {
     metadata: Record<string, any>;
     description: string;
     timestamp: Date;
-    relatedId: string; // linkId or documentId
+    relatedId: string;
 }
 
 export async function getUnifiedAuditLogs(): Promise<UnifiedAuditLog[]> {
@@ -28,58 +28,28 @@ export async function getUnifiedAuditLogs(): Promise<UnifiedAuditLog[]> {
     }
 
     try {
-        const [secureLinkLogs, ownedDocs] = await Promise.all([
-            prisma.auditLog.findMany({
-                where: { ownerId: userId },
-                select: {
-                    id: true,
-                    action: true,
-                    reason: true,
-                    metadata: true,
-                    timestamp: true,
-                    linkId: true,
-                    SecureLink: {
-                        select: {
-                            purpose: true,
-                        },
+        const secureLinkLogs = await prisma.auditLog.findMany({
+            where: { ownerId: userId },
+            select: {
+                id: true,
+                action: true,
+                reason: true,
+                metadata: true,
+                timestamp: true,
+                linkId: true,
+                SecureLink: {
+                    select: {
+                        purpose: true,
                     },
                 },
-                orderBy: {
-                    timestamp: 'desc'
-                },
-                take: 100,
-            }),
-            prisma.document.findMany({
-                where: { ownerId: userId },
-                select: { id: true, fileName: true },
-                take: 500,
-            }),
-        ]);
-        const docNameById = new Map(ownedDocs.map((d) => [d.id, d.fileName]));
-        const documentLogs = ownedDocs.length === 0
-            ? []
-            : await prisma.documentAuditLog.findMany({
-                where: {
-                    documentId: { in: ownedDocs.map((d) => d.id) },
-                },
-                select: {
-                    id: true,
-                    action: true,
-                    metadata: true,
-                    createdAt: true,
-                    documentId: true,
-                    userId: true,
-                    ipAddress: true,
-                    userAgent: true,
-                },
-                orderBy: {
-                    createdAt: 'desc'
-                },
-                take: 100,
-            });
+            },
+            orderBy: {
+                timestamp: 'desc'
+            },
+            take: 200,
+        });
 
-        // Map SecureLink AuditLogs
-        const mappedSecureLinkLogs: UnifiedAuditLog[] = secureLinkLogs.map(log => {
+        return secureLinkLogs.map(log => {
             let severity: Severity = 'INFO';
             let description = log.reason || '';
             const metadataObj = log.metadata ? JSON.parse(log.metadata) : {};
@@ -87,11 +57,10 @@ export async function getUnifiedAuditLogs(): Promise<UnifiedAuditLog[]> {
             if (log.action === 'DENIED' || log.action === 'LOCKED' || log.action === 'REVOKED'
                 || log.action === 'SUSPICIOUS_ACTIVITY_REVOKE' || log.action === 'REVOKE_ACCESS_SUCCESS') {
                 severity = 'CRITICAL';
-            } else if (log.action === 'EXPIRED') {
-                severity = 'WARNING';
+            } else if (log.action === 'EXPIRED' || log.action === 'PAGE_VIEW' || log.action === 'VIEW') {
+                severity = log.action === 'EXPIRED' ? 'WARNING' : 'INFO';
             }
 
-            // Attempt to derive a better description if reason is missing
             if (!description) {
                 switch (log.action) {
                     case 'CREATED':
@@ -100,92 +69,32 @@ export async function getUnifiedAuditLogs(): Promise<UnifiedAuditLog[]> {
                     case 'ACCESSED':
                         description = `Link was successfully verified and accessed.`;
                         break;
-                    case 'CLEANUP':
-                        description = `Expired data was automatically purged.`;
-                        break;
-                    case 'NOTIFIED':
-                        description = `Security notification was sent to owner.`;
-                        break;
-                    case 'SUSPICIOUS_ACTIVITY_REVOKE':
-                        description = `Vendor screenshot/capture attempt — access revoked and owner notified.`;
+                    case 'PAGE_VIEW':
+                        description = `File previewed${metadataObj.fileId ? ` (${metadataObj.fileId})` : ''}.`;
                         break;
                     default:
                         description = `System event: ${log.action}`;
                 }
             }
 
-            // If action is failed OTP context
             if (log.action === 'DENIED' && metadataObj.type === 'otp_reuse') {
                 severity = 'WARNING';
             }
 
             return {
                 id: log.id,
-                type: 'SECURITY',
+                type: log.action === 'PAGE_VIEW' ? 'DOCUMENT' as const : 'SECURITY' as const,
                 action: log.action,
                 severity,
-                actor: metadataObj.attemptedEmail || metadataObj.notificationEmail || 'System/Anonymous',
-                ipAddress: metadataObj.ip || null,
-                userAgent: null,
+                actor: metadataObj.attemptedEmail || metadataObj.notificationEmail || metadataObj.viewerEmail || 'System/Anonymous',
+                ipAddress: metadataObj.ip || metadataObj.ipAddress || null,
+                userAgent: metadataObj.userAgent || null,
                 metadata: metadataObj,
                 description,
                 timestamp: log.timestamp,
                 relatedId: log.linkId || 'unknown'
             };
         });
-
-        // Map DocumentAuditLogs
-        const mappedDocumentLogs: UnifiedAuditLog[] = documentLogs.map(log => {
-            let severity: Severity = 'INFO';
-            let description = '';
-            const metadataObj = log.metadata ? JSON.parse(log.metadata) : {};
-
-            if (log.action === 'delete') {
-                severity = 'WARNING';
-            }
-
-            switch (log.action) {
-                case 'upload':
-                    description = `Document uploaded: ${docNameById.get(log.documentId) || 'file'}`;
-                    break;
-                case 'view':
-                    description = `Document viewed by participant.`;
-                    break;
-                case 'edit':
-                    description = `Document was edited and new version saved.`;
-                    break;
-                case 'download':
-                    description = `Document downloaded.`;
-                    severity = 'WARNING'; // Downloads are usually restricted, so flag as warning
-                    break;
-                case 'delete':
-                    description = `Document deleted from storage.`;
-                    break;
-                default:
-                    description = `Document action: ${log.action}`;
-            }
-
-            return {
-                id: log.id,
-                type: 'DOCUMENT',
-                action: log.action.toUpperCase(),
-                severity,
-                actor: log.userId || 'Unknown User',
-                ipAddress: log.ipAddress || null,
-                userAgent: log.userAgent || null,
-                metadata: metadataObj,
-                description,
-                timestamp: log.createdAt,
-                relatedId: log.documentId
-            };
-        });
-
-        const allLogs = [...mappedSecureLinkLogs, ...mappedDocumentLogs];
-        
-        // Sort newest first
-        allLogs.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-
-        return allLogs;
     } catch (error) {
         console.error('Error fetching unified audit logs:', error);
         return [];

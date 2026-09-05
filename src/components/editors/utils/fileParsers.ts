@@ -85,45 +85,43 @@ export async function parseZIP(file: File): Promise<DocumentData> {
 }
 
 export async function parseExcel(file: File): Promise<DocumentData> {
-  const XLSX = await import("xlsx");
+  if (file.name.toLowerCase().endsWith(".xls") && !file.name.toLowerCase().endsWith(".xlsx")) {
+    throw new Error("Legacy .xls is not supported. Save as .xlsx or .csv.");
+  }
+  const ExcelJS = (await import("exceljs")).default;
+  const workbook = new ExcelJS.Workbook();
   const ab = await file.arrayBuffer();
-  const workbook = XLSX.read(ab, { type: "array" });
-  
-  const pages: any[] = [];
-  const sheetNames = workbook.SheetNames;
+  await workbook.xlsx.load(ab);
 
-  for (const sheetName of sheetNames) {
-    const worksheet = workbook.Sheets[sheetName];
-    const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-    const strRows = rows.map((r: any) => (r || []).map((c: any) => ({ value: c !== undefined && c !== null ? String(c) : "" })));
-    const cols = Math.max(...strRows.map(r => r.length), 1);
-    strRows.forEach(r => { while (r.length < cols) r.push({ value: "" }); });
-    
-    const colWidths = Array(cols).fill(60);
-    const excelCols = worksheet['!cols'];
-    
+  const pages: DocumentData["pages"] = [];
+  const sheetNames: string[] = [];
+
+  workbook.eachSheet((worksheet) => {
+    const sheetName = worksheet.name;
+    sheetNames.push(sheetName);
+    const strRows: Array<Array<{ value: string }>> = [];
+    worksheet.eachRow({ includeEmpty: true }, (row) => {
+      const values = Array.isArray(row.values) ? row.values.slice(1) : [];
+      strRows.push(
+        values.map((c) => ({
+          value: c !== undefined && c !== null ? String(typeof c === "object" && c && "text" in (c as object) ? (c as { text: string }).text : c) : "",
+        })),
+      );
+    });
+    const cols = Math.max(...strRows.map((r) => r.length), 1);
+    strRows.forEach((r) => {
+      while (r.length < cols) r.push({ value: "" });
+    });
+
+    const colWidths = Array(cols).fill(60) as number[];
     for (let c = 0; c < cols; c++) {
-      if (excelCols && excelCols[c] && typeof excelCols[c] === 'object') {
-        const colMeta = excelCols[c] as any;
-        if (colMeta.wpx) {
-          colWidths[c] = Math.max(60, colMeta.wpx);
-        } else if (colMeta.width) {
-          colWidths[c] = Math.max(60, colMeta.width * 8);
-        } else {
-          let maxLen = 5;
-          for (const row of strRows) {
-            if (row[c] && row[c].value.length > maxLen) {
-              maxLen = row[c].value.length;
-            }
-          }
-          colWidths[c] = Math.min(400, Math.max(60, maxLen * 8));
-        }
+      const col = worksheet.getColumn(c + 1);
+      if (col.width) {
+        colWidths[c] = Math.max(60, Number(col.width) * 8);
       } else {
         let maxLen = 5;
         for (const row of strRows) {
-          if (row[c] && row[c].value.length > maxLen) {
-            maxLen = row[c].value.length;
-          }
+          if (row[c] && row[c].value.length > maxLen) maxLen = row[c].value.length;
         }
         colWidths[c] = Math.min(400, Math.max(60, maxLen * 8));
       }
@@ -133,19 +131,37 @@ export async function parseExcel(file: File): Promise<DocumentData> {
     const pageWidth = Math.max(794, tableWidth + 57 * 2);
 
     pages.push({
-      id: uid(), width: pageWidth, height: Math.max(1122, strRows.length * 28 + 120), 
-      elements: [{ id: uid(), type: "table", x: 57, y: 60, width: tableWidth, height: strRows.length * 28 + 2, rows: strRows, colW: 100, colWidths, rowH: 28, selected: false, hasHeader: true } as TableElementData], 
-      bgImage: null
+      id: uid(),
+      width: pageWidth,
+      height: Math.max(1122, strRows.length * 28 + 120),
+      elements: [
+        {
+          id: uid(),
+          type: "table",
+          x: 57,
+          y: 60,
+          width: tableWidth,
+          height: strRows.length * 28 + 2,
+          rows: strRows,
+          colW: 100,
+          colWidths,
+          rowH: 28,
+          selected: false,
+          hasHeader: true,
+        } as TableElementData,
+      ],
+      bgImage: null,
     });
-  }
+  });
 
-  return { 
-    type: file.name.endsWith(".csv") ? "csv" : "xlsx", name: file.name, 
+  return {
+    type: file.name.endsWith(".csv") ? "csv" : "xlsx",
+    name: file.name,
     pages,
     metadata: {
       sheetNames,
-      activeSheet: 0
-    }
+      activeSheet: 0,
+    },
   };
 }
 

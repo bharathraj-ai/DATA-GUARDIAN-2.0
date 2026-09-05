@@ -10,8 +10,6 @@ process.env.SESSION_HMAC_SECRET =
   process.env.SESSION_HMAC_SECRET || 'test-session-hmac-secret-min-32-chars!!';
 process.env.EDIT_LOCK_TTL_SECONDS = '120';
 process.env.EDIT_LOCK_SAME_PRIORITY_POLICY = 'keep_current';
-delete process.env.EDIT_LOCK_GRACE_PERIOD_SECONDS;
-delete process.env.EDIT_LOCK_RESERVATION_SECONDS;
 process.env.UPSTASH_REDIS_REST_URL = '';
 process.env.UPSTASH_REDIS_REST_TOKEN = '';
 
@@ -537,10 +535,17 @@ describe('heartbeat + reservation', () => {
 
 describe('config defaults', () => {
   it('has no constant countdown or reservation by default', () => {
+    process.env.EDIT_LOCK_GRACE_PERIOD_SECONDS = '60';
+    process.env.EDIT_LOCK_RESERVATION_SECONDS = '3600';
+    process.env.EDIT_LOCK_MAX_RESERVATION_SECONDS = '7200';
     const cfg = getEditLockConfig();
     expect(cfg.gracePeriodSeconds).toBe(0);
     expect(cfg.reservationSeconds).toBe(0);
+    expect(cfg.maxReservationSeconds).toBe(0);
     expect(cfg.samePriorityPolicy).toBe('keep_current');
+    delete process.env.EDIT_LOCK_GRACE_PERIOD_SECONDS;
+    delete process.env.EDIT_LOCK_RESERVATION_SECONDS;
+    delete process.env.EDIT_LOCK_MAX_RESERVATION_SECONDS;
   });
 
   it('unlimited grace does not auto-complete; forceImmediate does', () => {

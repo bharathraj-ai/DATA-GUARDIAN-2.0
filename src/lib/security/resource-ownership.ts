@@ -122,30 +122,6 @@ export async function findAnnotationForFile(
   });
 }
 
-/**
- * Returns the Document only if the user owns it or has an explicit grant.
- */
-export async function findDocumentForUser(
-  documentId: string,
-  userId: string,
-): Promise<{ id: string; ownerId: string } | null> {
-  if (!documentId || !userId) return null;
-
-  const document = await prisma.document.findFirst({
-    where: {
-      id: documentId,
-      isDeleted: false,
-      OR: [
-        { ownerId: userId },
-        { grants: { some: { granteeId: userId } } },
-      ],
-    },
-    select: { id: true, ownerId: true },
-  });
-
-  return document;
-}
-
 /** Normalize email for membership comparisons. */
 export function normalizeEmail(value: string | null | undefined): string | null {
   const v = value?.trim().toLowerCase();

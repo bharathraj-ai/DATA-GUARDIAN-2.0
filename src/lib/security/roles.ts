@@ -13,16 +13,22 @@ import { canCreateSecureLinks, normalizeRole, type AppRole } from '@/lib/securit
 
 export {
   APP_ROLES,
+  ORG_MEMBER_ROLES,
   ROLE_RANK,
   SELF_SERVICE_ROLES,
+  OWNER_ASSIGNABLE_ROLES,
   canCreateSecureLinks,
+  canManageOrgMembers,
   dashboardPathForRole,
   isDashboardEntryPath,
   isElevatedStaff,
   isPrivilegedRole,
+  isSelfServiceRole,
   normalizeRole,
+  roleDisplayName,
   roleRank,
   type AppRole,
+  type OrgMemberRole,
 } from '@/lib/security/role-helpers';
 
 /**
@@ -32,21 +38,24 @@ export {
 export const getDbUserRole = cache(async function getDbUserRole(userId: string): Promise<{
   role: AppRole;
   roleSelected: boolean;
+  organizationId: string | null;
 } | null> {
   if (!userId) return null;
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { role: true, roleSelected: true },
+    select: { role: true, roleSelected: true, organizationId: true },
   });
   if (!user) return null;
   return {
     role: normalizeRole(user.role),
     roleSelected: user.roleSelected ?? false,
+    organizationId: user.organizationId ?? null,
   };
 });
 
-/** True when DB says this user may perform OWNER-only actions. */
+/** True when DB says this user may create secure links (Team leader). */
 export async function requireOwnerRole(userId: string): Promise<boolean> {
   const db = await getDbUserRole(userId);
   return Boolean(db && canCreateSecureLinks(db.role));
 }
+

@@ -1,7 +1,8 @@
 import { DefaultSession, DefaultUser } from 'next-auth';
 import type { OnboardingStep } from '@/lib/onboarding';
+import type { AppRole } from '@/lib/security/role-helpers';
 
-export type SessionAppRole = 'OWNER' | 'VENDOR';
+export type SessionAppRole = AppRole;
 
 declare module 'next-auth' {
   interface Session {
@@ -11,6 +12,7 @@ declare module 'next-auth' {
       roleSelected: boolean;
       /** Server-derived onboarding state (from roleSelected). */
       onboardingStep: OnboardingStep;
+      organizationId?: string | null;
     } & DefaultSession['user'];
   }
 
@@ -26,6 +28,7 @@ declare module 'next-auth/jwt' {
     role?: SessionAppRole | string;
     roleSelected?: boolean;
     onboardingStep?: OnboardingStep;
+    organizationId?: string | null;
   }
 }
 

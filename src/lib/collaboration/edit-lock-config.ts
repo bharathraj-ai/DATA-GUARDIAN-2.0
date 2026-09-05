@@ -1,6 +1,9 @@
 /**
  * Priority-based editing lock configuration.
  * Lower numeric priority = higher authority (same as VendorAccess.level).
+ *
+ * Group edit has no countdown and no reservation clock. Higher priority
+ * requests access; the holder Allows or they Take over now.
  */
 
 export type SamePriorityPolicy = 'keep_current' | 'allow_takeover';
@@ -17,11 +20,11 @@ export function getEditLockConfig() {
     return {
         /** Redis lock TTL; holder must heartbeat before this elapses. */
         ttlSeconds: envInt('EDIT_LOCK_TTL_SECONDS', 120, 30, 600),
-        /** Optional warning window. 0 = no countdown; editor Allows or higher-priority forces. */
-        gracePeriodSeconds: envInt('EDIT_LOCK_GRACE_PERIOD_SECONDS', 0, 0, 3600),
-        /** Optional reservation display only. 0 = none. Does NOT block higher-priority takeover. */
-        reservationSeconds: envInt('EDIT_LOCK_RESERVATION_SECONDS', 0, 0, 8 * 3600),
-        maxReservationSeconds: envInt('EDIT_LOCK_MAX_RESERVATION_SECONDS', 8 * 3600, 60, 24 * 3600),
+        /** Always 0 — no takeover countdown. */
+        gracePeriodSeconds: 0,
+        /** Always 0 — reservation does not block higher-priority takeover. */
+        reservationSeconds: 0,
+        maxReservationSeconds: 0,
         samePriorityPolicy: (samePriority === 'allow_takeover' ? 'allow_takeover' : 'keep_current') as SamePriorityPolicy,
         /** Heartbeats older than this are treated as a dead tab (same-user reclaim). */
         staleHeartbeatMs: envInt('EDIT_LOCK_STALE_HEARTBEAT_MS', 90_000, 5_000, 180_000),

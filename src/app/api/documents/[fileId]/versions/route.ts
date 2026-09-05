@@ -81,6 +81,7 @@ export async function POST(
         id: true,
         versionNumber: true,
         encryptedContent: true,
+        storageKey: true,
         iv: true,
         authTag: true,
         encryptedDek: true,
@@ -91,30 +92,49 @@ export async function POST(
       return NextResponse.json({ error: 'Version not found' }, { status: 404 });
     }
 
-    // Snapshot current state before restore
+    if (!version.encryptedDek) {
+      return NextResponse.json(
+        { error: 'This version cannot be restored because it is missing its encryption key.' },
+        { status: 409 },
+      );
+    }
+
+    const {
+      buildVersionSnapshot,
+      createFileVersionRow,
+      loadVersionCiphertext,
+      persistLiveCiphertext,
+    } = await import('@/lib/file-version-store');
+
+    const restoredBytes = await loadVersionCiphertext(version);
+    if (!restoredBytes) {
+      return NextResponse.json({ error: 'Version ciphertext is missing' }, { status: 404 });
+    }
+
+    const snapshot = await buildVersionSnapshot(file as never, { moveLiveObject: true });
     const versionCount = await prisma.fileVersion.count({ where: { fileId } });
-    await prisma.fileVersion.create({
-      data: {
+    if (snapshot) {
+      await createFileVersionRow({
         fileId,
         versionNumber: versionCount + 1,
-        encryptedContent: file.encryptedContent!,
-        iv: file.iv!,
-        authTag: file.authTag!,
-        fileSize: file.fileSize,
+        snapshot,
         changeType: 'restore',
         changeDescription: `Pre-restore snapshot before restoring v${version.versionNumber}`,
-      },
-    });
+      });
+    }
 
-    // Restore the old version bytes
-    await prisma.userFile.update({
-      where: { id: fileId },
-      data: {
-        encryptedContent: version.encryptedContent,
-        iv: version.iv,
-        authTag: version.authTag,
-        fileSize: version.fileSize,
-      },
+    const ext = (file.fileName || 'document.bin').split('.').pop() || 'bin';
+    await persistLiveCiphertext({
+      fileId,
+      fileName: file.fileName || 'document',
+      mimeType: file.fileType || 'application/octet-stream',
+      fileExtension: ext,
+      ciphertext: restoredBytes,
+      iv: version.iv,
+      authTag: version.authTag,
+      encryptedDek: version.encryptedDek,
+      plaintextSize: version.fileSize,
+      existingMongoFileId: (file as { mongoFileId?: string | null }).mongoFileId,
     });
 
     return NextResponse.json({ success: true, restoredVersion: version.versionNumber });

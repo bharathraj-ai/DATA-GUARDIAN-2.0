@@ -135,15 +135,10 @@ export const TableToolsSidebar: React.FC<TableToolsSidebarProps> = ({ actions })
             <ItalicIcon /> Italic
           </button>
           <button
-            className={`table-tool-btn ${cell?.align === undefined || cell?.align === "left" ? "" : ""}`}
-            onClick={() => {
-              // Cycle: no underline attribute yet in types, so we toggle bold as placeholder
-              // For underline, we'd need to extend TableCellData — toggling via bold for now isn't right
-              // Actually the user wants underline — but TableCellData doesn't have underline field
-              // We'll just do a visual toggle that doesn't persist (harmless)
-            }}
+            className={`table-tool-btn ${cell?.underline ? "active" : ""}`}
+            onClick={() => actions?.applyStyle("underline", !cell?.underline)}
             disabled={isDisabled || !hasCell}
-            title="Underline (visual only)"
+            title="Toggle underline on selected cell"
             aria-label="Underline"
           >
             <UnderlineIcon /> Underline

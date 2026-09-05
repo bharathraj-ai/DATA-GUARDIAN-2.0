@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { cookies } from 'next/headers';
 import { authorizeSecureLink } from '@/lib/linkAuthorization';
 import { prisma } from '@/lib/prisma';
+import { SSE_POLL_MS } from '@/lib/sse-poll';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -11,7 +12,7 @@ export const maxDuration = 60;
  * GET /api/session-monitor?token=
  *
  * Server-Sent Events endpoint.
- * Polls Redis every 3 seconds for link revocation flags.
+ * Polls Redis every SSE_POLL_MS for link revocation flags.
  * If the link has been revoked, sends { type: "revoked" } and closes.
  * Also sends periodic heartbeats to keep the connection alive.
  * 
@@ -214,7 +215,7 @@ export async function GET(req: NextRequest) {
           }
           send({ type: 'heartbeat', timestamp: new Date().toISOString() });
         }
-      }, 3000);
+      }, SSE_POLL_MS);
 
       // Clean up if client disconnects
       req.signal.addEventListener('abort', () => {

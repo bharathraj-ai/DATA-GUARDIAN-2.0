@@ -96,11 +96,11 @@ const TOPICS: Record<FooterTopicId, FooterTopic> = {
     lead: 'A short field guide to the pieces you will use day to day in Secure Protocol.',
     points: [
       'SecureLink — encrypted package with token, expiry, and access rules.',
-      'OTP — hashed one-time code; wrong attempts can lock or revoke the link.',
+      'OTP — hashed one-time code emailed to the vendor.',
       'Session — short-lived vendor access with device binding after unlock.',
       'Owner token — separate control path for revoke without using the share URL.',
     ],
-    note: 'Full published docs are expanding; this summary matches the live product behavior.',
+    cta: { href: '/docs', label: 'Open documentation' },
   },
   'developer-api': {
     id: 'developer-api',
@@ -109,12 +109,13 @@ const TOPICS: Record<FooterTopicId, FooterTopic> = {
     title: 'How the app is wired today',
     lead: 'Secure Protocol runs on Next.js with server actions, Prisma, and Redis-backed session controls.',
     points: [
-      'Auth: NextAuth + Google OAuth, then Owner/Vendor role selection.',
+      'Auth: NextAuth + Google OAuth, then Team leader / Vendor role selection.',
+      'Hierarchy: Admin → Company → Manager → Team leader → Vendor.',
       'Data: Prisma models for links, vendor access, files, and audit logs.',
       'Realtime controls: Redis for sessions, revoke cache, and rate limits.',
-      'Streams & editors: protected view/edit routes for in-browser work.',
     ],
-    note: 'Public API keys are not exposed in the marketing footer yet — this describes the current architecture.',
+    note: 'Public API keys are not exposed yet — this describes the current architecture.',
+    cta: { href: '/docs', label: 'Read architecture notes' },
   },
   'help-center': {
     id: 'help-center',
@@ -125,10 +126,10 @@ const TOPICS: Record<FooterTopicId, FooterTopic> = {
     points: [
       'Invalid OTP? Check the latest email code; after repeated fails the link may lock.',
       'Wrong Google account? Sign out and use the email bound to the share.',
-      'Need to stop access now? Owners can revoke from the dashboard or owner token page.',
+      'Need to stop access now? Team leaders can revoke from the dashboard or owner token page.',
       'Vendor paused mid-work? Use Break session, then re-enter OTP to resume.',
     ],
-    cta: { href: '/auth/signin', label: 'Sign in for support tools' },
+    cta: { href: '/help', label: 'Open help center' },
   },
   'system-status': {
     id: 'system-status',
@@ -140,9 +141,9 @@ const TOPICS: Record<FooterTopicId, FooterTopic> = {
       'App server (Next.js) — pages, sign-in, and server actions.',
       'PostgreSQL via Prisma — links, users, audit records.',
       'Redis — OTP rate limits, sessions, and fast revoke checks.',
-      'Google OAuth — account sign-in for owners and vendors.',
+      'MongoDB GridFS — ciphertext object store.',
     ],
-    note: 'There is no public status page yet. If create-link or OTP verify stalls, confirm database and Redis connectivity in your environment.',
+    cta: { href: '/status', label: 'Check live status' },
   },
   privacy: {
     id: 'privacy',
@@ -267,7 +268,7 @@ export default function SiteFooter() {
                 <span className="footer-logo-text">Secure Protocol</span>
               </Link>
               <p className="footer-motto">
-                Enterprise-grade data security. Protect, share, and control your sensitive information with zero-knowledge architecture.
+                Zero-trust data security. Protect, share, and control sensitive files with encrypted storage, OTP access, and instant revocation.
               </p>
               <div className="footer-socials">
                 <a href="#" aria-label="Twitter">

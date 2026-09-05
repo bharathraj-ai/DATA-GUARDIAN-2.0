@@ -25,7 +25,6 @@ const nextConfig: NextConfig = {
     'mongodb',
     'exceljs',
     'pdf-lib',
-    'xlsx',
     'bcryptjs',
     'nodemailer',
     'qrcode',
@@ -97,6 +96,7 @@ const nextConfig: NextConfig = {
             value: [
               "default-src 'self'",
               `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
+              "script-src-attr 'none'",
               "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
               "font-src 'self' https://fonts.gstatic.com",
               "img-src 'self' data: blob: https://lh3.googleusercontent.com https://avatars.githubusercontent.com",
@@ -107,19 +107,6 @@ const nextConfig: NextConfig = {
               "base-uri 'self'",
               "form-action 'self'",
               "object-src 'none'",
-            ].join('; '),
-          },
-        ],
-      },
-      // ONLYOFFICE editor — CSP allowing ONLYOFFICE iframe + local PDF blob preview
-      {
-        source: '/editor/:path*',
-        headers: [
-          {
-            key: 'Content-Security-Policy',
-            value: [
-              `frame-src 'self' blob: data: ${process.env.ONLYOFFICE_SERVER_URL || 'http://localhost:8080'}`,
-              `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""} ${process.env.ONLYOFFICE_SERVER_URL || 'http://localhost:8080'}`,
             ].join('; '),
           },
         ],

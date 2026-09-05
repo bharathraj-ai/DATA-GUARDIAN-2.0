@@ -72,9 +72,8 @@ export async function exportDocument(currentDoc: DocumentData): Promise<File> {
     }
 
     if (allRows.length > 0) {
-      const XLSX = await import("xlsx");
-      const worksheet = XLSX.utils.aoa_to_sheet(allRows);
-      const csvStr = XLSX.utils.sheet_to_csv(worksheet);
+      const { rowsToCsv } = await import("@/lib/csv-serialize");
+      const csvStr = rowsToCsv(allRows);
       return new File([csvStr], withExt(currentDoc.name, ".csv"), { type: "text/csv" });
     } else {
       return new File([""], withExt(currentDoc.name, ".csv"), { type: "text/csv" });
