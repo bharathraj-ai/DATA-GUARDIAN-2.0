@@ -5,11 +5,49 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import { useSession, signOut } from 'next-auth/react';
 import Image from 'next/image';
+import { isMarketingPath } from '@/lib/marketing-paths';
+import { useDeferredMarketingSession } from '@/components/useDeferredMarketingSession';
+
+type NavSession = {
+    user?: {
+        name?: string | null;
+        image?: string | null;
+        role?: string | null;
+        onboardingStep?: string | null;
+        roleSelected?: boolean | null;
+    } | null;
+} | null;
 
 export default function Navbar() {
     const pathname = usePathname();
-    const router = useRouter();
+    if (isMarketingPath(pathname)) {
+        return <MarketingNavbar />;
+    }
+    return <AppNavbar />;
+}
+
+function MarketingNavbar() {
+    const pathname = usePathname();
+    const { session, status } = useDeferredMarketingSession(pathname);
+    return <NavbarView session={session} status={status} prefetch={false} />;
+}
+
+function AppNavbar() {
     const { data: session, status } = useSession();
+    return <NavbarView session={session} status={status} prefetch />;
+}
+
+function NavbarView({
+    session,
+    status,
+    prefetch,
+}: {
+    session: NavSession;
+    status: string;
+    prefetch: boolean;
+}) {
+    const pathname = usePathname();
+    const router = useRouter();
     const [isScrolled, setIsScrolled] = useState(false);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const [hasMounted, setHasMounted] = useState(false);
@@ -42,23 +80,20 @@ export default function Navbar() {
         return () => window.removeEventListener('scroll', handleScroll);
     }, []);
 
-    // Prefetch authenticated destinations so nav feels instant
+    // Prefetch dashboards only — /create-link warms Mongo/Prisma and starves the Neon pool.
     useEffect(() => {
-        if (status !== 'authenticated') return;
+        if (!prefetch || status !== 'authenticated') return;
         const roleReady =
             session?.user?.onboardingStep === 'COMPLETE' ||
             (session?.user?.onboardingStep == null && Boolean(session?.user?.roleSelected));
-        const role = session?.user?.role;
-        router.prefetch('/how-it-works');
-        router.prefetch('/services');
         if (!roleReady) return;
+        const role = session?.user?.role;
         if (role === 'OWNER') {
             router.prefetch('/dashboard/owner');
-            router.prefetch('/create-link');
         } else if (role === 'VENDOR') {
             router.prefetch('/dashboard/vendor');
         }
-    }, [status, session, router]);
+    }, [prefetch, status, session, router]);
 
     const navLinks = [
         { name: 'Home', href: '/' },

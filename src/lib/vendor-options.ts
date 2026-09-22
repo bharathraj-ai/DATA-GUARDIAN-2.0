@@ -12,6 +12,6 @@ export const listVendorOptions = cache(async function listVendorOptions(): Promi
         where: { role: 'VENDOR' },
         select: { email: true, name: true },
         orderBy: [{ name: 'asc' }, { email: 'asc' }],
-        take: 200,
+        take: 50,
     });
 });

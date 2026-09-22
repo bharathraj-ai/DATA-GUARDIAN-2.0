@@ -28,55 +28,37 @@ export async function getUnifiedAuditLogs(): Promise<UnifiedAuditLog[]> {
     }
 
     try {
-        const [secureLinkLogs, ownedDocs] = await Promise.all([
-            prisma.auditLog.findMany({
-                where: { ownerId: userId },
-                select: {
-                    id: true,
-                    action: true,
-                    reason: true,
-                    metadata: true,
-                    timestamp: true,
-                    linkId: true,
-                    SecureLink: {
-                        select: {
-                            purpose: true,
-                        },
+        const secureLinkLogs = await prisma.auditLog.findMany({
+            where: { ownerId: userId },
+            select: {
+                id: true,
+                action: true,
+                reason: true,
+                metadata: true,
+                timestamp: true,
+                linkId: true,
+                SecureLink: {
+                    select: {
+                        purpose: true,
                     },
                 },
-                orderBy: {
-                    timestamp: 'desc'
-                },
-                take: 100,
-            }),
-            prisma.document.findMany({
-                where: { ownerId: userId },
-                select: { id: true, fileName: true },
-                take: 500,
-            }),
-        ]);
-        const docNameById = new Map(ownedDocs.map((d) => [d.id, d.fileName]));
-        const documentLogs = ownedDocs.length === 0
-            ? []
-            : await prisma.documentAuditLog.findMany({
-                where: {
-                    documentId: { in: ownedDocs.map((d) => d.id) },
-                },
-                select: {
-                    id: true,
-                    action: true,
-                    metadata: true,
-                    createdAt: true,
-                    documentId: true,
-                    userId: true,
-                    ipAddress: true,
-                    userAgent: true,
-                },
-                orderBy: {
-                    createdAt: 'desc'
-                },
-                take: 100,
-            });
+            },
+            orderBy: {
+                timestamp: 'desc'
+            },
+            take: 80,
+        });
+        const documentLogs: Array<{
+            id: string;
+            action: string;
+            metadata: string | null;
+            createdAt: Date;
+            documentId: string;
+            userId: string | null;
+            ipAddress: string | null;
+            userAgent: string | null;
+        }> = [];
+        const docNameById = new Map<string, string>();
 
         // Map SecureLink AuditLogs
         const mappedSecureLinkLogs: UnifiedAuditLog[] = secureLinkLogs.map(log => {

@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation';
 import { auth } from '@/lib/auth';
 import { listVendorOptions } from '@/lib/vendor-options';
 import { ownerHasActiveLink } from '@/actions/dashboard';
-import { getDbUserRole } from '@/lib/security/roles';
+import { canCreateSecureLinks } from '@/lib/security/role-helpers';
 import { getOnboardingStep } from '@/lib/onboarding';
 import CreateLinkClient from './CreateLinkClient';
 import { isMongoConfigured, warmMongoConnection } from '@/lib/mongo/client';
@@ -10,32 +10,27 @@ import { warmEmailTransport } from '@/lib/email';
 import { warmPrismaConnection } from '@/lib/prisma';
 
 /**
- * Auth + vendor list on the server — form paints with data ready (no client waterfall).
- * Role gate uses Postgres, never JWT alone.
+ * JWT gate for first paint. Mutations still call requireOwnerRole on the server.
+ * Vendor list + active-link check run in parallel with connection warm-up.
  */
 export default async function CreateLinkPage() {
     if (isMongoConfigured()) {
         void warmMongoConnection().catch(() => {});
     }
     warmEmailTransport();
+    void warmPrismaConnection().catch(() => {});
 
-    const [, session] = await Promise.all([warmPrismaConnection(), auth()]);
+    const session = await auth();
 
     if (!session?.user?.id) {
         redirect('/auth/signin?callbackUrl=/create-link');
     }
 
-    const dbUser = await getDbUserRole(session.user.id);
-
-    if (!dbUser) {
-        redirect('/auth/signin?callbackUrl=/create-link');
-    }
-
-    if (getOnboardingStep(dbUser.roleSelected) === 'ROLE_SELECTION') {
+    if (getOnboardingStep(session.user.roleSelected) === 'ROLE_SELECTION') {
         redirect('/auth/role-select?callbackUrl=/create-link');
     }
 
-    if (dbUser.role !== 'OWNER') {
+    if (!canCreateSecureLinks(session.user.role)) {
         redirect('/dashboard/vendor');
     }
 

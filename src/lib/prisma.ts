@@ -68,8 +68,8 @@ function buildDatasourceUrl(): string {
     // Direct Neon compute is small, but 3 is too tight: RSC + server actions +
     // OAuth adapter queries overlap and hit P2024 (pool timeout).
     const defaultLimit = usingPooler
-      ? (process.env.NODE_ENV === 'development' ? '5' : '10')
-      : (process.env.NODE_ENV === 'development' ? '5' : '12');
+      ? (process.env.NODE_ENV === 'development' ? '8' : '15')
+      : (process.env.NODE_ENV === 'development' ? '8' : '15');
 
     parsed.searchParams.set(
       'connection_limit',

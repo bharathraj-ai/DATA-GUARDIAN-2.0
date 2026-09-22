@@ -27,7 +27,7 @@ export default function VendorDashboardClient({
         if (fetchInFlight.current) return;
         fetchInFlight.current = true;
         try {
-            const received = await getReceivedLinks(userEmail);
+            const received = await getReceivedLinks(userEmail, { includeHistory: false });
             setLinks(received);
         } catch (error) {
             console.error('Error fetching links:', error);
@@ -38,7 +38,7 @@ export default function VendorDashboardClient({
 
     // Poll every 20s only while the tab is visible (was 5s always-on)
     useEffect(() => {
-        const POLL_MS = 20_000;
+        const POLL_MS = 45_000;
 
         const tick = () => {
             if (document.visibilityState === 'visible') {

@@ -47,7 +47,7 @@ function getStatus(link: { expiresAt: Date; isUsed: boolean; isRevoked: boolean 
     return 'active';
 }
 
-/** List-row fields only — no nested files/audits (loaded on expand). */
+/** List-row fields only — cap nested vendors so 40 links are not 40×N round-trips. */
 const LIST_SELECT = {
     id: true,
     token: true,
@@ -63,12 +63,10 @@ const LIST_SELECT = {
     lockedAt: true,
     otpVerifiedAt: true,
     allowedVendorEmail: true,
-    LinkAccess: {
-        select: { vendorEmail: true, level: true, isUsed: true, otpVerifiedAt: true },
-    },
     VendorAccess: {
         select: { email: true, level: true, status: true },
         orderBy: { level: 'asc' as const },
+        take: 8,
     },
     _count: { select: { UserFile: true } },
 } as const;
@@ -94,16 +92,18 @@ const VENDOR_LIST_SELECT = {
  * Avoids OR + relation `some()` which the planner cannot use cleanly.
  */
 async function findReceivedLinksByEmail(email: string) {
-    const vendorRows = await prisma.vendorAccess.findMany({
-        where: { email: { equals: email, mode: 'insensitive' } },
-        select: { secureLinkId: true },
-        take: 80,
-    });
-    const accessRows = await prisma.linkAccess.findMany({
-        where: { vendorEmail: { equals: email, mode: 'insensitive' } },
-        select: { secureLinkId: true },
-        take: 80,
-    });
+    const [vendorRows, accessRows] = await Promise.all([
+        prisma.vendorAccess.findMany({
+            where: { email: { equals: email, mode: 'insensitive' } },
+            select: { secureLinkId: true },
+            take: 40,
+        }),
+        prisma.linkAccess.findMany({
+            where: { vendorEmail: { equals: email, mode: 'insensitive' } },
+            select: { secureLinkId: true },
+            take: 40,
+        }),
+    ]);
     const ids = [...new Set([
         ...vendorRows.map((r) => r.secureLinkId),
         ...accessRows.map((r) => r.secureLinkId),
@@ -115,7 +115,7 @@ async function findReceivedLinksByEmail(email: string) {
                 ? { OR: [{ allowedVendorEmail: { equals: email, mode: 'insensitive' } }, { id: { in: ids } }] }
                 : { allowedVendorEmail: { equals: email, mode: 'insensitive' } },
         orderBy: { createdAt: 'desc' },
-        take: 80,
+        take: 40,
         select: {
             ...VENDOR_LIST_SELECT,
             LinkAccess: {
@@ -149,7 +149,11 @@ function mapVendorLinks(links: Awaited<ReturnType<typeof findReceivedLinksByEmai
 }
 
 function mapListLink(link: any, effectiveIsUsed: boolean): DashboardLink {
-    const primaryVendor = link.LinkAccess?.[0]?.vendorEmail || link.allowedVendorEmail || null;
+    const primaryVendor =
+        link.allowedVendorEmail ||
+        link.VendorAccess?.[0]?.email ||
+        link.LinkAccess?.[0]?.vendorEmail ||
+        null;
     // Prefer link-level stamp; fall back to any vendor LinkAccess verify time
     const vendorVerifiedAt: Date | null =
         (link.LinkAccess || [])
@@ -249,7 +253,7 @@ async function fetchVendorSendHistory(email: string): Promise<SendHistoryRecord[
             vendorEmail: { contains: email, mode: 'insensitive' },
         },
         orderBy: { createdAt: 'desc' },
-        take: 100,
+        take: 40,
         select: {
             id: true,
             topic: true,
@@ -269,12 +273,12 @@ async function fetchOwnedLinksForOwner(userId: string): Promise<DashboardLink[]>
     const links = await prisma.secureLink.findMany({
         where: { ownerId: userId },
         orderBy: { createdAt: 'desc' },
-        take: 80,
+        take: 40,
         select: LIST_SELECT,
     });
 
     return links.map((link: any) => {
-        const anyVendorUsed = link.LinkAccess?.some((a: any) => a.isUsed) || false;
+        const anyVendorUsed = link.VendorAccess?.some((a: any) => a.status === 'completed') || false;
         return mapListLink(link, link.isUsed || anyVendorUsed);
     });
 }
@@ -297,7 +301,10 @@ export async function getOwnedLinks(userId: string): Promise<DashboardLink[]> {
 /**
  * Vendor received links — no nested files/audits.
  */
-export async function getReceivedLinks(email: string): Promise<DashboardLink[]> {
+export async function getReceivedLinks(
+    email: string,
+    opts?: { includeHistory?: boolean },
+): Promise<DashboardLink[]> {
     try {
         const session = await auth();
         const sessionEmail = session?.user?.email?.toLowerCase();
@@ -307,11 +314,16 @@ export async function getReceivedLinks(email: string): Promise<DashboardLink[]> 
             return [];
         }
 
-        return mergeVendorInbox(
-            mapVendorLinks(await findReceivedLinksByEmail(target)),
-            await fetchVendorSendHistory(target),
-            target,
-        );
+        const includeHistory = opts?.includeHistory !== false;
+        if (!includeHistory) {
+            return mapVendorLinks(await findReceivedLinksByEmail(target));
+        }
+
+        const [live, history] = await Promise.all([
+            findReceivedLinksByEmail(target),
+            fetchVendorSendHistory(target),
+        ]);
+        return mergeVendorInbox(mapVendorLinks(live), history, target);
     } catch (error) {
         console.error('Error fetching received links:', error);
         return [];
@@ -376,7 +388,7 @@ export async function getSendHistory(userId: string): Promise<SendHistoryRecord[
         return await prisma.sendRecord.findMany({
             where: { ownerId: userId },
             orderBy: { createdAt: 'desc' },
-            take: 100,
+            take: 40,
             select: {
                 id: true,
                 topic: true,
@@ -434,12 +446,13 @@ export async function getVendorDashboardInitial(): Promise<{
         return { links: [], email: null, name: null };
     }
 
+    const [live, history] = await Promise.all([
+        findReceivedLinksByEmail(email),
+        fetchVendorSendHistory(email),
+    ]);
+
     return {
-        links: mergeVendorInbox(
-            mapVendorLinks(await findReceivedLinksByEmail(email)),
-            await fetchVendorSendHistory(email),
-            email,
-        ),
+        links: mergeVendorInbox(mapVendorLinks(live), history, email),
         email,
         name: session?.user?.name ?? null,
     };
@@ -460,21 +473,23 @@ export async function getOwnerDashboardData(userId: string): Promise<{
         return { links: [], history: [] };
     }
 
-    const links = await fetchOwnedLinksForOwner(userId);
-    const history = await prisma.sendRecord.findMany({
-        where: { ownerId: userId },
-        orderBy: { createdAt: 'desc' },
-        take: 100,
-        select: {
-            id: true,
-            topic: true,
-            vendorEmail: true,
-            fileCount: true,
-            status: true,
-            createdAt: true,
-            expiredAt: true,
-        },
-    });
+    const [links, history] = await Promise.all([
+        fetchOwnedLinksForOwner(userId),
+        prisma.sendRecord.findMany({
+            where: { ownerId: userId },
+            orderBy: { createdAt: 'desc' },
+            take: 40,
+            select: {
+                id: true,
+                topic: true,
+                vendorEmail: true,
+                fileCount: true,
+                status: true,
+                createdAt: true,
+                expiredAt: true,
+            },
+        }),
+    ]);
     return { links, history };
 }
 
@@ -484,27 +499,17 @@ export async function ownerHasActiveLink(userId: string): Promise<boolean> {
     if (!session?.user?.id || session.user.id !== userId) return false;
 
     try {
-        const candidates = await prisma.secureLink.findMany({
+        const live = await prisma.secureLink.findFirst({
             where: {
                 ownerId: userId,
                 isRevoked: false,
                 isUsed: false,
                 expiresAt: { gt: new Date() },
+                LinkAccess: { none: { isUsed: true } },
             },
             select: { id: true },
-            take: 25,
         });
-        if (candidates.length === 0) return false;
-
-        const usedAccess = await prisma.linkAccess.findMany({
-            where: {
-                secureLinkId: { in: candidates.map((c) => c.id) },
-                isUsed: true,
-            },
-            select: { secureLinkId: true },
-        });
-        const usedIds = new Set(usedAccess.map((a) => a.secureLinkId));
-        return candidates.some((c) => !usedIds.has(c.id));
+        return Boolean(live);
     } catch (error) {
         console.warn('[ownerHasActiveLink] DB unavailable — allowing create-link:', error);
         return false;
