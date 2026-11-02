@@ -82,19 +82,31 @@ function resolveStoragePath(...segments: string[]): string {
 }
 
 export async function ensureStorageDirectories(): Promise<void> {
-  const dirs = [
-    resolveStoragePath('documents'),
-    resolveStoragePath('versions'),
-  ];
+  const provider = (process.env.STORAGE_PROVIDER || '').trim().toLowerCase();
+  if (process.env.NODE_ENV === 'production' && provider !== 'local') {
+    // In production with GridFS, no local filesystem storage directories are required
+    return;
+  }
+  try {
+    const dirs = [
+      resolveStoragePath('documents'),
+      resolveStoragePath('versions'),
+    ];
 
-  for (const dir of dirs) {
-    await fs.mkdir(dir, { recursive: true });
+    for (const dir of dirs) {
+      await fs.mkdir(dir, { recursive: true });
+    }
+  } catch {
+    // Non-blocking in restricted container environments
   }
 }
 
 /**
  * Save a document to secure storage.
- * Returns the relative storage path (stored in the DB — NOT the absolute path).
+ * In production or when STORAGE_PROVIDER=mongodb, documents are encrypted before
+ * storage and saved exclusively to MongoDB GridFS. Zero plaintext files are written to disk.
+ *
+ * Local filesystem storage remains available for development only.
  */
 export async function saveDocument(
   documentId: string,
@@ -114,25 +126,36 @@ export async function saveDocument(
   const safeId = assertSafeSegment(documentId, 'documentId');
   const safeName = safeBaseName(fileName);
 
-  // If MongoDB GridFS is configured / selected, upload encrypted to GridFS
+  // If MongoDB GridFS is configured / selected, upload encrypted directly to GridFS
   const provider = (process.env.STORAGE_PROVIDER || '').trim().toLowerCase();
-  let gridFsResult: any = null;
-  if (provider === 'mongodb' || (process.env.NODE_ENV === 'production' && provider !== 'local')) {
-    try {
-      const { uploadEncryptedFile } = await import('./encrypted-storage');
-      gridFsResult = await uploadEncryptedFile({
-        buffer,
-        filename: safeName,
-        mimeType: options?.mimeType || getMimeType(getFileExtension(safeName)),
-        uploadedBy: options?.uploadedBy || 'system',
-        classification: options?.classification || 'INTERNAL',
-        documentId: safeId,
-      });
-    } catch (err) {
-      throw err;
-    }
+  const isMongo = provider === 'mongodb' || (process.env.NODE_ENV === 'production' && provider !== 'local');
+
+  if (isMongo) {
+    const { uploadEncryptedFile } = await import('./encrypted-storage');
+    const gridFsResult = await uploadEncryptedFile({
+      buffer,
+      filename: safeName,
+      mimeType: options?.mimeType || getMimeType(getFileExtension(safeName)),
+      uploadedBy: options?.uploadedBy || 'system',
+      classification: options?.classification || 'INTERNAL',
+      documentId: safeId,
+    });
+
+    // In production GridFS storage: do NOT write plaintext files to local disk
+    const storagePath = `gridfs://${gridFsResult.storageFileId}`;
+    return {
+      storagePath,
+      absolutePath: storagePath,
+      storageFileId: gridFsResult.storageFileId,
+      storageProvider: gridFsResult.storageProvider,
+      encryptionAlgorithm: gridFsResult.encryptionAlgorithm,
+      encryptionIV: gridFsResult.encryptionIV,
+      authenticationTag: gridFsResult.authenticationTag,
+      encryptedDEK: gridFsResult.encryptedDEK,
+    };
   }
 
+  // Development-only fallback: local filesystem storage
   const dir = resolveStoragePath('documents', safeId);
   await fs.mkdir(dir, { recursive: true });
 
@@ -145,7 +168,6 @@ export async function saveDocument(
     await fs.writeFile(tempPath, buffer);
     await fs.rename(tempPath, absolutePath);
   } catch (writeErr) {
-    // Clean up temporary file on failure
     try {
       await fs.unlink(tempPath);
     } catch {}
@@ -156,21 +178,94 @@ export async function saveDocument(
   return {
     storagePath,
     absolutePath,
-    storageFileId: gridFsResult?.storageFileId,
-    storageProvider: gridFsResult?.storageProvider || 'local',
-    encryptionAlgorithm: gridFsResult?.encryptionAlgorithm,
-    encryptionIV: gridFsResult?.encryptionIV,
-    authenticationTag: gridFsResult?.authenticationTag,
-    encryptedDEK: gridFsResult?.encryptedDEK,
+    storageFileId: undefined,
+    storageProvider: 'local',
   };
 }
 
-export async function readDocument(storagePath: string): Promise<Buffer> {
+export async function readDocument(
+  storagePath: string,
+  encryptionMeta?: {
+    encryptedDEK?: string | null;
+    encryptionIV?: string | null;
+    authenticationTag?: string | null;
+    storageFileId?: string | null;
+  }
+): Promise<Buffer> {
+  if (storagePath.startsWith('gridfs://') || encryptionMeta?.storageFileId) {
+    const fileId = encryptionMeta?.storageFileId || storagePath.replace('gridfs://', '');
+    const { downloadDecryptedFile } = await import('./encrypted-storage');
+
+    // If metadata was supplied directly, use it
+    if (encryptionMeta?.encryptedDEK && encryptionMeta?.encryptionIV && encryptionMeta?.authenticationTag) {
+      return downloadDecryptedFile({
+        storageFileId: fileId,
+        encryptedDEK: encryptionMeta.encryptedDEK,
+        encryptionIV: encryptionMeta.encryptionIV,
+        authenticationTag: encryptionMeta.authenticationTag,
+      });
+    }
+
+    // Otherwise, query Prisma for Document or DocumentVersion metadata
+    const { prisma } = await import('@/lib/prisma');
+    const doc = await prisma.document.findFirst({
+      where: {
+        OR: [{ storageFileId: fileId }, { storagePath }],
+      },
+      select: {
+        storageFileId: true,
+        encryptedDEK: true,
+        encryptionIV: true,
+        authenticationTag: true,
+      },
+    });
+
+    if (doc && doc.storageFileId && doc.encryptedDEK && doc.encryptionIV && doc.authenticationTag) {
+      return downloadDecryptedFile({
+        storageFileId: doc.storageFileId,
+        encryptedDEK: doc.encryptedDEK,
+        encryptionIV: doc.encryptionIV,
+        authenticationTag: doc.authenticationTag,
+      });
+    }
+
+    // Try DocumentVersion
+    const ver = await prisma.documentVersion.findFirst({
+      where: {
+        OR: [{ storageFileId: fileId }, { storagePath }],
+      },
+      select: {
+        storageFileId: true,
+        encryptedDEK: true,
+        encryptionIV: true,
+        authenticationTag: true,
+      },
+    });
+
+    if (ver && ver.storageFileId && ver.encryptedDEK && ver.encryptionIV && ver.authenticationTag) {
+      return downloadDecryptedFile({
+        storageFileId: ver.storageFileId,
+        encryptedDEK: ver.encryptedDEK,
+        encryptionIV: ver.encryptionIV,
+        authenticationTag: ver.authenticationTag,
+      });
+    }
+
+    throw new Error('Encryption metadata not found for GridFS document: failed closed');
+  }
+
   const absolutePath = resolveStoragePath(storagePath);
   return fs.readFile(absolutePath);
 }
 
 export async function getDocumentStream(storagePath: string) {
+  if (storagePath.startsWith('gridfs://')) {
+    const fileId = storagePath.replace('gridfs://', '');
+    const { getStorageProvider } = await import('./storage-provider');
+    const provider = getStorageProvider();
+    return provider.downloadStream(fileId);
+  }
+
   const absolutePath = resolveStoragePath(storagePath);
   await fs.access(absolutePath);
 
@@ -178,43 +273,108 @@ export async function getDocumentStream(storagePath: string) {
   return createReadStream(absolutePath);
 }
 
-export async function getDocumentStats(storagePath: string) {
+export async function getDocumentStats(storagePath: string): Promise<{ size: number; mtime: Date }> {
+  if (storagePath.startsWith('gridfs://')) {
+    const fileId = storagePath.replace('gridfs://', '');
+    const { getStorageProvider } = await import('./storage-provider');
+    const provider = getStorageProvider();
+    const info = await provider.getFileInfo(fileId);
+    if (!info) {
+      throw new Error(`Storage file not found in GridFS: ${fileId}`);
+    }
+    return {
+      size: info.length,
+      mtime: info.uploadDate,
+    };
+  }
+
   const absolutePath = resolveStoragePath(storagePath);
-  return fs.stat(absolutePath);
+  const stat = await fs.stat(absolutePath);
+  return {
+    size: stat.size,
+    mtime: stat.mtime,
+  };
 }
 
 export async function saveVersion(
   documentId: string,
   versionNumber: number,
   fileExtension: string,
-  buffer: Buffer
-): Promise<{ storagePath: string; fileSize: number }> {
+  buffer: Buffer,
+  options?: { mimeType?: string; uploadedBy?: string }
+): Promise<{
+  storagePath: string;
+  fileSize: number;
+  storageFileId?: string;
+  storageProvider?: string;
+  encryptionAlgorithm?: string;
+  encryptionIV?: string;
+  authenticationTag?: string;
+  encryptedDEK?: string;
+}> {
   const safeId = assertSafeSegment(documentId, 'documentId');
   const safeExt = safeBaseName(fileExtension.replace(/^\./, '') || 'bin');
+  const versionFileName = `${versionNumber}.${safeExt}`;
+
+  const provider = (process.env.STORAGE_PROVIDER || '').trim().toLowerCase();
+  const isMongo = provider === 'mongodb' || (process.env.NODE_ENV === 'production' && provider !== 'local');
+
+  if (isMongo) {
+    const { uploadEncryptedFile } = await import('./encrypted-storage');
+    const gridFsResult = await uploadEncryptedFile({
+      buffer,
+      filename: versionFileName,
+      mimeType: options?.mimeType || getMimeType(safeExt),
+      uploadedBy: options?.uploadedBy || 'system',
+      documentId: safeId,
+      version: versionNumber,
+    });
+
+    const storagePath = `gridfs://${gridFsResult.storageFileId}`;
+    return {
+      storagePath,
+      fileSize: buffer.length,
+      storageFileId: gridFsResult.storageFileId,
+      storageProvider: gridFsResult.storageProvider,
+      encryptionAlgorithm: gridFsResult.encryptionAlgorithm,
+      encryptionIV: gridFsResult.encryptionIV,
+      authenticationTag: gridFsResult.authenticationTag,
+      encryptedDEK: gridFsResult.encryptedDEK,
+    };
+  }
 
   const dir = resolveStoragePath('versions', safeId);
   await fs.mkdir(dir, { recursive: true });
 
-  const versionFileName = `${versionNumber}.${safeExt}`;
   const absolutePath = resolveStoragePath('versions', safeId, versionFileName);
   await fs.writeFile(absolutePath, buffer);
 
   const storagePath = path.join('versions', safeId, versionFileName);
-  return { storagePath, fileSize: buffer.length };
+  return { storagePath, fileSize: buffer.length, storageProvider: 'local' };
 }
 
-export async function readVersion(storagePath: string): Promise<Buffer> {
-  const absolutePath = resolveStoragePath(storagePath);
-  return fs.readFile(absolutePath);
+export async function readVersion(
+  storagePath: string,
+  encryptionMeta?: {
+    encryptedDEK?: string | null;
+    encryptionIV?: string | null;
+    authenticationTag?: string | null;
+    storageFileId?: string | null;
+  }
+): Promise<Buffer> {
+  return readDocument(storagePath, encryptionMeta);
 }
 
 export async function deleteDocumentFiles(documentId: string): Promise<void> {
   const safeId = assertSafeSegment(documentId, 'documentId');
-  const docDir = resolveStoragePath('documents', safeId);
-  const verDir = resolveStoragePath('versions', safeId);
 
-  await fs.rm(docDir, { recursive: true, force: true }).catch(() => {});
-  await fs.rm(verDir, { recursive: true, force: true }).catch(() => {});
+  // Local directory cleanup (best-effort)
+  try {
+    const docDir = resolveStoragePath('documents', safeId);
+    const verDir = resolveStoragePath('versions', safeId);
+    await fs.rm(docDir, { recursive: true, force: true }).catch(() => {});
+    await fs.rm(verDir, { recursive: true, force: true }).catch(() => {});
+  } catch {}
 
   // Clean up any MongoDB GridFS file referenced by this document
   try {

@@ -94,36 +94,37 @@ export async function POST(
       return NextResponse.json({ error: 'Version not found' }, { status: 404 });
     }
 
-    // Snapshot current state before restore
-    const versionCount = await prisma.fileVersion.count({ where: { fileId } });
-    await prisma.fileVersion.create({
-      data: {
-        fileId,
-        versionNumber: versionCount + 1,
-        encryptedContent: null,
-        storageProvider: (file as any).storageProvider || 'mongodb',
-        storageFileId: (file as any).storageFileId || file.mongoFile?.gridFSId || null,
-        iv: file.iv!,
-        authTag: file.authTag!,
-        encryptedDek: file.encryptedDek,
-        fileSize: file.fileSize,
-        changeType: 'restore',
-        changeDescription: `Pre-restore snapshot before restoring v${version.versionNumber}`,
-      },
-    });
+    // Snapshot current state and restore old version reference atomically in a transaction
+    await prisma.$transaction(async (tx) => {
+      const versionCount = await tx.fileVersion.count({ where: { fileId } });
+      await tx.fileVersion.create({
+        data: {
+          fileId,
+          versionNumber: versionCount + 1,
+          encryptedContent: null,
+          storageProvider: (file as any).storageProvider || 'mongodb',
+          storageFileId: (file as any).storageFileId || file.mongoFile?.gridFSId || null,
+          iv: file.iv!,
+          authTag: file.authTag!,
+          encryptedDek: file.encryptedDek,
+          fileSize: file.fileSize,
+          changeType: 'restore',
+          changeDescription: `Pre-restore snapshot before restoring v${version.versionNumber}`,
+        },
+      });
 
-    // Restore the old version reference
-    await prisma.userFile.update({
-      where: { id: fileId },
-      data: {
-        encryptedContent: version.encryptedContent ?? null,
-        storageProvider: version.storageProvider,
-        storageFileId: version.storageFileId,
-        iv: version.iv,
-        authTag: version.authTag,
-        encryptedDek: version.encryptedDek,
-        fileSize: version.fileSize,
-      },
+      await tx.userFile.update({
+        where: { id: fileId },
+        data: {
+          encryptedContent: version.encryptedContent ?? null,
+          storageProvider: version.storageProvider,
+          storageFileId: version.storageFileId,
+          iv: version.iv,
+          authTag: version.authTag,
+          encryptedDek: version.encryptedDek,
+          fileSize: version.fileSize,
+        },
+      });
     });
 
     return NextResponse.json({ success: true, restoredVersion: version.versionNumber });

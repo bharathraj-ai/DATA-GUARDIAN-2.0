@@ -44,5 +44,6 @@ export async function decryptUserFileBytes(fileRecord: DecryptableFile): Promise
         const dek = fileRecord.encryptedDek ? decryptDek(fileRecord.encryptedDek) : undefined;
         return decryptBuffer(downloaded, fileRecord.iv, fileRecord.authTag, dek);
     }
-    return downloaded;
+    // Fail closed: Missing encryption parameters
+    throw new Error('File decryption failed closed: missing IV or authTag');
 }

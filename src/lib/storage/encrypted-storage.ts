@@ -35,6 +35,7 @@ export interface EncryptedDownloadParams {
   encryptedDEK?: string | null;
   encryptionIV?: string | null;
   authenticationTag?: string | null;
+  allowLegacyUnencrypted?: boolean;
 }
 
 /**
@@ -103,12 +104,12 @@ export async function downloadDecryptedFile(
   // 1. Download ciphertext
   const ciphertext = await activeProvider.download(params.storageFileId);
 
-  // If encryption metadata is present, decrypt and verify
+  // 2. Encryption metadata must be complete: fail closed if missing
   if (params.encryptedDEK && params.encryptionIV && params.authenticationTag) {
-    // 2. Unwrap DEK using KEK (with key rotation support)
+    // Unwrap DEK using KEK (with key rotation support)
     const dek = decryptDek(params.encryptedDEK);
 
-    // 3. Decrypt and verify auth tag
+    // Decrypt and verify AES-256-GCM auth tag (throws on tampering / mismatch)
     return decryptBuffer(
       ciphertext,
       params.encryptionIV,
@@ -117,8 +118,16 @@ export async function downloadDecryptedFile(
     );
   }
 
-  // Fallback for unencrypted legacy or raw blobs if metadata is missing
-  return ciphertext;
+  // Explicit legacy override (never enabled by default)
+  if (params.allowLegacyUnencrypted === true) {
+    logger.warn(`[STORAGE] Downloaded legacy unencrypted file: ${params.storageFileId}`);
+    return ciphertext;
+  }
+
+  // FAIL CLOSED: Never return raw ciphertext as plaintext
+  throw new Error(
+    `Decryption failed closed: missing required encryption metadata (IV, authTag, or encryptedDEK) for storageFileId ${params.storageFileId}`
+  );
 }
 
 /**

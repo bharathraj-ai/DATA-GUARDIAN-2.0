@@ -24,6 +24,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ fileId: string }> },
 ) {
+  let uploadResult: any = null;
   try {
     const { fileId } = await params;
     const body = await req.json() as {
@@ -70,7 +71,7 @@ export async function POST(
     // Save ciphertext in centralized MongoDB GridFS storage (zero full buffers in PostgreSQL)
     const { getStorageProvider } = await import('@/lib/storage/storage-provider');
     const storageProvider = getStorageProvider();
-    const uploadResult = await storageProvider.upload(
+    uploadResult = await storageProvider.upload(
       encrypted.encryptedContent,
       file.fileName || 'document.bin',
       {
@@ -154,12 +155,21 @@ export async function POST(
     }
 
     if (versionNumber === 0) {
+      if (uploadResult?.storageFileId) {
+        await storageProvider.delete(uploadResult.storageFileId).catch(() => {});
+      }
       return NextResponse.json({ error: 'Could not persist document version' }, { status: 503 });
     }
 
     return NextResponse.json({ success: true, versionNumber });
   } catch (err) {
     logger.error('[save] error:', err);
+    if (uploadResult?.storageFileId) {
+      try {
+        const { getStorageProvider } = await import('@/lib/storage/storage-provider');
+        await getStorageProvider().delete(uploadResult.storageFileId).catch(() => {});
+      } catch {}
+    }
     return NextResponse.json({ error: 'Failed to save document' }, { status: 500 });
   }
 }

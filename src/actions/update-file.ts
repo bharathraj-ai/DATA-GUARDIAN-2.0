@@ -26,6 +26,7 @@ export async function updateFile(
     fileId: string,
     formData: FormData,
 ): Promise<UpdateFileResult> {
+    let uploadResult: any = null;
     try {
         // 1. Server-side authorization — all capability checks happen here
         const authResult = await authorizeSecureLink(token, 'edit', fileId);
@@ -146,7 +147,6 @@ export async function updateFile(
         }
 
         // 8. Encrypt new content with fresh DEK (per-file key rotation on every save)
-        //    Always store inline in DB for fast draft saves — S3 only on final submit
         const dek = generateDek();
         const { iv, authTag, encryptedContent } = encryptBuffer(fileBuffer, dek);
         const encryptedDek = encryptDek(dek);
@@ -155,7 +155,7 @@ export async function updateFile(
         // Save ciphertext in centralized MongoDB GridFS storage (zero full buffers in PostgreSQL)
         const { getStorageProvider } = await import('@/lib/storage/storage-provider');
         const storageProvider = getStorageProvider();
-        const uploadResult = await storageProvider.upload(
+        uploadResult = await storageProvider.upload(
             encryptedContent,
             fileRecord.fileName,
             {
@@ -198,6 +198,9 @@ export async function updateFile(
         if (result.count === 0) {
             const stillHeld = await assertActorHoldsEditLock({ documentId: fileId, actor });
             if (!stillHeld.ok) {
+                if (uploadResult?.storageFileId) {
+                    await storageProvider.delete(uploadResult.storageFileId).catch(() => {});
+                }
                 return {
                     success: false,
                     error: stillHeld.reason === 'not_holder'
@@ -216,6 +219,9 @@ export async function updateFile(
         }
 
         if (result.count === 0) {
+            if (uploadResult?.storageFileId) {
+                await storageProvider.delete(uploadResult.storageFileId).catch(() => {});
+            }
             const actual = await prisma.userFile.findUnique({
                 where: { id: fileId },
                 select: { version: true },
@@ -253,6 +259,12 @@ export async function updateFile(
         return { success: true, newVersion, currentVersion: newVersion };
     } catch (error) {
         logger.error('updateFile error', error);
+        if (uploadResult?.storageFileId) {
+            try {
+                const { getStorageProvider } = await import('@/lib/storage/storage-provider');
+                await getStorageProvider().delete(uploadResult.storageFileId).catch(() => {});
+            } catch {}
+        }
         return { success: false, error: 'An unexpected error occurred while saving.' };
     }
 }
