@@ -33,7 +33,14 @@ async function deleteGridFSFiles(gridFSIds: string[]) {
     if (gridFSIds.length === 0) return;
     try {
         const { deleteFromMongo } = await import('@/lib/mongo/operations');
-        await Promise.allSettled(gridFSIds.map((id) => deleteFromMongo(id)));
+        const { getStorageProvider } = await import('@/lib/storage/storage-provider');
+        const provider = getStorageProvider();
+        await Promise.allSettled(
+            gridFSIds.map(async (id) => {
+                await deleteFromMongo(id).catch(() => {});
+                await provider.delete(id).catch(() => {});
+            })
+        );
     } catch (err) {
         logger.error('[CLEANUP] Batch GridFS deletion error (non-blocking)', err);
     }
@@ -193,6 +200,9 @@ export async function executeCleanup(options?: { ownerId?: string }): Promise<Cl
                                 { isRevoked: true },
                             ],
                         },
+                        {
+                            cleanupStatus: { not: 'CLEANUP_COMPLETED' },
+                        },
                     ],
                 },
                 select: {
@@ -321,6 +331,7 @@ export async function executeCleanup(options?: { ownerId?: string }): Promise<Cl
  * is expired/revoked (or be an authorized owner/cron path).
  */
 export async function executeSingleLinkCleanup(token: string): Promise<{ success: boolean; error?: string }> {
+    let linkIdToUpdate: string | null = null;
     try {
         const secureLink = await prisma.secureLink.findUnique({
             where: { token },
@@ -329,6 +340,7 @@ export async function executeSingleLinkCleanup(token: string): Promise<{ success
                 userId: true,
                 expiresAt: true,
                 isRevoked: true,
+                cleanupStatus: true,
                 ownerId: true,
                 purpose: true,
                 LinkAccess: {
@@ -338,6 +350,7 @@ export async function executeSingleLinkCleanup(token: string): Promise<{ success
                     select: {
                         id: true,
                         mongoFileId: true,
+                        storageFileId: true,
                         mongoFile: {
                             select: { id: true, gridFSId: true },
                         },
@@ -350,6 +363,12 @@ export async function executeSingleLinkCleanup(token: string): Promise<{ success
             return { success: true };
         }
 
+        linkIdToUpdate = secureLink.id;
+
+        if (secureLink.cleanupStatus === 'CLEANUP_COMPLETED') {
+            return { success: true };
+        }
+
         const now = new Date();
         const isExpiredOrRevoked = secureLink.expiresAt < now || secureLink.isRevoked;
 
@@ -357,15 +376,36 @@ export async function executeSingleLinkCleanup(token: string): Promise<{ success
             return { success: false, error: 'Link is still active' };
         }
 
+        // P5.1-02: Concurrency Lock & Lifecycle State Transition to CLEANUP_IN_PROGRESS
+        const claimResult = await prisma.secureLink.updateMany({
+            where: {
+                id: secureLink.id,
+                cleanupStatus: { in: ['CLEANUP_PENDING', 'REVOKED', 'ACTIVE', 'CLEANUP_FAILED'] },
+            },
+            data: {
+                cleanupStatus: 'CLEANUP_IN_PROGRESS',
+                cleanupStartedAt: now,
+                cleanupRetries: { increment: 1 },
+            },
+        });
+
+        if (claimResult.count === 0) {
+            // Another worker claimed or completed cleanup concurrently
+            return { success: true };
+        }
+
         const mongoGridFSIds: string[] = [];
         for (const file of secureLink.UserFile) {
             if (file.mongoFile?.gridFSId) {
                 mongoGridFSIds.push(file.mongoFile.gridFSId);
             }
+            if ((file as any).storageFileId) {
+                mongoGridFSIds.push((file as any).storageFileId);
+            }
         }
 
         await deleteGridFSFiles(mongoGridFSIds);
-        await stampSurvivingRecords([secureLink], now);
+        await stampSurvivingRecords([secureLink as any], now);
 
         const mongoFileIds = secureLink.UserFile
             .map((f) => f.mongoFileId)
@@ -378,9 +418,27 @@ export async function executeSingleLinkCleanup(token: string): Promise<{ success
             userDataIds: [secureLink.userId],
         });
 
+        // Lifecycle completion
+        await prisma.secureLink.updateMany({
+            where: { id: secureLink.id },
+            data: {
+                cleanupStatus: 'CLEANUP_COMPLETED',
+                cleanedAt: new Date(),
+            },
+        }).catch(() => {});
+
         return { success: true };
     } catch (error) {
         logger.error('Single link cleanup error', error);
+        if (linkIdToUpdate) {
+            await prisma.secureLink.updateMany({
+                where: { id: linkIdToUpdate },
+                data: {
+                    cleanupStatus: 'CLEANUP_FAILED',
+                    cleanupError: error instanceof Error ? error.message : String(error),
+                },
+            }).catch(() => {});
+        }
         return { success: false, error: 'Cleanup failed' };
     }
 }

@@ -15,7 +15,7 @@
  * (true revoked / false invalid) so a killed Redis cannot open access.
  */
 
-import { logger } from '@/lib/logger';
+import { logger, redactToken } from '@/lib/logger';
 
 let _redisModule: typeof import('@/lib/redis') | null = null;
 async function getRedisModule() {
@@ -54,7 +54,7 @@ export async function tryCheckRevoked(token: string): Promise<boolean | null> {
         } catch (err) {
             logger.warn('[Redis] tryCheckRevoked unavailable — falling back to authoritative PostgreSQL check', {
                 error: err instanceof Error ? err.message : String(err),
-                token,
+                token: redactToken(token),
             });
         }
     }

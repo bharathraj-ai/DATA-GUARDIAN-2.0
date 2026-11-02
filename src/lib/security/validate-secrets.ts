@@ -135,6 +135,22 @@ export function validateCryptoSecrets(customEnv?: NodeJS.ProcessEnv): void {
     }
   }
 
+  // ── 3. Production Storage Validation ────────────────────────────
+  const isProduction = env.NODE_ENV === 'production';
+  const storageProvider = (env.STORAGE_PROVIDER || '').trim().toLowerCase();
+
+  if (isProduction) {
+    if (storageProvider === 'local') {
+      errors.push('STORAGE_PROVIDER=local is prohibited in production. Use mongodb.');
+    }
+    const mongoUri = env.MONGODB_URI?.trim();
+    if (!mongoUri) {
+      errors.push('MONGODB_URI is required in production for GridFS persistent file storage');
+    } else if (!mongoUri.startsWith('mongodb://') && !mongoUri.startsWith('mongodb+srv://')) {
+      errors.push('MONGODB_URI has invalid protocol (must start with mongodb:// or mongodb+srv://)');
+    }
+  }
+
   // ── Report ──────────────────────────────────────────────────────
   if (errors.length > 0) {
     const header = 'Cryptographic secret validation failed:';

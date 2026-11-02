@@ -141,17 +141,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // ── 8. Secure Storage Phase (DL-01) ─────────────────────────────
+    // ── 8. Secure Storage Phase (DL-01 / GridFS Envelope Encryption) ─
     // Requirement: Prevent database records from being created before successful file storage.
-    // Concurrency guarantee: documentId is unique UUIDv4 per upload, preventing race condition collisions.
+    // Encrypt file with unique DEK (AES-256-GCM) and store in MongoDB GridFS (or secure storage).
     const documentId = crypto.randomUUID();
     createdDocumentId = documentId;
 
-    let savedStoragePath: string;
+    let saved: any;
     try {
       await ensureStorageDirectories();
-      const saved = await saveDocument(documentId, sanitizedFileName, fileBuffer);
-      savedStoragePath = saved.storagePath;
+      saved = await saveDocument(documentId, sanitizedFileName, fileBuffer, {
+        mimeType: getMimeType(fileExtension),
+        uploadedBy: userId,
+        classification,
+      });
       fileSavedOnDisk = true;
     } catch (storageError) {
       logger.error('[UPLOAD] File storage write failed:', storageError);
@@ -166,24 +169,32 @@ export async function POST(request: NextRequest) {
     }
 
     // ── 9. Database Phase (DL-01) ──────────────────────────────────
-    // File is securely and completely written to disk. Now create DB record with full storagePath.
+    // File is securely and completely written. Now create DB record with full metadata.
     let document;
     try {
       document = await prisma.document.create({
         data: {
           id: documentId,
           fileName: sanitizedFileName,
+          originalFilename: file.name,
           fileType: fileExtension,
           mimeType: getMimeType(fileExtension),
-          storagePath: savedStoragePath,
+          storagePath: saved.storagePath,
+          storageProvider: saved.storageProvider || (process.env.STORAGE_PROVIDER || 'mongodb'),
+          storageFileId: saved.storageFileId || null,
           fileSize: file.size,
+          encryptionAlgorithm: saved.encryptionAlgorithm || 'aes-256-gcm',
+          encryptionIV: saved.encryptionIV || null,
+          authenticationTag: saved.authenticationTag || null,
+          encryptedDEK: saved.encryptedDEK || null,
+          storageCreatedAt: new Date(),
           ownerId: userId,
           classification,
         },
       });
     } catch (dbError) {
       logger.error('[UPLOAD] Database record creation failed, cleaning up stored file:', dbError);
-      // Requirement: Prevent orphaned physical files when DB operations fail
+      // Requirement: Prevent orphaned files when DB operations fail
       try {
         await deleteDocumentFiles(documentId);
         fileSavedOnDisk = false;
@@ -209,6 +220,9 @@ export async function POST(request: NextRequest) {
         fileSize: document.fileSize,
         fileType: document.fileType,
         classification: document.classification,
+        storageProvider: document.storageProvider,
+        storageFileId: document.storageFileId,
+        encryptionAlgorithm: document.encryptionAlgorithm,
         virusScan: 'pending_hook',
       },
     });
@@ -227,7 +241,7 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     logger.error('[UPLOAD] Error uploading document:', error);
-    // Safety recovery: clean up any physical file if created
+    // Safety recovery: clean up stored file if created
     if (createdDocumentId && fileSavedOnDisk) {
       try {
         await deleteDocumentFiles(createdDocumentId);

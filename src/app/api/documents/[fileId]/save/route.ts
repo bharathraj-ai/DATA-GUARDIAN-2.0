@@ -67,6 +67,25 @@ export async function POST(
     const encrypted = encryptBuffer(rawBytes, newDek);
     const encryptedDekStr = encryptDek(newDek);
 
+    // Save ciphertext in centralized MongoDB GridFS storage (zero full buffers in PostgreSQL)
+    const { getStorageProvider } = await import('@/lib/storage/storage-provider');
+    const storageProvider = getStorageProvider();
+    const uploadResult = await storageProvider.upload(
+      encrypted.encryptedContent,
+      file.fileName || 'document.bin',
+      {
+        metadata: {
+          fileId,
+          version: (file.version || 1) + 1,
+          mimeType: file.fileType,
+          encryptionAlgorithm: 'aes-256-gcm',
+          encryptionIV: encrypted.iv,
+          authenticationTag: encrypted.authTag,
+          encryptedDEK: encryptedDekStr,
+        },
+      }
+    );
+
     let versionNumber = 0;
     for (let attempt = 0; attempt < 5; attempt++) {
       try {
@@ -80,9 +99,12 @@ export async function POST(
             data: {
               fileId,
               versionNumber: next,
-              encryptedContent: file.encryptedContent!,
+              encryptedContent: null, // Full file stored in MongoDB GridFS
+              storageProvider: storageProvider.providerName,
+              storageFileId: (file as any).storageFileId || file.mongoFile?.gridFSId || null,
               iv: file.iv!,
               authTag: file.authTag!,
+              encryptedDek: file.encryptedDek,
               fileSize: file.fileSize,
               changeType,
               changeDescription: changeDescription ?? 'Collaborative edit',
@@ -91,7 +113,9 @@ export async function POST(
           await tx.userFile.update({
             where: { id: fileId },
             data: {
-              encryptedContent: encrypted.encryptedContent,
+              encryptedContent: null, // Full file stored in MongoDB GridFS
+              storageProvider: storageProvider.providerName,
+              storageFileId: uploadResult.storageFileId,
               iv: encrypted.iv,
               authTag: encrypted.authTag,
               encryptedDek: encryptedDekStr,
@@ -106,11 +130,17 @@ export async function POST(
                   where: { fileId },
                   orderBy: { versionNumber: 'asc' },
                   take: versionCount - MAX_VERSIONS,
-                  select: { id: true }
+                  select: { id: true, storageFileId: true }
               });
               await tx.fileVersion.deleteMany({
                   where: { id: { in: versionsToDelete.map(v => v.id) } }
               });
+              // Clean up pruned GridFS objects
+              for (const v of versionsToDelete) {
+                if (v.storageFileId) {
+                  storageProvider.delete(v.storageFileId).catch(() => {});
+                }
+              }
           }
 
           return next;

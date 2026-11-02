@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { readDocument, getMimeType } from '@/lib/storage/secureStorage';
+import { downloadDecryptedFile } from '@/lib/storage/encrypted-storage';
 import { checkDocumentPermission } from '@/lib/security/rbac';
 import { logDocumentEvent, extractRequestInfo } from '@/lib/security/auditLog';
 import { formatContentDisposition } from '@/lib/security/filename';
@@ -72,8 +73,25 @@ export async function GET(
       );
     }
 
-    // ── Stream file from secure storage ─────────────────────────
-    const fileBuffer = await readDocument(document.storagePath);
+    // ── Retrieve & Decrypt file from storage ───────────────────
+    let fileBuffer: Buffer;
+    if (document.storageFileId) {
+      fileBuffer = await downloadDecryptedFile({
+        storageFileId: document.storageFileId,
+        storageProvider: document.storageProvider,
+        encryptedDEK: document.encryptedDEK,
+        encryptionIV: document.encryptionIV,
+        authenticationTag: document.authenticationTag,
+      });
+    } else if (document.storagePath) {
+      // Backward-compatible fallback for pre-migration local files
+      fileBuffer = await readDocument(document.storagePath);
+    } else {
+      return NextResponse.json(
+        { error: 'Document storage content not found' },
+        { status: 404 }
+      );
+    }
     const mimeType = getMimeType(document.fileType);
 
     const disposition = formatContentDisposition(

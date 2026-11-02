@@ -11,7 +11,8 @@
     "start": "next start",
     "lint": "eslint",
     "test": "jest --config jest.config.ts",
-    "test:security": "jest --config jest.config.ts tests/security"
+    "test:security": "jest --config jest.config.ts tests/security",
+    "migrate:storage": "node scripts/prisma-generate.js && tsx scripts/migrate-local-storage-to-mongodb.ts"
   },
   "dependencies": {
     "@next-auth/prisma-adapter": "^1.0.7",
@@ -69,6 +70,7 @@
     "eslint-config-next": "16.1.6",
     "jest": "^30.4.2",
     "ts-jest": "^29.4.11",
+    "tsx": "^4.23.15",
     "typescript": "^5"
   },
   "engines": {

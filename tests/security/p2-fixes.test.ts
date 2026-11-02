@@ -90,7 +90,7 @@ describe('P2 Security Remediation Test Suite', () => {
   // =========================================================================
   describe('SV-04: Distributed Rate Limiting', () => {
     it('fails closed for security-sensitive OTP verification during Redis outage in production', async () => {
-      process.env.NODE_ENV = 'production';
+      (process.env as any).NODE_ENV = 'production';
       process.env.REQUIRE_DISTRIBUTED_RATE_LIMIT = 'true';
       // Simulate Redis unconfigured or throwing
       (redis.eval as jest.Mock).mockRejectedValue(new Error('Connection refused to Upstash Redis'));
@@ -103,7 +103,7 @@ describe('P2 Security Remediation Test Suite', () => {
     });
 
     it('fails closed for security-sensitive Login rate limiting during Redis outage in production', async () => {
-      process.env.NODE_ENV = 'production';
+      (process.env as any).NODE_ENV = 'production';
       process.env.REQUIRE_DISTRIBUTED_RATE_LIMIT = 'true';
       (redis.eval as jest.Mock).mockRejectedValue(new Error('Redis timeout'));
 
@@ -115,7 +115,7 @@ describe('P2 Security Remediation Test Suite', () => {
     });
 
     it('preserves safe development memory fallback when Redis is unavailable outside production', async () => {
-      process.env.NODE_ENV = 'development';
+      (process.env as any).NODE_ENV = 'development';
       delete process.env.REQUIRE_DISTRIBUTED_RATE_LIMIT;
       (redis.eval as jest.Mock).mockRejectedValue(new Error('Local Redis offline'));
 
@@ -128,7 +128,7 @@ describe('P2 Security Remediation Test Suite', () => {
     });
 
     it('shares rate limits across multiple simulated application instances via Redis', async () => {
-      process.env.NODE_ENV = 'production';
+      (process.env as any).NODE_ENV = 'production';
       process.env.REQUIRE_DISTRIBUTED_RATE_LIMIT = 'true';
 
       let redisCount = 0;

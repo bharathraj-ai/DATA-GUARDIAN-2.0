@@ -24,7 +24,17 @@ export async function registerNode() {
     const { validateCryptoSecrets } = await import('@/lib/security/validate-secrets');
     validateCryptoSecrets();
 
-    void warmMongo();
+    if (process.env.NODE_ENV === 'production') {
+        const { checkMongoConnection } = await import('@/lib/storage/mongodb-client');
+        const mongoStatus = await checkMongoConnection();
+        if (!mongoStatus.healthy) {
+            logger.error('[Mongo] CRITICAL: MongoDB GridFS connection failed in production mode:', mongoStatus.error);
+            throw new Error(`Production startup failed: MongoDB GridFS is unreachable (${mongoStatus.error})`);
+        }
+        logger.info(`[Mongo] Production GridFS storage verified (${mongoStatus.latencyMs}ms).`);
+    } else {
+        void warmMongo();
+    }
 
     if (process.env.NODE_ENV === 'development') {
         logger.info('[CLEANUP] Skipped in development (faster first page load)');

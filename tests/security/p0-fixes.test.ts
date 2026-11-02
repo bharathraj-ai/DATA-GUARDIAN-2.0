@@ -310,6 +310,7 @@ describe('FIX 1: Cryptographic Key Separation (SV-02)', () => {
 
   describe('Startup Secret Validation (validateCryptoSecrets)', () => {
     const validEnv: NodeJS.ProcessEnv = {
+      NODE_ENV: 'test',
       ENCRYPTION_KEY: TEST_ENCRYPTION_KEY,
       KEK_KEY: TEST_KEK_KEY,
       OTP_HMAC_SECRET: TEST_OTP_SECRET,

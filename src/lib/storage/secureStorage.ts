@@ -99,10 +99,39 @@ export async function ensureStorageDirectories(): Promise<void> {
 export async function saveDocument(
   documentId: string,
   fileName: string,
-  buffer: Buffer
-): Promise<{ storagePath: string; absolutePath: string }> {
+  buffer: Buffer,
+  options?: { mimeType?: string; uploadedBy?: string; classification?: string }
+): Promise<{
+  storagePath: string;
+  absolutePath: string;
+  storageFileId?: string;
+  storageProvider?: string;
+  encryptionAlgorithm?: string;
+  encryptionIV?: string;
+  authenticationTag?: string;
+  encryptedDEK?: string;
+}> {
   const safeId = assertSafeSegment(documentId, 'documentId');
   const safeName = safeBaseName(fileName);
+
+  // If MongoDB GridFS is configured / selected, upload encrypted to GridFS
+  const provider = (process.env.STORAGE_PROVIDER || '').trim().toLowerCase();
+  let gridFsResult: any = null;
+  if (provider === 'mongodb' || (process.env.NODE_ENV === 'production' && provider !== 'local')) {
+    try {
+      const { uploadEncryptedFile } = await import('./encrypted-storage');
+      gridFsResult = await uploadEncryptedFile({
+        buffer,
+        filename: safeName,
+        mimeType: options?.mimeType || getMimeType(getFileExtension(safeName)),
+        uploadedBy: options?.uploadedBy || 'system',
+        classification: options?.classification || 'INTERNAL',
+        documentId: safeId,
+      });
+    } catch (err) {
+      throw err;
+    }
+  }
 
   const dir = resolveStoragePath('documents', safeId);
   await fs.mkdir(dir, { recursive: true });
@@ -124,7 +153,16 @@ export async function saveDocument(
   }
 
   const storagePath = path.join('documents', safeId, safeName);
-  return { storagePath, absolutePath };
+  return {
+    storagePath,
+    absolutePath,
+    storageFileId: gridFsResult?.storageFileId,
+    storageProvider: gridFsResult?.storageProvider || 'local',
+    encryptionAlgorithm: gridFsResult?.encryptionAlgorithm,
+    encryptionIV: gridFsResult?.encryptionIV,
+    authenticationTag: gridFsResult?.authenticationTag,
+    encryptedDEK: gridFsResult?.encryptedDEK,
+  };
 }
 
 export async function readDocument(storagePath: string): Promise<Buffer> {
@@ -175,8 +213,31 @@ export async function deleteDocumentFiles(documentId: string): Promise<void> {
   const docDir = resolveStoragePath('documents', safeId);
   const verDir = resolveStoragePath('versions', safeId);
 
-  await fs.rm(docDir, { recursive: true, force: true });
-  await fs.rm(verDir, { recursive: true, force: true });
+  await fs.rm(docDir, { recursive: true, force: true }).catch(() => {});
+  await fs.rm(verDir, { recursive: true, force: true }).catch(() => {});
+
+  // Clean up any MongoDB GridFS file referenced by this document
+  try {
+    const { prisma } = await import('@/lib/prisma');
+    const doc = await prisma.document.findUnique({
+      where: { id: safeId },
+      select: { storageFileId: true, versions: { select: { storageFileId: true } } },
+    });
+    if (doc) {
+      const { getStorageProvider } = await import('./storage-provider');
+      const provider = getStorageProvider();
+      if (doc.storageFileId) {
+        await provider.delete(doc.storageFileId).catch(() => {});
+      }
+      for (const v of doc.versions) {
+        if (v.storageFileId) {
+          await provider.delete(v.storageFileId).catch(() => {});
+        }
+      }
+    }
+  } catch {
+    // Non-blocking
+  }
 }
 
 const MIME_MAP: Record<string, string> = {

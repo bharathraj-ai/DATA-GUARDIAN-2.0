@@ -72,6 +72,11 @@ model SecureLink {
   maxViews           Int?       // Null means unlimited
   maxDownloads       Int?       // Null means unlimited
   ownerId            String?
+  cleanupStatus      String     @default("ACTIVE") // ACTIVE | COMPLETION_REQUESTED | REVOKED | CLEANUP_PENDING | CLEANUP_IN_PROGRESS | CLEANUP_COMPLETED | CLEANUP_FAILED
+  cleanupRetries     Int        @default(0)
+  cleanupError       String?
+  cleanupStartedAt   DateTime?
+  cleanedAt          DateTime?
   AuditLog           AuditLog[]
   User               User?      @relation(fields: [ownerId], references: [id])
   UserData           UserData      @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -213,6 +218,8 @@ model UserFile {
   encryptedDek     String?
   mongoFileId      String?       @unique
   mongoFile        MongoFile?    @relation(fields: [mongoFileId], references: [id])
+  storageProvider  String?       @default("mongodb")
+  storageFileId    String?
   status               String        @default("draft") // draft | editing | submitted | approved | rejected | revoked
   submittedAt          DateTime?
   submittedBy          String?
@@ -232,10 +239,12 @@ model FileVersion {
   id                String   @id @default(cuid())
   fileId            String
   versionNumber     Int
-  encryptedContent  Bytes
+  encryptedContent  Bytes?
   iv                String
   authTag           String
   encryptedDek      String?
+  storageProvider   String?  @default("mongodb")
+  storageFileId     String?
   fileSize          Int
   changeType        String   // "annotation" | "page_replace" | "restore" | "collaborative_edit" | "PRIORITY_TAKEOVER"
   changeDescription String?
@@ -370,29 +379,38 @@ model ChatMessage {
 // ============================================
 
 /// Secure document metadata for ONLYOFFICE-managed files.
-/// Actual files are stored on disk at storagePath — never publicly accessible.
+/// Actual files are stored in MongoDB GridFS (or legacy local disk) — never publicly accessible.
 model Document {
-  id             String             @id @default(cuid())
-  fileName       String
-  fileType       String             // Extension: docx, xlsx, pptx, etc.
-  mimeType       String             @default("application/octet-stream")
-  storagePath    String             // Relative path inside secure-storage
-  fileSize       Int                @default(0)
-  ownerId        String
-  classification String             @default("INTERNAL") // PUBLIC | INTERNAL | CONFIDENTIAL | RESTRICTED
-  currentVersion Int                @default(1)
-  isDeleted      Boolean            @default(false)
-  createdAt      DateTime           @default(now())
-  updatedAt      DateTime           @updatedAt
-  owner          User               @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  versions       DocumentVersion[]
-  auditLogs      DocumentAuditLog[]
-  grants         DocumentGrant[]
+  id                  String             @id @default(cuid())
+  fileName            String
+  fileType            String             // Extension: docx, xlsx, pptx, etc.
+  mimeType            String             @default("application/octet-stream")
+  storagePath         String?            // Relative path inside secure-storage (for legacy local files)
+  storageProvider     String             @default("mongodb") // "mongodb" | "local"
+  storageFileId       String?            // GridFS file _id
+  originalFilename    String?
+  fileSize            Int                @default(0)
+  encryptionAlgorithm String?            @default("aes-256-gcm")
+  encryptionIV        String?
+  authenticationTag   String?
+  encryptedDEK        String?
+  storageCreatedAt    DateTime?          @default(now())
+  ownerId             String
+  classification      String             @default("INTERNAL") // PUBLIC | INTERNAL | CONFIDENTIAL | RESTRICTED
+  currentVersion      Int                @default(1)
+  isDeleted           Boolean            @default(false)
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  owner               User               @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  versions            DocumentVersion[]
+  auditLogs           DocumentAuditLog[]
+  grants              DocumentGrant[]
 
   @@index([ownerId])
   @@index([classification])
   @@index([createdAt])
   @@index([isDeleted])
+  @@index([storageFileId])
   @@index([ownerId, isDeleted, createdAt])
 }
 
@@ -410,20 +428,29 @@ model DocumentGrant {
   @@index([granteeId])
 }
 
-/// Version history entry — stores path to previous version on disk.
+/// Version history entry — stores reference to previous version in GridFS or disk.
 model DocumentVersion {
-  id          String   @id @default(cuid())
-  documentId  String
-  version     Int
-  storagePath String   // e.g. /secure-storage/versions/{docId}/{version}.docx
-  fileSize    Int      @default(0)
-  changeType  String   @default("edit") // "edit" | "autosave" | "force_save" | "restore"
-  changedBy   String?  // userId who triggered the save
-  createdAt   DateTime @default(now())
-  document    Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  id                  String   @id @default(cuid())
+  documentId          String
+  version             Int
+  storagePath         String?  // e.g. /secure-storage/versions/{docId}/{version}.docx (legacy)
+  storageProvider     String   @default("mongodb") // "mongodb" | "local"
+  storageFileId       String?  // GridFS file _id
+  originalFilename    String?
+  fileSize            Int      @default(0)
+  encryptionAlgorithm String?  @default("aes-256-gcm")
+  encryptionIV        String?
+  authenticationTag   String?
+  encryptedDEK        String?
+  storageCreatedAt    DateTime? @default(now())
+  changeType          String   @default("edit") // "edit" | "autosave" | "force_save" | "restore"
+  changedBy           String?  // userId who triggered the save
+  createdAt           DateTime @default(now())
+  document            Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
 
   @@unique([documentId, version])
   @@index([documentId])
+  @@index([storageFileId])
   @@index([createdAt])
 }
 

@@ -26,12 +26,20 @@ export async function decryptUserFileBytes(fileRecord: DecryptableFile): Promise
         );
     }
 
-    const gridFSId = gridFsIdForFile(fileRecord);
+    const gridFSId = gridFsIdForFile(fileRecord) || fileRecord.storageFileId;
     if (!gridFSId) {
         throw new Error('File has no content available');
     }
 
-    const downloaded = await downloadFromMongo(gridFSId, fileRecord.fileSize ?? undefined);
+    let downloaded: Buffer;
+    try {
+        const { getStorageProvider } = await import('@/lib/storage/storage-provider');
+        downloaded = await getStorageProvider().download(gridFSId);
+    } catch {
+        // Fallback for legacy uploads bucket
+        downloaded = await downloadFromMongo(gridFSId, fileRecord.fileSize ?? undefined);
+    }
+
     if (fileRecord.iv && fileRecord.authTag) {
         const dek = fileRecord.encryptedDek ? decryptDek(fileRecord.encryptedDek) : undefined;
         return decryptBuffer(downloaded, fileRecord.iv, fileRecord.authTag, dek);

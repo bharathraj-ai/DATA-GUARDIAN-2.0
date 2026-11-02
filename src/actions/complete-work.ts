@@ -4,9 +4,10 @@ import { prisma } from '@/lib/prisma';
 import { authorizeSecureLink } from '@/lib/linkAuthorization';
 import { loadUserFilesContentForLink, gridFsIdForFile } from '@/lib/security/resource-ownership';
 import { decryptBuffer, decryptDek } from '@/lib/crypto';
+import { decryptUserFileBytes } from '@/lib/decrypt-user-file';
 import { downloadFromMongo } from '@/lib/mongo/operations';
 import { sendCompletedWorkEmail, type FileAttachment } from '@/lib/email';
-import { logger, redactEmail } from '@/lib/logger';
+import { logger, redactEmail, redactToken } from '@/lib/logger';
 
 export type CompleteWorkResult = {
     success: boolean;
@@ -31,17 +32,19 @@ export async function completeWork(token: string): Promise<CompleteWorkResult> {
             return { success: false, error: authResult.error };
         }
 
-        const isOwner = authResult.context.isOwner;
+        const isOwner = Boolean(authResult.context.isOwner);
         const vendorLevel = authResult.context.vendorAccess?.level;
+        const isLevel1Leader = !isOwner && Number.isInteger(vendorLevel) && vendorLevel === 1;
 
-        // P5-05: Server-side RBAC enforcement
-        // Only the link owner or explicitly authorized Level 1 Team Leader can finalize the workflow.
-        // Level 2 participants must NOT globally revoke links or trigger global file deletion.
-        if (!isOwner && vendorLevel !== undefined && vendorLevel > 1) {
+        // P5.1-01: Server-side RBAC enforcement
+        // Only the actual link owner or a verified Level 1 Team Leader can finalize work.
+        // Level 2 participants, missing vendor roles, or unauthenticated/unresolved roles must FAIL CLOSED.
+        if (!isOwner && !isLevel1Leader) {
             logger.securityEvent('UNAUTHORIZED_COMPLETE_WORK_ATTEMPT', {
-                token,
+                token: redactToken(token),
                 vendorEmail: authResult.context.effectiveEmail,
-                level: vendorLevel,
+                level: vendorLevel !== undefined ? vendorLevel : 'unresolved',
+                reason: 'Requires Link Owner or Level 1 Team Leader',
             });
             return {
                 success: false,
@@ -49,8 +52,8 @@ export async function completeWork(token: string): Promise<CompleteWorkResult> {
             };
         }
 
-        const vendorEmail = authResult.context.effectiveEmail || 'unknown';
         const secureLink = authResult.context.secureLink;
+        const vendorEmail = authResult.context.effectiveEmail || 'unknown';
 
         // Check if editing was enabled — only send files via email if editing was allowed
         const isEditingEnabled = (secureLink as any).allowEditing === true;
@@ -83,37 +86,12 @@ export async function completeWork(token: string): Promise<CompleteWorkResult> {
                     const hasEncryption = file.iv && file.authTag;
                     const gridFSId = gridFsIdForFile(file);
 
-                    if (file.encryptedContent) {
-                        // Inline encrypted content (latest draft) — decrypt it
-                        const dek = (file as any).encryptedDek
-                            ? decryptDek((file as any).encryptedDek)
-                            : undefined;
-                        buffer = decryptBuffer(
-                            file.encryptedContent,
-                            file.iv!,
-                            file.authTag!,
-                            dek
-                        );
-                        logger.info(`Decrypted inline file ${file.fileName}: ${buffer.length} bytes`);
-                    } else if (gridFSId) {
-                        const downloadedBuffer = await downloadFromMongo(gridFSId, file.fileSize);
-                        logger.info(`Downloaded GridFS file ${file.fileName}: ${downloadedBuffer.length} bytes, hasEncryption=${!!hasEncryption}`);
-
-                        if (hasEncryption) {
-                            const dek = (file as any).encryptedDek ? decryptDek((file as any).encryptedDek) : undefined;
-                            buffer = decryptBuffer(
-                                downloadedBuffer,
-                                file.iv!,
-                                file.authTag!,
-                                dek
-                            );
-                        } else {
-                            buffer = downloadedBuffer;
-                        }
-                    } else if ((file as any).mongoFileId) {
-                        logger.warn(`MongoFile record not found for ${file.fileName} (mongoFileId: ${(file as any).mongoFileId})`);
-                    } else {
-                        logger.warn(`File ${file.fileName} has no content (no encryptedContent, no mongoFileId)`);
+                    try {
+                        buffer = await decryptUserFileBytes(file as any);
+                        logger.info(`Decrypted file ${file.fileName}: ${buffer.length} bytes`);
+                    } catch (decErr) {
+                        logger.warn(`Failed to decrypt file ${file.fileName}:`, decErr);
+                        buffer = null;
                     }
 
                     if (!buffer) return null;
@@ -301,7 +279,7 @@ export async function completeWork(token: string): Promise<CompleteWorkResult> {
             data: { isRevoked: true },
         });
 
-        if (updateResult.count === 0) {
+        if (updateResult?.count === 0) {
             // Another concurrent request finalized the link already
             logger.info('completeWork: Link was already finalized concurrently.');
             return { success: true };
@@ -378,6 +356,12 @@ export async function completeWork(token: string): Promise<CompleteWorkResult> {
             purpose: (secureLink as { purpose?: string | null }).purpose,
             vendorEmail: vendorEmail !== 'unknown' ? vendorEmail : null,
             status: 'completed',
+        });
+
+        // Transition lifecycle to CLEANUP_PENDING before worker execution
+        await prisma.secureLink.updateMany({
+            where: { id: secureLink.id },
+            data: { cleanupStatus: 'CLEANUP_PENDING' },
         });
 
         const { executeSingleLinkCleanup } = await import('@/lib/cleanup-core');

@@ -82,6 +82,8 @@ export async function POST(
         id: true,
         versionNumber: true,
         encryptedContent: true,
+        storageProvider: true,
+        storageFileId: true,
         iv: true,
         authTag: true,
         encryptedDek: true,
@@ -98,22 +100,28 @@ export async function POST(
       data: {
         fileId,
         versionNumber: versionCount + 1,
-        encryptedContent: file.encryptedContent!,
+        encryptedContent: null,
+        storageProvider: (file as any).storageProvider || 'mongodb',
+        storageFileId: (file as any).storageFileId || file.mongoFile?.gridFSId || null,
         iv: file.iv!,
         authTag: file.authTag!,
+        encryptedDek: file.encryptedDek,
         fileSize: file.fileSize,
         changeType: 'restore',
         changeDescription: `Pre-restore snapshot before restoring v${version.versionNumber}`,
       },
     });
 
-    // Restore the old version bytes
+    // Restore the old version reference
     await prisma.userFile.update({
       where: { id: fileId },
       data: {
-        encryptedContent: version.encryptedContent,
+        encryptedContent: version.encryptedContent ?? null,
+        storageProvider: version.storageProvider,
+        storageFileId: version.storageFileId,
         iv: version.iv,
         authTag: version.authTag,
+        encryptedDek: version.encryptedDek,
         fileSize: version.fileSize,
       },
     });

@@ -267,6 +267,63 @@ export async function cleanOrphanFiles(options: DetectOrphanOptions = {}): Promi
     }
   }
 
+  // ── 5. Clean MongoDB GridFS Orphans (Persistent Storage Hardening) ──────────
+  try {
+    const { getMongoConfig, getGridFSBucket } = await import('@/lib/storage/mongodb-client');
+    const { ObjectId } = await import('mongodb');
+    const config = getMongoConfig();
+
+    if (config.isConfigured) {
+      const bucket = await getGridFSBucket();
+      const cutoff = new Date(Date.now() - (options.gracePeriodMinutes ?? 30) * 60 * 1000);
+      const gridFiles = await bucket.find({ uploadDate: { $lt: cutoff } }).toArray();
+
+      if (gridFiles.length > 0) {
+        const candidateIds = gridFiles.map((f) => f._id.toString());
+        const [docRefs, docVerRefs, userFileRefs, fileVerRefs] = await Promise.all([
+          prisma.document.findMany({
+            where: { storageFileId: { in: candidateIds }, isDeleted: false },
+            select: { storageFileId: true },
+          }),
+          prisma.documentVersion.findMany({
+            where: { storageFileId: { in: candidateIds } },
+            select: { storageFileId: true },
+          }),
+          prisma.userFile.findMany({
+            where: { storageFileId: { in: candidateIds } },
+            select: { storageFileId: true },
+          }),
+          prisma.fileVersion.findMany({
+            where: { storageFileId: { in: candidateIds } },
+            select: { storageFileId: true },
+          }),
+        ]);
+
+        const activeIds = new Set<string>();
+        for (const r of docRefs) if (r.storageFileId) activeIds.add(r.storageFileId);
+        for (const r of docVerRefs) if (r.storageFileId) activeIds.add(r.storageFileId);
+        for (const r of userFileRefs) if (r.storageFileId) activeIds.add(r.storageFileId);
+        for (const r of fileVerRefs) if (r.storageFileId) activeIds.add(r.storageFileId);
+
+        for (const gf of gridFiles) {
+          const idStr = gf._id.toString();
+          if (!activeIds.has(idStr)) {
+            try {
+              await bucket.delete(new ObjectId(idStr));
+              deletedPaths.push(`gridfs:${idStr}`);
+            } catch (delErr: any) {
+              if (!delErr?.message?.includes('FileNotFound')) {
+                logger.error(`[ORPHAN_CLEANUP] Failed to delete GridFS orphan: ${idStr}`, delErr);
+              }
+            }
+          }
+        }
+      }
+    }
+  } catch (gridErr) {
+    logger.error('[ORPHAN_CLEANUP] GridFS orphan cleanup error (non-blocking):', gridErr);
+  }
+
   // ── Record in Audit Log ─────────────────────────────────────────────────
   if (deletedPaths.length > 0) {
     const graceMinutes = options.gracePeriodMinutes ?? parseInt(process.env.ORPHAN_CLEANUP_GRACE_MINUTES || '30', 10);

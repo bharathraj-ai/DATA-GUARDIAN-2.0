@@ -152,6 +152,24 @@ export async function updateFile(
         const encryptedDek = encryptDek(dek);
         const newETag = crypto.randomUUID();
 
+        // Save ciphertext in centralized MongoDB GridFS storage (zero full buffers in PostgreSQL)
+        const { getStorageProvider } = await import('@/lib/storage/storage-provider');
+        const storageProvider = getStorageProvider();
+        const uploadResult = await storageProvider.upload(
+            encryptedContent,
+            fileRecord.fileName,
+            {
+                metadata: {
+                    fileId,
+                    mimeType: trustedMimeType,
+                    encryptionAlgorithm: 'aes-256-gcm',
+                    encryptionIV: iv,
+                    authenticationTag: authTag,
+                    encryptedDEK: encryptedDek,
+                },
+            }
+        );
+
         // 9. Atomic update with OCC.
         // Redis edit lock is the writer gate. Client expectedVersion can lag behind
         // our own autosave / access-request snapshot — use the server version, then
@@ -163,7 +181,9 @@ export async function updateFile(
                     fileName: fileRecord.fileName, // Preserve original filename — do not trust client
                     fileType: trustedMimeType,
                     fileSize: uploadedFile.size,
-                    encryptedContent,
+                    encryptedContent: null, // Full file in MongoDB GridFS
+                    storageProvider: storageProvider.providerName,
+                    storageFileId: uploadResult.storageFileId,
                     iv,
                     authTag,
                     encryptedDek,

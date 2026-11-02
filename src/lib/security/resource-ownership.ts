@@ -38,6 +38,8 @@ const USER_FILE_CONTENT_SELECT = {
   authTag: true,
   encryptedDek: true,
   mongoFileId: true,
+  storageProvider: true,
+  storageFileId: true,
   editingLocked: true,
   mongoFile: {
     select: {
@@ -51,6 +53,8 @@ const USER_FILE_CONTENT_SELECT = {
 
 export type UserFileContentRow = {
   mongoFileId?: string | null;
+  storageProvider?: string | null;
+  storageFileId?: string | null;
   fileSize?: number | null;
   mongoFile?: {
     gridFSId: string;
@@ -60,8 +64,9 @@ export type UserFileContentRow = {
   } | null;
 };
 
-/** GridFS id from the UserFile join — skips a second Prisma lookup. */
+/** GridFS id from the UserFile join or storageFileId — skips a second Prisma lookup. */
 export function gridFsIdForFile(file: UserFileContentRow): string | null {
+  if (file.storageFileId) return file.storageFileId;
   const mongo = file.mongoFile;
   if (!mongo || mongo.isDeleted || !mongo.gridFSId) return null;
   return mongo.gridFSId;
