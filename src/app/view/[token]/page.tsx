@@ -2,7 +2,7 @@ import React from 'react';
 import dynamic from 'next/dynamic';
 import { redirect } from 'next/navigation';
 import { getUserData } from '@/actions/get-user';
-import { AlertTriangle, Shield } from 'lucide-react';
+import { AlertTriangle, Shield, CheckCircle2 } from 'lucide-react';
 import { CollaborationProvider } from '@/components/view/CollaborationProvider';
 import { SessionTimer } from '@/components/view/SessionTimer';
 import { SecureViewWrapper } from '@/components/view/SecureViewWrapper';
@@ -37,6 +37,23 @@ export default async function ViewPage({ params }: { params: Promise<{ token: st
 
         if (isSessionGone) {
             redirect(`/share/${cleanToken}`);
+        }
+
+        if (result.errorType === 'COMPLETED') {
+            return (
+                <main className={styles.desk}>
+                    <div className={styles.wash} />
+                    <div className={styles.deniedWrap}>
+                        <div className={styles.denied} style={{ borderColor: 'rgba(16, 185, 129, 0.4)' }}>
+                            <div className={styles.deniedIcon} style={{ background: 'rgba(16, 185, 129, 0.1)', color: '#10B981' }}>
+                                <CheckCircle2 size={32} />
+                            </div>
+                            <h2>Work Completed & Delivered</h2>
+                            <p>{result.error || 'All files have been successfully sent to the owner. This working session is now complete.'}</p>
+                        </div>
+                    </div>
+                </main>
+            );
         }
 
         const title =

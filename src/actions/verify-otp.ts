@@ -659,7 +659,7 @@ export async function verifyOTP(input: OTPVerifyInput & { email?: string }): Pro
                 secureLink.notificationEmail,
                 secureLink.id,
                 secureLink.purpose || undefined
-            ).catch((err) => console.error('Failed to send access notification:', err));
+            ).catch((err) => logger.error('Failed to send access notification', err));
         }
 
         // Set signed session cookie (httpOnly). Redis cache is optional.

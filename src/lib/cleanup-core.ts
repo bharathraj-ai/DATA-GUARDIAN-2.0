@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma';
+import { logger } from '@/lib/logger';
 
 export type CleanupResult = {
     success: boolean;
@@ -7,6 +8,7 @@ export type CleanupResult = {
     deletedFiles: number;
     deletedAuditLogs: number;
     deletedMongoFiles: number;
+    deletedOrphanFiles?: number;
     error?: string;
 };
 
@@ -32,9 +34,8 @@ async function deleteGridFSFiles(gridFSIds: string[]) {
     try {
         const { deleteFromMongo } = await import('@/lib/mongo/operations');
         await Promise.allSettled(gridFSIds.map((id) => deleteFromMongo(id)));
-        console.log(`[CLEANUP] Batch: deleted ${gridFSIds.length} GridFS file(s)`);
     } catch (err) {
-        console.error('[CLEANUP] Batch GridFS deletion error (non-blocking):', err);
+        logger.error('[CLEANUP] Batch GridFS deletion error (non-blocking)', err);
     }
 }
 
@@ -98,55 +99,73 @@ async function stampSurvivingRecords(links: LinkCleanupRow[], now: Date) {
 }
 
 /**
- * Ordered deletes without an interactive transaction.
- * Interactive txs default to 5s and fail on Neon under load; cleanup is idempotent
- * so a mid-batch failure can be retried on the next run.
+ * Atomic, idempotent, and recoverable row purge (DL-02).
+ *
+ * Executes all deletions in a single batch transaction so that a database failure
+ * rolls back completely, preventing partial deletion from leaving inconsistent
+ * or orphaned records.
+ *
+ * Safe to retry repeatedly without data corruption.
  */
-async function purgeLinkRows(ids: {
+export async function purgeLinkRows(ids: {
     linkIds: string[];
     fileIds: string[];
     mongoFileIds: string[];
     userDataIds: string[];
 }) {
-    await prisma.chatMessage.deleteMany({
-        where: { secureLinkId: { in: ids.linkIds } },
-    });
-
-    if (ids.fileIds.length > 0) {
-        await prisma.documentSession.deleteMany({
-            where: { fileId: { in: ids.fileIds } },
-        });
-        await prisma.collabOperation.deleteMany({
-            where: { fileId: { in: ids.fileIds } },
-        });
-        await prisma.documentChatMessage.deleteMany({
-            where: { fileId: { in: ids.fileIds } },
-        });
+    if (ids.linkIds.length === 0 && ids.userDataIds.length === 0) {
+        return { deletedLinks: 0, deletedUserData: 0, deletedFiles: 0 };
     }
 
-    // UserFile references MongoFile — delete files before mongo metadata.
-    const deletedFiles = await prisma.userFile.deleteMany({
-        where: { secureLinkId: { in: ids.linkIds } },
-    });
+    // Atomic transaction ensures all operations succeed or all roll back
+    const results = await prisma.$transaction([
+        prisma.chatMessage.deleteMany({
+            where: { secureLinkId: { in: ids.linkIds } },
+        }),
+        ...(ids.fileIds.length > 0 ? [
+            prisma.documentSession.deleteMany({
+                where: { fileId: { in: ids.fileIds } },
+            }),
+            prisma.collabOperation.deleteMany({
+                where: { fileId: { in: ids.fileIds } },
+            }),
+            prisma.documentChatMessage.deleteMany({
+                where: { fileId: { in: ids.fileIds } },
+            }),
+            prisma.annotation.deleteMany({
+                where: { fileId: { in: ids.fileIds } },
+            }),
+            prisma.fileVersion.deleteMany({
+                where: { fileId: { in: ids.fileIds } },
+            }),
+        ] : []),
+        // UserFile references MongoFile — delete UserFile before MongoFile
+        prisma.userFile.deleteMany({
+            where: { secureLinkId: { in: ids.linkIds } },
+        }),
+        ...(ids.mongoFileIds.length > 0 ? [
+            prisma.mongoFile.deleteMany({
+                where: { id: { in: ids.mongoFileIds } },
+            }),
+        ] : []),
+        prisma.secureLink.deleteMany({
+            where: { id: { in: ids.linkIds } },
+        }),
+        prisma.userData.deleteMany({
+            where: { id: { in: ids.userDataIds } },
+        }),
+    ]);
 
-    if (ids.mongoFileIds.length > 0) {
-        await prisma.mongoFile.deleteMany({
-            where: { id: { in: ids.mongoFileIds } },
-        });
-    }
-
-    const deletedLinks = await prisma.secureLink.deleteMany({
-        where: { id: { in: ids.linkIds } },
-    });
-
-    const deletedUserData = await prisma.userData.deleteMany({
-        where: { id: { in: ids.userDataIds } },
-    });
+    const len = results.length;
+    const deletedUserData = results[len - 1]?.count ?? 0;
+    const deletedLinks = results[len - 2]?.count ?? 0;
+    const userFileOffset = ids.mongoFileIds.length > 0 ? 4 : 3;
+    const deletedFiles = results[len - userFileOffset]?.count ?? 0;
 
     return {
-        deletedLinks: deletedLinks.count,
-        deletedUserData: deletedUserData.count,
-        deletedFiles: deletedFiles.count,
+        deletedLinks,
+        deletedUserData,
+        deletedFiles,
     };
 }
 
@@ -242,13 +261,34 @@ export async function executeCleanup(options?: { ownerId?: string }): Promise<Cl
             await new Promise((resolve) => setTimeout(resolve, 50));
         }
 
-        if (totalDeletedLinks > 0) {
+        // Self-healing recovery: remove any orphaned UserData records left by legacy partial failures
+        try {
+            const orphanedUserData = await prisma.userData.deleteMany({
+                where: { SecureLink: null },
+            });
+            totalDeletedUserData += orphanedUserData.count;
+        } catch {}
+
+        // Automated Orphan File Detection & Cleanup (Reliability Hardening)
+        let totalDeletedOrphanFiles = 0;
+        try {
+            const { cleanOrphanFiles } = await import('@/lib/storage/orphan-cleanup');
+            const orphanResult = await cleanOrphanFiles();
+            if (orphanResult.success) {
+                totalDeletedOrphanFiles = orphanResult.deletedCount;
+            }
+        } catch (orphanErr) {
+            logger.error('[CLEANUP] Orphan file cleanup error (non-blocking)', orphanErr);
+        }
+
+        if (totalDeletedLinks > 0 || totalDeletedOrphanFiles > 0) {
             console.log(
                 `[CLEANUP] Purged ${totalDeletedLinks} links, ` +
                 `${totalDeletedUserData} encrypted records, ` +
                 `${totalDeletedFiles} files, ` +
                 `${totalDeletedMongoFiles} GridFS objects, ` +
-                `${totalDeletedAuditLogs} audit logs`
+                `${totalDeletedAuditLogs} audit logs, ` +
+                `${totalDeletedOrphanFiles} orphan files`
             );
         }
 
@@ -259,9 +299,10 @@ export async function executeCleanup(options?: { ownerId?: string }): Promise<Cl
             deletedFiles: totalDeletedFiles,
             deletedAuditLogs: totalDeletedAuditLogs,
             deletedMongoFiles: totalDeletedMongoFiles,
+            deletedOrphanFiles: totalDeletedOrphanFiles,
         };
     } catch (error) {
-        console.error('Cleanup error:', error instanceof Error ? error.message : 'Unknown');
+        logger.error('Cleanup error', error);
         return {
             success: false,
             deletedLinks: 0,
@@ -339,7 +380,7 @@ export async function executeSingleLinkCleanup(token: string): Promise<{ success
 
         return { success: true };
     } catch (error) {
-        console.error('Single link cleanup error:', error instanceof Error ? error.message : 'Unknown');
+        logger.error('Single link cleanup error', error);
         return { success: false, error: 'Cleanup failed' };
     }
 }

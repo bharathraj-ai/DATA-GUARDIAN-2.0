@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authorizeEditLockCall, isUnavailable, lockPayload, lockUnavailableResponse } from '@/lib/collaboration/edit-lock-http';
 import { completePriorityTakeover, getEditLockStatus } from '@/lib/collaboration/edit-lock-service';
+import { logger } from '@/lib/logger';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -55,7 +56,7 @@ export async function GET(
         });
     } catch (err) {
         if (isUnavailable(err)) return lockUnavailableResponse(gate.linkId, gate.fileId, gate.actor);
-        console.error('[edit-lock/status]', err);
+        logger.error('[edit-lock/status]', err);
         return NextResponse.json({ error: 'Failed to read editing lock' }, { status: 500 });
     }
 }

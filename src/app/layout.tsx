@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from 'next/font/google';
+import { headers } from 'next/headers';
 import "./globals.css";
 import "./anthropic.css";
 import "./responsive.css";
@@ -51,11 +52,14 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Reading headers propagates the cryptographic CSP nonce to all Next.js App Router scripts and links
+  await headers();
+
   return (
     <html lang="en" className={inter.variable}>
       <head>

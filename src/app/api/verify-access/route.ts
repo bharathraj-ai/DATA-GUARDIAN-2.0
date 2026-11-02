@@ -51,6 +51,10 @@ export async function GET(request: NextRequest) {
         });
 
         if (!link || link.isRevoked || link.lockedAt) {
+            const isCompleted = link?.VendorAccess?.some((v) => v.status === 'completed');
+            if (isCompleted) {
+                return NextResponse.json({ type: 'completed' }, { status: 200 });
+            }
             return NextResponse.json({ type: 'revoked' }, { status: 403 });
         }
 
@@ -59,7 +63,10 @@ export async function GET(request: NextRequest) {
         }
 
         const vendor = link.VendorAccess[0];
-        if (vendor?.isRevoked || vendor?.status === 'completed') {
+        if (vendor?.status === 'completed') {
+            return NextResponse.json({ type: 'completed' }, { status: 200 });
+        }
+        if (vendor?.isRevoked) {
             return NextResponse.json({ type: 'revoked' }, { status: 403 });
         }
 

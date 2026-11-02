@@ -14,10 +14,15 @@ import path from 'path';
  *     versions/{documentId}/{version}.{ext}
  */
 
-const STORAGE_ROOT = process.env.SECURE_STORAGE_PATH || './secure-storage';
-
-function getStorageRoot(): string {
-  return path.resolve(STORAGE_ROOT);
+export function getStorageRoot(): string {
+  const configured = process.env.SECURE_STORAGE_PATH;
+  if (configured && configured.trim()) {
+    return path.resolve(configured.trim());
+  }
+  if (process.env.NODE_ENV === 'production') {
+    return '/app/storage-vault';
+  }
+  return path.resolve(process.cwd(), '.secure-storage');
 }
 
 /** True if resolved path is exactly root or a path under root (sep-safe). */
@@ -102,8 +107,21 @@ export async function saveDocument(
   const dir = resolveStoragePath('documents', safeId);
   await fs.mkdir(dir, { recursive: true });
 
+  // Atomic write: write to a temporary file first, then atomically rename
+  const tempName = `.upload_${Date.now()}_${Math.random().toString(36).slice(2)}.tmp`;
+  const tempPath = resolveStoragePath('documents', safeId, tempName);
   const absolutePath = resolveStoragePath('documents', safeId, safeName);
-  await fs.writeFile(absolutePath, buffer);
+
+  try {
+    await fs.writeFile(tempPath, buffer);
+    await fs.rename(tempPath, absolutePath);
+  } catch (writeErr) {
+    // Clean up temporary file on failure
+    try {
+      await fs.unlink(tempPath);
+    } catch {}
+    throw writeErr;
+  }
 
   const storagePath = path.join('documents', safeId, safeName);
   return { storagePath, absolutePath };

@@ -2,6 +2,7 @@
 
 import { auth } from '@/lib/auth';
 import { listVendorOptions, type VendorOption } from '@/lib/vendor-options';
+import { logger } from '@/lib/logger';
 
 export type { VendorOption };
 
@@ -23,7 +24,7 @@ export async function getAvailableVendors(): Promise<VendorOption[]> {
 
         return await listVendorOptions();
     } catch (error) {
-        console.error('Error fetching vendors:', error);
+        logger.error('Error fetching vendors', error);
         return [];
     }
 }

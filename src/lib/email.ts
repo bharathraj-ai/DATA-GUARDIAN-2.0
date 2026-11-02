@@ -1,5 +1,6 @@
 import nodemailer from 'nodemailer';
 import type Transporter from 'nodemailer/lib/mailer';
+import { logger, redactEmail } from '@/lib/logger';
 
 // ============================================
 // SMTP TRANSPORTER (serverless-safe)
@@ -26,6 +27,11 @@ export function isEmailConfigured(): boolean {
 
 let transporter: Transporter | null = null;
 let warming: Promise<void> | null = null;
+
+export function _resetTransporterForTesting(): void {
+    transporter = null;
+    warming = null;
+}
 
 function getTransporter(): Transporter {
     if (transporter) return transporter;
@@ -170,10 +176,13 @@ function emailShell(opts: {
 // OTP EMAIL DELIVERY
 // ============================================
 
-/**
- * Sends a secure OTP email to the vendor with the share link and OTP code.
- */
-export async function sendOTPEmail(
+export interface SendEmailRetryOptions {
+    maxRetries?: number;
+    initialDelayMs?: number;
+    backoffFactor?: number;
+}
+
+async function sendOTPEmailSingleAttempt(
     vendorEmail: string,
     token: string,
     otp: string,
@@ -243,6 +252,54 @@ export async function sendOTPEmail(
         }),
         'OTP email',
     );
+}
+
+/**
+ * Reliable OTP email delivery with exponential backoff (DL-05).
+ * Retries on transient timeouts or SMTP errors, never logs plaintext OTP.
+ */
+export async function sendOTPEmailWithRetry(
+    vendorEmail: string,
+    token: string,
+    otp: string,
+    expiresMinutes: number,
+    options?: SendEmailRetryOptions
+): Promise<void> {
+    const maxRetries = options?.maxRetries ?? 2;
+    const initialDelayMs = options?.initialDelayMs ?? 200;
+    const backoffFactor = options?.backoffFactor ?? 2;
+
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+            await sendOTPEmailSingleAttempt(vendorEmail, token, otp, expiresMinutes);
+            return;
+        } catch (err) {
+            lastError = err;
+            if (attempt < maxRetries) {
+                const delay = initialDelayMs * Math.pow(backoffFactor, attempt);
+                logger.warn(
+                    `[EMAIL] OTP send attempt ${attempt + 1}/${maxRetries + 1} failed for ${redactEmail(vendorEmail)}, retrying in ${delay}ms...`,
+                    err instanceof Error ? err.message : 'Unknown error'
+                );
+                await new Promise((resolve) => setTimeout(resolve, delay));
+            }
+        }
+    }
+    throw lastError;
+}
+
+/**
+ * Sends a secure OTP email with automatic retry and backoff (DL-05).
+ */
+export async function sendOTPEmail(
+    vendorEmail: string,
+    token: string,
+    otp: string,
+    expiresMinutes: number,
+    options?: SendEmailRetryOptions,
+): Promise<void> {
+    return sendOTPEmailWithRetry(vendorEmail, token, otp, expiresMinutes, options);
 }
 
 // ============================================

@@ -2,6 +2,7 @@
 
 import { prisma } from '@/lib/prisma';
 import { auth } from '@/lib/auth';
+import { logger } from '@/lib/logger';
 
 export interface DashboardLink {
     id: string;
@@ -287,13 +288,13 @@ export async function getOwnedLinks(userId: string): Promise<DashboardLink[]> {
     try {
         const session = await auth();
         if (!session?.user?.id || session.user.id !== userId) {
-            console.error('[SECURITY] getOwnedLinks called with mismatched userId');
+            logger.securityEvent('AUTHZ_MISMATCH', { action: 'getOwnedLinks', requestedUserId: userId });
             return [];
         }
 
         return fetchOwnedLinksForOwner(userId);
     } catch (error) {
-        console.error('Error fetching owned links:', error);
+        logger.error('Error fetching owned links', error);
         return [];
     }
 }
@@ -310,7 +311,7 @@ export async function getReceivedLinks(
         const sessionEmail = session?.user?.email?.toLowerCase();
         const target = email.toLowerCase();
         if (!sessionEmail || sessionEmail !== target) {
-            console.error('[SECURITY] getReceivedLinks called with mismatched email');
+            logger.securityEvent('AUTHZ_MISMATCH', { action: 'getReceivedLinks', requestedEmail: target });
             return [];
         }
 
@@ -325,7 +326,7 @@ export async function getReceivedLinks(
         ]);
         return mergeVendorInbox(mapVendorLinks(live), history, target);
     } catch (error) {
-        console.error('Error fetching received links:', error);
+        logger.error('Error fetching received links', error);
         return [];
     }
 }
@@ -373,7 +374,7 @@ export async function getLinkDetails(linkId: string): Promise<{
             auditLogs: link.AuditLog,
         };
     } catch (error) {
-        console.error('Error fetching link details:', error);
+        logger.error('Error fetching link details', error);
         return { success: false, error: 'Failed' };
     }
 }
@@ -382,7 +383,7 @@ export async function getSendHistory(userId: string): Promise<SendHistoryRecord[
     try {
         const session = await auth();
         if (!session?.user?.id || session.user.id !== userId) {
-            console.error('[SECURITY] getSendHistory called with mismatched userId');
+            logger.securityEvent('AUTHZ_MISMATCH', { action: 'getSendHistory', requestedUserId: userId });
             return [];
         }
         return await prisma.sendRecord.findMany({
@@ -400,7 +401,7 @@ export async function getSendHistory(userId: string): Promise<SendHistoryRecord[
             },
         });
     } catch (error) {
-        console.error('Error fetching send history:', error);
+        logger.error('Error fetching send history', error);
         return [];
     }
 }
@@ -469,7 +470,7 @@ export async function getOwnerDashboardData(userId: string): Promise<{
 }> {
     const session = await auth();
     if (!session?.user?.id || session.user.id !== userId) {
-        console.error('[SECURITY] getOwnerDashboardData called with mismatched userId');
+        logger.securityEvent('AUTHZ_MISMATCH', { action: 'getOwnerDashboardData', requestedUserId: userId });
         return { links: [], history: [] };
     }
 

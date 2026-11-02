@@ -6,6 +6,7 @@ import { authorizeSecureLink } from '@/lib/linkAuthorization';
 import { checkDownloadRateLimit, extractClientIP, formatRateLimitError } from '@/lib/rate-limit';
 import { headers } from 'next/headers';
 import { decryptUserFileBytes } from '@/lib/decrypt-user-file';
+import { logger } from '@/lib/logger';
 
 const PREVIEW_ROW_LIMIT = 10;
 
@@ -106,7 +107,7 @@ export async function getFilePreview(token: string, fileId: string): Promise<Fil
         try {
             buffer = await decryptUserFileBytes(fileRecord);
         } catch (e) {
-            console.error('[PREVIEW] Decrypt failed:', e);
+            logger.error('[PREVIEW] Decrypt failed', e);
             return { success: false, error: 'Failed to retrieve file for preview' };
         }
 
@@ -241,7 +242,7 @@ export async function getFilePreview(token: string, fileId: string): Promise<Fil
                     restricted: false,
                 };
             } catch (err) {
-                console.error('[PREVIEW] Word convert failed:', err);
+                logger.error('[PREVIEW] Word convert failed', err);
                 return {
                     success: false,
                     error: 'Could not preview this Word document. Use Edit to open it.',
@@ -273,7 +274,7 @@ export async function getFilePreview(token: string, fileId: string): Promise<Fil
         return { success: false, error: 'Unsupported preview type' };
 
     } catch (error) {
-        console.error('Preview Error:', error);
+        logger.error('Preview Error', error);
         return { success: false, error: 'Failed to open preview' };
     }
 }

@@ -58,9 +58,13 @@ RUN adduser --system --uid 1001 nextjs
 # Copy public assets
 COPY --from=builder /app/public ./public
 
-# Set up standalone output directory
-RUN mkdir .next
-RUN chown nextjs:nodejs .next
+# Set up standalone output directory and persistent isolated storage
+RUN mkdir -p .next /app/storage-vault
+RUN chown -R nextjs:nodejs .next /app/storage-vault
+
+# Isolate persistent document storage into a dedicated mountable volume
+VOLUME ["/app/storage-vault"]
+ENV SECURE_STORAGE_PATH="/app/storage-vault"
 
 # Copy built application
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./

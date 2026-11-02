@@ -5,10 +5,13 @@ import { generateOTP, hashOTP } from '@/lib/crypto';
 import { checkOTPRateLimit, checkLinkRateLimit, extractClientIP, formatRateLimitError } from '@/lib/rate-limit';
 import { headers } from 'next/headers';
 import { logger, redactEmail } from '@/lib/logger';
-import { isEmailConfigured } from '@/lib/email';
+import { isEmailConfigured, sendOTPEmailWithRetry } from '@/lib/email';
+import redis from '@/lib/redis';
+import { isRedisConfigured } from '@/lib/redis-helpers';
 
 /** Minimum seconds between OTP emails for the same vendor+link (anti-spam). */
 const RESEND_COOLDOWN_SECONDS = 60;
+const IN_FLIGHT_LOCK_TTL_SECONDS = 15;
 
 export type SendVendorOTPResult = {
     success: boolean;
@@ -63,6 +66,9 @@ export async function sendVendorOTP(input: {
                         loginCount: true,
                         maxLogins: true,
                         currentOtpCreatedAt: true,
+                        otpHash: true,
+                        currentOtpHash: true,
+                        currentOtpExpiresAt: true,
                     },
                 },
             },
@@ -136,9 +142,43 @@ export async function sendVendorOTP(input: {
             }
         }
 
+        if (!isEmailConfigured()) {
+            logger.error('[EMAIL] EMAIL_USER/EMAIL_PASS (or SMTP_USER/SMTP_PASS) not set on server');
+            return {
+                success: false,
+                error: 'Email is not configured on the server. Contact the link owner.',
+            };
+        }
+
+        // Concurrency guard: avoid duplicate simultaneous OTP sends for the same vendor (DL-05)
+        const inFlightKey = `lock:otp-send:${vendor.id}`;
+        let lockAcquired = false;
+        if (isRedisConfigured()) {
+            try {
+                const setRes = await redis.set(inFlightKey, '1', { nx: true, ex: IN_FLIGHT_LOCK_TTL_SECONDS });
+                if (!setRes) {
+                    return {
+                        success: false,
+                        error: 'An OTP request is already in progress. Please check your email.',
+                        errorType: 'COOLDOWN',
+                        retryAfterSeconds: 5,
+                    };
+                }
+                lockAcquired = true;
+            } catch {
+                // If Redis locking check fails, proceed safely
+            }
+        }
+
         const otp = generateOTP();
         const otpHash = await hashOTP(otp);
         const now = new Date();
+
+        // Capture previous OTP state for safe rollback if delivery fails (DL-05)
+        const previousOtpHash = vendor.otpHash;
+        const previousCurrentOtpHash = vendor.currentOtpHash;
+        const previousCreatedAt = vendor.currentOtpCreatedAt;
+        const previousExpiresAt = vendor.currentOtpExpiresAt;
 
         // Cap email validity at 10 minutes (or remaining link life)
         const remainingMs = secureLink.expiresAt.getTime() - now.getTime();
@@ -153,89 +193,142 @@ export async function sendVendorOTP(input: {
             ),
         );
 
-        await prisma.$transaction(async (tx) => {
-            await tx.otpHistory.updateMany({
-                where: { vendorAccessId: vendor.id, status: 'ACTIVE' },
-                data: {
-                    status: 'INVALIDATED',
-                    invalidatedAt: now,
-                    reason: 'NEW_OTP_REQUESTED',
-                },
-            });
-
-            await tx.vendorAccess.update({
-                where: { id: vendor.id },
-                data: {
-                    otpHash,
-                    currentOtpHash: otpHash,
-                    currentOtpCreatedAt: now,
-                    currentOtpExpiresAt: otpExpiresAt,
-                },
-            });
-
-            // Fresh OTP must be enterable after a prior successful unlock (single-use
-            // applies to the old code, not to this vendor forever).
-            await tx.linkAccess.updateMany({
-                where: {
-                    secureLinkId: secureLink.id,
-                    vendorEmail: { equals: normalizedEmail, mode: 'insensitive' },
-                },
-                data: {
-                    isUsed: false,
-                    otpHash,
-                    failedAttempts: 0,
-                    lockedAt: null,
-                },
-            });
-
-            await tx.otpHistory.create({
-                data: {
-                    vendorAccessId: vendor.id,
-                    otpHash,
-                    reason: 'OTP_REQUESTED',
-                    status: 'ACTIVE',
-                },
-            });
-
-            await tx.auditLog.create({
-                data: {
-                    action: 'OTP_RESENT',
-                    linkId: secureLink.id,
-                    reason: 'Vendor requested a new OTP',
-                    metadata: JSON.stringify({
-                        vendorEmail: redactEmail(normalizedEmail),
-                        validityMinutes,
-                    }),
-                },
-            });
-        });
-
-        if (!isEmailConfigured()) {
-            logger.error('[EMAIL] EMAIL_USER/EMAIL_PASS (or SMTP_USER/SMTP_PASS) not set on server');
-            return {
-                success: false,
-                error: 'Email is not configured on the server. Contact the link owner.',
-            };
-        }
-
         try {
-            const { sendOTPEmail } = await import('@/lib/email');
-            await sendOTPEmail(normalizedEmail, token, otp, validityMinutes);
-        } catch (err) {
-            logger.error(
-                `[EMAIL FAILED] Could not send OTP to ${redactEmail(normalizedEmail)}`,
-                err instanceof Error ? err.message : err,
-            );
-            return {
-                success: false,
-                error:
-                    'Could not deliver the OTP email. Check spam or try again in a minute.',
-            };
+            await prisma.$transaction(async (tx) => {
+                await tx.otpHistory.updateMany({
+                    where: { vendorAccessId: vendor.id, status: 'ACTIVE' },
+                    data: {
+                        status: 'INVALIDATED',
+                        invalidatedAt: now,
+                        reason: 'NEW_OTP_REQUESTED',
+                    },
+                });
+
+                await tx.vendorAccess.update({
+                    where: { id: vendor.id },
+                    data: {
+                        otpHash,
+                        currentOtpHash: otpHash,
+                        currentOtpCreatedAt: now,
+                        currentOtpExpiresAt: otpExpiresAt,
+                    },
+                });
+
+                // Fresh OTP must be enterable after a prior successful unlock (single-use
+                // applies to the old code, not to this vendor forever).
+                await tx.linkAccess.updateMany({
+                    where: {
+                        secureLinkId: secureLink.id,
+                        vendorEmail: { equals: normalizedEmail, mode: 'insensitive' },
+                    },
+                    data: {
+                        isUsed: false,
+                        otpHash,
+                        failedAttempts: 0,
+                        lockedAt: null,
+                    },
+                });
+
+                await tx.otpHistory.create({
+                    data: {
+                        vendorAccessId: vendor.id,
+                        otpHash,
+                        reason: 'OTP_REQUESTED',
+                        status: 'ACTIVE',
+                    },
+                });
+
+                await tx.auditLog.create({
+                    data: {
+                        action: 'OTP_RESENT',
+                        linkId: secureLink.id,
+                        reason: 'Vendor requested a new OTP',
+                        metadata: JSON.stringify({
+                            vendorEmail: redactEmail(normalizedEmail),
+                            validityMinutes,
+                        }),
+                    },
+                });
+            });
+
+            // Reliable OTP Email Delivery with Retries (DL-05)
+            try {
+                await sendOTPEmailWithRetry(normalizedEmail, token, otp, validityMinutes);
+            } catch (err) {
+                logger.error(
+                    `[EMAIL FAILED] Could not send OTP to ${redactEmail(normalizedEmail)} — reverting rotation:`,
+                    err instanceof Error ? err.message : err,
+                );
+
+                // COMPENSATING TRANSACTION: Revert OTP rotation so user is NOT permanently locked out!
+                await prisma.$transaction(async (tx) => {
+                    await tx.vendorAccess.update({
+                        where: { id: vendor.id },
+                        data: {
+                            otpHash: previousOtpHash,
+                            currentOtpHash: previousCurrentOtpHash,
+                            currentOtpCreatedAt: previousCreatedAt,
+                            currentOtpExpiresAt: previousExpiresAt,
+                        },
+                    });
+
+                    await tx.linkAccess.updateMany({
+                        where: {
+                            secureLinkId: secureLink.id,
+                            vendorEmail: { equals: normalizedEmail, mode: 'insensitive' },
+                        },
+                        data: {
+                            otpHash: previousOtpHash,
+                        },
+                    });
+
+                    await tx.otpHistory.updateMany({
+                        where: { vendorAccessId: vendor.id, otpHash },
+                        data: {
+                            status: 'DELIVERY_FAILED',
+                            invalidatedAt: new Date(),
+                            reason: 'DELIVERY_FAILED',
+                        },
+                    });
+
+                    if (previousCurrentOtpHash) {
+                        await tx.otpHistory.updateMany({
+                            where: { vendorAccessId: vendor.id, otpHash: previousCurrentOtpHash },
+                            data: {
+                                status: 'ACTIVE',
+                                invalidatedAt: null,
+                            },
+                        });
+                    }
+
+                    await tx.auditLog.create({
+                        data: {
+                            action: 'OTP_DELIVERY_FAILED',
+                            linkId: secureLink.id,
+                            reason: 'Email provider failure; reverted OTP rotation to prevent lockout',
+                            metadata: JSON.stringify({
+                                vendorEmail: redactEmail(normalizedEmail),
+                                reverted: true,
+                            }),
+                        },
+                    });
+                }).catch((revertErr) => {
+                    logger.error('[REVERT FAILED] Reverting OTP rotation failed:', revertErr);
+                });
+
+                return {
+                    success: false,
+                    error: 'Could not deliver the OTP email. Please check your connection or try again.',
+                };
+            }
+
+            logger.info(`OTP SENT TO: ${redactEmail(normalizedEmail)}`);
+            return { success: true };
+        } finally {
+            if (lockAcquired) {
+                await redis.del(inFlightKey).catch(() => {});
+            }
         }
-
-        logger.info(`OTP SENT TO: ${redactEmail(normalizedEmail)}`);
-
-        return { success: true };
     } catch (e) {
         logger.error('Failed to send vendor OTP:', e);
         return {

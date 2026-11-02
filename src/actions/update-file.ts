@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { encryptBuffer, generateDek, encryptDek } from '@/lib/crypto';
 import { authorizeSecureLink } from '@/lib/linkAuthorization';
 import { validateMimeType, ALLOWED_EXTENSIONS } from '@/lib/security/file-validator';
+import { logger } from '@/lib/logger';
 import path from 'path';
 
 export type UpdateFileResult = {
@@ -231,7 +232,7 @@ export async function updateFile(
 
         return { success: true, newVersion, currentVersion: newVersion };
     } catch (error) {
-        console.error('updateFile error:', error);
+        logger.error('updateFile error', error);
         return { success: false, error: 'An unexpected error occurred while saving.' };
     }
 }

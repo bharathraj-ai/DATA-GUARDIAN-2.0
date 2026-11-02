@@ -5,6 +5,7 @@ import { extractClientIP, checkSecureChatRateLimits, formatRateLimitError } from
 import { isLinkParticipant, normalizeEmail } from '@/lib/security/resource-ownership';
 import { verifyShareSession } from '@/lib/share-session';
 import { cookies } from 'next/headers';
+import { logger } from '@/lib/logger';
 
 /**
  * POST /api/chat
@@ -93,7 +94,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ success: true, message });
   } catch (error) {
-    console.error('Chat Error:', error);
+    logger.error('Chat Error:', error);
     return NextResponse.json({ error: 'Failed to send message' }, { status: 500 });
   }
 }

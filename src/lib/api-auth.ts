@@ -8,7 +8,7 @@ import { extractClientIP, checkGlobalRateLimit } from '@/lib/rate-limit';
 import crypto from 'crypto';
 import { validateCSRF } from '@/lib/security/csrf';
 import { logger, redactToken, redactEmail } from '@/lib/logger';
-import { isRedisConfigured } from '@/lib/redis-helpers';
+import { isRedisConfigured, trySetRevoked } from '@/lib/redis-helpers';
 import { verifyShareSession } from '@/lib/share-session';
 import { decryptData } from '@/lib/crypto';
 
@@ -285,6 +285,9 @@ export async function authorizeApiRequest(
     const secureLink = file.SecureLink;
 
     if (secureLink.isRevoked || secureLink.expiresAt < new Date()) {
+        if (secureLink.isRevoked) {
+            void trySetRevoked(token);
+        }
         await logSecurityEvent('DENIED', secureLink.id, { ip, reason: 'Link expired or revoked in DB', requestId }, secureLink.ownerId);
         return { errorResponse: NextResponse.json({ error: 'Forbidden: Link has expired or been revoked' }, { status: 403 }) };
     }
@@ -350,18 +353,11 @@ export async function authorizeApiRequest(
     const authSession = authSessionEarly;
     const sessionEmail = normalizeEmail(authSession?.user?.email);
 
-    const rawCookieEmail = cookieStore.get('vendor_email')?.value;
-    let cookieEmail: string | null = null;
-    if (rawCookieEmail) {
-        try {
-            const decoded = decryptData<{ email: string }>(rawCookieEmail);
-            cookieEmail = normalizeEmail(decoded.email);
-        } catch {
-            // Reject plaintext spoof attempts
-            cookieEmail = null;
-        }
-    }
-    const effectiveEmail = signedVendorEmail || cookieEmail || sessionEmail;
+    // SV-05: Identity resolution trusts ONLY cryptographically verified identities:
+    // 1. MAC-bound vendor email from signed share session (HMAC-SHA256 verified)
+    // 2. NextAuth authenticated session email
+    // The unauthenticated / un-bound vendor_email cookie fallback is removed.
+    const effectiveEmail = signedVendorEmail || sessionEmail;
     const isOwner = Boolean(authSession?.user?.id && authSession.user.id === secureLink.ownerId);
 
     const hasEmailGate =

@@ -4,6 +4,7 @@ import { encryptBuffer, generateDek, encryptDek } from '@/lib/crypto';
 import { authorizeApiRequest } from '@/lib/api-auth';
 import { checkUploadRateLimit, extractClientIP } from '@/lib/rate-limit';
 import { headers } from 'next/headers';
+import { logger } from '@/lib/logger';
 
 function dataUrlToBytes(dataUrl: string): Buffer {
   const base64 = dataUrl.split(',')[1] || dataUrl;
@@ -128,7 +129,7 @@ export async function POST(
 
     return NextResponse.json({ success: true, versionNumber });
   } catch (err) {
-    console.error('[save] error:', err);
+    logger.error('[save] error:', err);
     return NextResponse.json({ error: 'Failed to save document' }, { status: 500 });
   }
 }

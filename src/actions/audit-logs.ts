@@ -2,6 +2,7 @@
 
 import { prisma } from '@/lib/prisma';
 import { auth } from '@/lib/auth';
+import { logger } from '@/lib/logger';
 
 export type Severity = 'INFO' | 'WARNING' | 'CRITICAL';
 
@@ -169,7 +170,7 @@ export async function getUnifiedAuditLogs(): Promise<UnifiedAuditLog[]> {
 
         return allLogs;
     } catch (error) {
-        console.error('Error fetching unified audit logs:', error);
+        logger.error('Error fetching unified audit logs', error);
         return [];
     }
 }

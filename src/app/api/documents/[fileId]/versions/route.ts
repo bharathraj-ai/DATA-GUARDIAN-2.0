@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { authorizeApiRequest } from '@/lib/api-auth';
+import { logger } from '@/lib/logger';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -47,7 +48,7 @@ export async function GET(
 
     return NextResponse.json({ success: true, versions });
   } catch (err) {
-    console.error('[versions GET] error:', err);
+    logger.error('[versions GET] error:', err);
     return NextResponse.json({ error: 'Failed to fetch versions' }, { status: 500 });
   }
 }
@@ -119,7 +120,7 @@ export async function POST(
 
     return NextResponse.json({ success: true, restoredVersion: version.versionNumber });
   } catch (err) {
-    console.error('[versions POST] error:', err);
+    logger.error('[versions POST] error:', err);
     return NextResponse.json({ error: 'Failed to restore version' }, { status: 500 });
   }
 }

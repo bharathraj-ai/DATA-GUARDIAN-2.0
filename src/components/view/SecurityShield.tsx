@@ -26,6 +26,7 @@ import React, {
     memo,
     useMemo,
 } from 'react';
+import { isWorkCompleted, isInternalNavigationActive } from './sudden-exit-client';
 
 interface SecurityShieldProps {
     token: string;
@@ -199,6 +200,7 @@ export const SecurityShield = memo(function SecurityShield({
     const osScreenshotChordArmedAtRef = useRef(0);
     /** Super/Win key — Snipping Tool starts with Win then steals the rest of the chord */
     const lastMetaKeyAtRef = useRef(0);
+    const terminatedBecauseSuspiciousRef = useRef(false);
 
     const syncCoverCopy = useCallback((opts: { validating?: boolean; terminated?: boolean }) => {
         const cover = coverRef.current;
@@ -207,9 +209,20 @@ export const SecurityShield = memo(function SecurityShield({
         const sub = cover.querySelector('.security-privacy-cover-sub');
         if (!title || !sub) return;
         if (opts.terminated || sessionTerminatedRef.current) {
-            title.textContent = 'Access Revoked';
-            sub.textContent =
-                'Suspicious activity was detected. Vendor access has been denied and the data owner has been notified.';
+            if (isWorkCompleted()) {
+                title.textContent = 'Work Delivered';
+                sub.textContent =
+                    'All files have been successfully sent to the owner. This working session is now complete.';
+                return;
+            }
+            if (terminatedBecauseSuspiciousRef.current) {
+                title.textContent = 'Access Revoked';
+                sub.textContent =
+                    'Suspicious activity was detected. Vendor access has been denied and the data owner has been notified.';
+                return;
+            }
+            title.textContent = 'Session Ended';
+            sub.textContent = 'Your secure viewing session has ended.';
             return;
         }
         title.textContent = 'Protected Content Hidden';
@@ -353,8 +366,10 @@ export const SecurityShield = memo(function SecurityShield({
      */
     const reportSuspiciousActivityAndRevoke = useCallback(
         (detail: string, reason: 'screenshot' | 'devtools' | 'tab_switch' | 'copy' = 'screenshot') => {
+            if (isWorkCompleted() || isInternalNavigationActive()) return;
             if (sessionTerminatedRef.current && suspiciousRevokeSentRef.current) return;
 
+            terminatedBecauseSuspiciousRef.current = true;
             setTerminatedBecauseSuspicious(true);
             activatePrivacyCover('suspicious-revoke');
             terminateSession(
@@ -424,6 +439,10 @@ export const SecurityShield = memo(function SecurityShield({
                 return;
             }
 
+            if (data.type === 'completed' || isWorkCompleted()) {
+                terminateSession('Work completed');
+                return;
+            }
             if (data.type === 'revoked') {
                 terminateSession('Share link was revoked');
                 return;
@@ -664,6 +683,19 @@ export const SecurityShield = memo(function SecurityShield({
         };
     }, [sessionTerminated]);
 
+    // Handle legitimate work completion signal
+    useEffect(() => {
+        const handleWorkCompleted = () => {
+            if (restoreDebounceRef.current) clearTimeout(restoreDebounceRef.current);
+            if (flushTimeoutRef.current) clearTimeout(flushTimeoutRef.current);
+            sessionTerminatedRef.current = true;
+            setSessionTerminated(true);
+            syncCoverCopy({ terminated: true });
+        };
+        window.addEventListener('dg:work-completed', handleWorkCompleted);
+        return () => window.removeEventListener('dg:work-completed', handleWorkCompleted);
+    }, [syncCoverCopy]);
+
     // ═══════════════════════════════════════════════════════════════
     // BLUR / VISIBILITY — primary privacy path for OS screenshot UIs
     // Cover immediately; audit + verify-access are throttled (not every blur).
@@ -672,6 +704,10 @@ export const SecurityShield = memo(function SecurityShield({
         if (sessionTerminated) return;
 
         const handleVisibilityChange = () => {
+            if (isWorkCompleted() || isInternalNavigationActive()) {
+                return;
+            }
+
             if (document.hidden) {
                 const snipChord =
                     Date.now() - osScreenshotChordArmedAtRef.current < 2800
@@ -699,6 +735,10 @@ export const SecurityShield = memo(function SecurityShield({
         };
 
         const handleBlur = () => {
+            if (isWorkCompleted() || isInternalNavigationActive()) {
+                return;
+            }
+
             if (
                 Date.now() - osScreenshotChordArmedAtRef.current < 2800
                 || Date.now() - lastMetaKeyAtRef.current < 2800
@@ -734,6 +774,7 @@ export const SecurityShield = memo(function SecurityShield({
             const regainedFocus = !lastFocused && focused && protectionActiveRef.current;
 
             if (lostFocus) {
+                if (isWorkCompleted() || isInternalNavigationActive()) return;
                 const snipChord =
                     Date.now() - osScreenshotChordArmedAtRef.current < 2800
                     || Date.now() - lastMetaKeyAtRef.current < 2800;
@@ -1073,12 +1114,18 @@ export const SecurityShield = memo(function SecurityShield({
                     }}
                 >
                     <h2 style={{ fontSize: '24px', fontWeight: 700, margin: '0 0 12px' }}>
-                        {terminatedBecauseSuspicious ? 'Access Revoked' : 'Session Terminated'}
+                        {isWorkCompleted()
+                            ? 'Work Delivered'
+                            : terminatedBecauseSuspicious
+                            ? 'Access Revoked'
+                            : 'Session Terminated'}
                     </h2>
                     <p style={{ fontSize: '15px', color: '#9CA3AF', maxWidth: '420px', lineHeight: 1.6 }}>
-                        {terminatedBecauseSuspicious
+                        {isWorkCompleted()
+                            ? 'All files have been successfully sent to the owner. This working session is now complete.'
+                            : terminatedBecauseSuspicious
                             ? 'Suspicious activity was detected. This working session has been terminated, vendor access has been denied, and the data owner has been notified.'
-                            : 'Your secure viewing session has been terminated due to security policy violations. This event has been logged.'}
+                            : 'Your secure viewing session has ended.'}
                     </p>
                 </div>
             )}

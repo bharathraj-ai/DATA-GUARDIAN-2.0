@@ -3,9 +3,6 @@ import Image from 'next/image';
 import ScrollReveal from '@/components/ScrollReveal';
 import HeroActions from '@/components/HeroActions';
 
-// Marketing page — no server data; cache as static
-export const dynamic = 'force-static';
-
 export default function LandingPage() {
   return (
     <main className="landing-page">

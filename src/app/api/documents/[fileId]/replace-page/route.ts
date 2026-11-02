@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { encryptBuffer, decryptBuffer, generateDek, encryptDek, decryptDek } from '@/lib/crypto';
 import { authorizeApiRequest } from '@/lib/api-auth';
+import { logger } from '@/lib/logger';
 export const dynamic = 'force-dynamic';
 
 /**
@@ -94,7 +95,7 @@ export async function POST(
 
     return NextResponse.json({ success: true, newVersion: versionCount + 1 });
   } catch (err) {
-    console.error('[replace-page] error:', err);
+    logger.error('[replace-page] error:', err);
     return NextResponse.json({ error: 'Failed to replace page' }, { status: 500 });
   }
 }

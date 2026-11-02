@@ -2,6 +2,7 @@
 
 import { prisma } from '@/lib/prisma';
 import { authorizeSecureLink } from '@/lib/linkAuthorization';
+import { logger } from '@/lib/logger';
 
 export async function autosaveSession(
   token: string, 
@@ -69,7 +70,7 @@ export async function autosaveSession(
 
     throw lastError;
   } catch (error) {
-    console.error('Autosave error:', error);
+    logger.error('Autosave error', error);
     return { success: false, error: 'Failed to autosave' };
   }
 }

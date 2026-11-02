@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { authorizeApiRequest } from '@/lib/api-auth';
+import { logger } from '@/lib/logger';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -72,7 +73,7 @@ export async function POST(
 
     return NextResponse.json({ success: true, chatMessage });
   } catch (err) {
-    console.error('[chat POST] error:', err);
+    logger.error('[chat POST] error:', err);
     return NextResponse.json({ error: 'Failed to send message' }, { status: 500 });
   }
 }
@@ -132,7 +133,7 @@ export async function GET(
 
     return NextResponse.json({ success: true, messages });
   } catch (err) {
-    console.error('[chat GET] error:', err);
+    logger.error('[chat GET] error:', err);
     return NextResponse.json({ error: 'Failed to fetch messages' }, { status: 500 });
   }
 }

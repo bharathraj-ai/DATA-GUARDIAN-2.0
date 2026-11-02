@@ -3,6 +3,7 @@ import { authorizeEditLockCall, isUnavailable, lockPayload, lockUnavailableRespo
 import { auditLockRequestOutcome, requestEditLock } from '@/lib/collaboration/edit-lock-service';
 import { getEditLockConfig } from '@/lib/collaboration/edit-lock-config';
 import { clampReservationSeconds } from '@/lib/collaboration/resolve-lock-actor';
+import { logger } from '@/lib/logger';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -109,7 +110,7 @@ export async function POST(
         }, { status: 409 });
     } catch (err) {
         if (isUnavailable(err)) return lockUnavailableResponse(gate.linkId, gate.fileId, gate.actor);
-        console.error('[edit-lock/request]', err);
+        logger.error('[edit-lock/request]', err);
         return NextResponse.json({ error: 'Failed to request editing lock' }, { status: 500 });
     }
 }

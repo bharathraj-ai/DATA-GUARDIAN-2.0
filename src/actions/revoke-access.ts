@@ -266,7 +266,7 @@ export async function getLinkStatus(ownerToken: string): Promise<{
             },
         };
     } catch (error) {
-        console.error('Error getting link status:', error instanceof Error ? error.message : 'Unknown');
+        logger.error('Error getting link status', error);
         return {
             success: false,
             error: 'Failed to get link status.',

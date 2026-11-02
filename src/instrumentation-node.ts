@@ -21,6 +21,9 @@ async function warmMongo() {
 }
 
 export async function registerNode() {
+    const { validateCryptoSecrets } = await import('@/lib/security/validate-secrets');
+    validateCryptoSecrets();
+
     void warmMongo();
 
     if (process.env.NODE_ENV === 'development') {

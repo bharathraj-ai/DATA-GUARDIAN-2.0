@@ -36,21 +36,55 @@ export function isRedisConfigured(): boolean {
 
 /**
  * Fast revoke cache lookup.
- * null = no Redis → check SecureLink.isRevoked in DB
- * true  = revoked (or Redis configured but errored — fail closed)
- * false = Redis says not revoked (still verify DB)
+ * null  = Redis and DB unavailable
+ * true  = revoked (in Redis cache or confirmed in authoritative PostgreSQL)
+ * false = not revoked
  */
 export async function tryCheckRevoked(token: string): Promise<boolean | null> {
-    if (!isRedisConfigured()) {
-        return null;
+    if (isRedisConfigured()) {
+        try {
+            const { isTokenRevoked } = await getRedisModule();
+            const revoked = await isTokenRevoked(token);
+            if (revoked === true) {
+                return true;
+            }
+            if (revoked === false) {
+                return false;
+            }
+        } catch (err) {
+            logger.warn('[Redis] tryCheckRevoked unavailable — falling back to authoritative PostgreSQL check', {
+                error: err instanceof Error ? err.message : String(err),
+                token,
+            });
+        }
     }
 
+    // Authoritative PostgreSQL fallback: Redis outage must never falsely mark a valid link as revoked
     try {
-        const { isTokenRevoked } = await getRedisModule();
-        return (await isTokenRevoked(token)) === true;
+        const { prisma } = await import('@/lib/prisma');
+        const link = await prisma.secureLink.findUnique({
+            where: { token },
+            select: { isRevoked: true },
+        });
+        return link?.isRevoked === true;
+    } catch (dbErr) {
+        logger.error('[DB] Fallback revocation check failed during Redis outage', dbErr);
+        return null;
+    }
+}
+
+/**
+ * Permanently mark a token as revoked in Redis without TTL expiration (DL-03).
+ */
+export async function trySetRevoked(token: string): Promise<void> {
+    if (!isRedisConfigured()) return;
+    try {
+        const { invalidateSession } = await getRedisModule();
+        await invalidateSession(token, true);
     } catch (err) {
-        logger.error('Redis tryCheckRevoked FAIL CLOSED — treating as revoked', err);
-        return true;
+        logger.warn('[Redis] Failed to backfill permanent revocation marker', {
+            error: err instanceof Error ? err.message : String(err),
+        });
     }
 }
 
@@ -155,9 +189,9 @@ export async function tryInvalidateOneSession(
  * null = Redis unavailable / no session fingerprint stored.
  */
 /**
- * SSE heartbeat Redis check — one round-trip.
- * Redis error → 'revoked' (fail closed kill-switch).
- * Cache miss / unknown → 'ok' (signed cookie + DB remain authoritative).
+ * SSE heartbeat access check.
+ * - Redis accelerates active session / kill-switch lookup.
+ * - If Redis errors out, authoritative PostgreSQL fallback ensures valid links/sessions are not falsely revoked.
  */
 export async function trySseAccessCheck(
     token: string,
@@ -173,7 +207,42 @@ export async function trySseAccessCheck(
         if (result === 'unknown') return 'ok';
         return result;
     } catch (err) {
-        logger.error('Redis trySseAccessCheck FAIL CLOSED — treating as revoked', err);
+        logger.warn('[Redis] trySseAccessCheck unavailable — falling back to authoritative PostgreSQL check', {
+            error: err instanceof Error ? err.message : String(err),
+            token,
+        });
+    }
+
+    // Authoritative PostgreSQL fallback on Redis outage
+    try {
+        const { prisma } = await import('@/lib/prisma');
+        const link = await prisma.secureLink.findUnique({
+            where: { token },
+            select: {
+                isRevoked: true,
+                VendorAccess: {
+                    select: {
+                        activeSessionId: true,
+                        isRevoked: true,
+                    },
+                },
+            },
+        });
+
+        if (!link || link.isRevoked) {
+            return 'revoked';
+        }
+
+        if (link.VendorAccess && link.VendorAccess.length > 0) {
+            const vendor = link.VendorAccess.find((v) => v.activeSessionId === sessionId);
+            if (vendor?.isRevoked) {
+                return 'revoked';
+            }
+        }
+
+        return 'ok';
+    } catch (dbErr) {
+        logger.error('[DB] Fallback SSE access check failed during Redis outage', dbErr);
         return 'revoked';
     }
 }

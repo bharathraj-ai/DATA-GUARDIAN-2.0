@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authorizeEditLockCall, isUnavailable, lockPayload, lockUnavailableResponse } from '@/lib/collaboration/edit-lock-http';
 import { completePriorityTakeover, heartbeatEditLock } from '@/lib/collaboration/edit-lock-service';
+import { logger } from '@/lib/logger';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -62,7 +63,7 @@ export async function POST(
         });
     } catch (err) {
         if (isUnavailable(err)) return lockUnavailableResponse(gate.linkId, gate.fileId, gate.actor);
-        console.error('[edit-lock/heartbeat]', err);
+        logger.error('[edit-lock/heartbeat]', err);
         return NextResponse.json({ error: 'Failed to heartbeat editing lock' }, { status: 500 });
     }
 }

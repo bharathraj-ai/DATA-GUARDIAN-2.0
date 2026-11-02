@@ -15,10 +15,38 @@ export type CompleteWorkResult = {
 
 export async function completeWork(token: string): Promise<CompleteWorkResult> {
     try {
-        // 1. Authorize (Must have view capability at least)
+        // 1. Authorize session
         const authResult = await authorizeSecureLink(token, 'view', undefined, { includeDraft: false });
         if (!authResult.success) {
+            // Idempotency: If link is already revoked/completed, return success gracefully
+            if (authResult.error?.toLowerCase().includes('revoked')) {
+                const existing = await prisma.secureLink.findUnique({
+                    where: { token },
+                    select: { isRevoked: true },
+                });
+                if (existing?.isRevoked) {
+                    return { success: true };
+                }
+            }
             return { success: false, error: authResult.error };
+        }
+
+        const isOwner = authResult.context.isOwner;
+        const vendorLevel = authResult.context.vendorAccess?.level;
+
+        // P5-05: Server-side RBAC enforcement
+        // Only the link owner or explicitly authorized Level 1 Team Leader can finalize the workflow.
+        // Level 2 participants must NOT globally revoke links or trigger global file deletion.
+        if (!isOwner && vendorLevel !== undefined && vendorLevel > 1) {
+            logger.securityEvent('UNAUTHORIZED_COMPLETE_WORK_ATTEMPT', {
+                token,
+                vendorEmail: authResult.context.effectiveEmail,
+                level: vendorLevel,
+            });
+            return {
+                success: false,
+                error: 'Forbidden: Only the Team Leader (Level 1) or Link Owner can finalize and complete this work.',
+            };
         }
 
         const vendorEmail = authResult.context.effectiveEmail || 'unknown';
@@ -264,11 +292,20 @@ export async function completeWork(token: string): Promise<CompleteWorkResult> {
             logger.info(`Locked editing on ${fileIds.length} file(s).`);
         }
 
-        // 6. Mark the link as revoked
-        await prisma.secureLink.update({
-            where: { id: secureLink.id },
-            data: { isRevoked: true }
+        // 6. Mark the link as revoked atomically (concurrency & idempotency protection)
+        const updateResult = await prisma.secureLink.updateMany({
+            where: {
+                id: secureLink.id,
+                isRevoked: false,
+            },
+            data: { isRevoked: true },
         });
+
+        if (updateResult.count === 0) {
+            // Another concurrent request finalized the link already
+            logger.info('completeWork: Link was already finalized concurrently.');
+            return { success: true };
+        }
 
         if (vendorEmail !== 'unknown') {
             const lowerEmail = vendorEmail.toLowerCase();
@@ -296,7 +333,7 @@ export async function completeWork(token: string): Promise<CompleteWorkResult> {
                 data: { isUsed: false }
             });
 
-            logger.info(`Revoked access for ${redactEmail(lowerEmail)}. VendorAccess: ${revokedVA.count}, LinkAccess: ${revokedLA.count}`);
+            logger.info(`Revoked access for ${redactEmail(lowerEmail)}. VendorAccess: ${revokedVA?.count ?? 0}, LinkAccess: ${revokedLA?.count ?? 0}`);
         } else {
             logger.info(`No specific vendor email found, but marking action.`);
         }

@@ -2,6 +2,7 @@ import { getGridFSBucket, getMongoDb, GRIDFS_CHUNK_SIZE, withMongoRetry } from '
 import { ObjectId } from 'mongodb';
 import { Readable, Transform } from 'stream';
 import crypto from 'crypto';
+import { logger } from '@/lib/logger';
 
 export interface MongoUploadParams {
   buffer: Buffer;
@@ -206,7 +207,7 @@ export async function deleteFromMongo(gridFSId: string): Promise<void> {
     if (err?.message?.includes('FileNotFound') || err?.code === 'FileNotFound' || /file not found/i.test(err?.message)) {
       return;
     }
-    console.error(`[Mongo] Failed to delete GridFS file ${gridFSId}:`, err);
+    logger.error(`[Mongo] Failed to delete GridFS file ${gridFSId}`, err);
     throw err;
   }
 }

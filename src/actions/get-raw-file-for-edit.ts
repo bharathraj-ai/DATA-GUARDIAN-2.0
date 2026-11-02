@@ -3,6 +3,7 @@
 import { prisma } from '@/lib/prisma';
 import { authorizeSecureLink } from '@/lib/linkAuthorization';
 import { decryptUserFileBytes } from '@/lib/decrypt-user-file';
+import { logger } from '@/lib/logger';
 
 export type RawFileData = {
     success: boolean;
@@ -51,7 +52,7 @@ export async function getRawFileForEdit(token: string, fileId: string): Promise<
         try {
             buffer = await decryptUserFileBytes(fileRecord);
         } catch (e) {
-            console.error('[EDIT] Decrypt failed:', e);
+            logger.error('[EDIT] Decrypt failed', e);
             return { success: false, error: 'Failed to retrieve or decrypt file from storage' };
         }
 
@@ -74,7 +75,7 @@ export async function getRawFileForEdit(token: string, fileId: string): Promise<
         };
 
     } catch (error) {
-        console.error('Get Raw File Error:', error);
+        logger.error('Get Raw File Error', error);
         return { success: false, error: 'Failed to load file content' };
     }
 }

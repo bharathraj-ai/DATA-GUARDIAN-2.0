@@ -1,5 +1,8 @@
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
+import { validateCryptoSecrets } from '@/lib/security/validate-secrets';
+
+export { validateCryptoSecrets };
 
 // ============================================
 // TOKEN & OTP UTILITIES
@@ -22,20 +25,47 @@ export function generateOTP(): string {
 }
 
 /**
+ * Returns the dedicated OTP HMAC secret.
+ *
+ * OTP_HMAC_SECRET is MANDATORY and must NOT be the same value as
+ * ENCRYPTION_KEY, KEK_KEY, NEXTAUTH_SECRET, or SESSION_HMAC_SECRET.
+ * This prevents key-confusion attacks where a single leaked key
+ * compromises all security primitives simultaneously.
+ */
+export function getOtpHmacSecret(): string {
+    const secret = process.env.OTP_HMAC_SECRET;
+    if (!secret) {
+        throw new Error(
+            'OTP_HMAC_SECRET is required for OTP hashing. ' +
+            'Set a dedicated >=32-char secret that is NOT shared with ENCRYPTION_KEY or other secrets.'
+        );
+    }
+    if (secret.length < 32) {
+        throw new Error('OTP_HMAC_SECRET must be at least 32 characters');
+    }
+    // Strict isolation: ensure OTP_HMAC_SECRET is distinct from encryption keys
+    if (process.env.ENCRYPTION_KEY && secret === process.env.ENCRYPTION_KEY) {
+        throw new Error('OTP_HMAC_SECRET must not match ENCRYPTION_KEY');
+    }
+    if (process.env.KEK_KEY && secret === process.env.KEK_KEY) {
+        throw new Error('OTP_HMAC_SECRET must not match KEK_KEY');
+    }
+    return secret;
+}
+
+/**
  * Hashes an OTP using HMAC-SHA256 (fast, secure for short-lived tokens)
- * 
+ *
  * For 6-digit OTPs with 5-minute expiry and 3-attempt limit, HMAC is more appropriate
  * than bcrypt because:
  * - OTPs are short-lived (brute-force window is minimal)
  * - We need fast verification for good UX
- * - HMAC with a secret key provides sufficient security
+ * - HMAC with a dedicated secret key provides sufficient security
+ *
+ * Always uses OTP_HMAC_SECRET — never falls back to ENCRYPTION_KEY.
  */
 export function hashOTPSync(otp: string): string {
-    const secret = process.env.OTP_HMAC_SECRET || process.env.ENCRYPTION_KEY;
-    if (!secret) {
-        throw new Error('OTP_HMAC_SECRET or ENCRYPTION_KEY is required for OTP hashing');
-    }
-    return crypto.createHmac('sha256', secret).update(otp).digest('hex');
+    return crypto.createHmac('sha256', getOtpHmacSecret()).update(otp).digest('hex');
 }
 
 export async function hashOTP(otp: string): Promise<string> {
@@ -43,30 +73,41 @@ export async function hashOTP(otp: string): Promise<string> {
 }
 
 /**
- * Verifies an OTP against its hash
- * Supports both new HMAC hashes and legacy bcrypt hashes for backward compatibility
+ * Verifies an OTP against its hash.
+ *
+ * Supports:
+ * 1. Current HMAC-SHA256 hashes (OTP_HMAC_SECRET)
+ * 2. Rotated HMAC secrets (OTP_HMAC_SECRET_PREVIOUS / OTP_HMAC_SECRET_OLD)
+ * 3. Legacy bcrypt hashes ($2a$/$2b$/$2y$ prefixed)
+ *
+ * NOTE: Never reuses ENCRYPTION_KEY or KEK_KEY for HMAC verification.
  */
 export async function verifyOTPHash(otp: string, hash: string): Promise<boolean> {
-    // Check if it's a bcrypt hash (starts with $2a$, $2b$, or $2y$)
+    if (!otp || !hash) return false;
+
+    // Check if it's a legacy bcrypt hash (starts with $2a$, $2b$, or $2y$)
     if (hash.startsWith('$2')) {
-        // Legacy bcrypt verification for existing OTPs
         return bcrypt.compare(otp, hash);
     }
 
-    // Prefer dedicated OTP secret; also accept legacy ENCRYPTION_KEY hashes
-    const secrets = [
-        process.env.OTP_HMAC_SECRET,
-        process.env.ENCRYPTION_KEY,
-    ].filter((s): s is string => Boolean(s));
-
-    if (secrets.length === 0) {
-        throw new Error('OTP_HMAC_SECRET or ENCRYPTION_KEY is required for OTP verification');
+    // Build ordered list of legitimate OTP HMAC secrets for rotation
+    const primary = getOtpHmacSecret();
+    const secrets: string[] = [primary];
+    const prevSecret = process.env.OTP_HMAC_SECRET_PREVIOUS || process.env.OTP_HMAC_SECRET_OLD;
+    if (prevSecret && prevSecret !== primary && prevSecret.length >= 32) {
+        secrets.push(prevSecret);
     }
 
-    const hashBuf = Buffer.from(hash);
+    let hashBuf: Buffer;
+    try {
+        hashBuf = Buffer.from(hash, 'hex');
+    } catch {
+        return false;
+    }
+
     for (const secret of secrets) {
         const computedHash = crypto.createHmac('sha256', secret).update(otp).digest('hex');
-        const computedBuf = Buffer.from(computedHash);
+        const computedBuf = Buffer.from(computedHash, 'hex');
         if (computedBuf.length === hashBuf.length && crypto.timingSafeEqual(computedBuf, hashBuf)) {
             return true;
         }
@@ -122,50 +163,96 @@ export function generateEncryptionKey(): string {
     return crypto.randomBytes(KEY_LENGTH).toString('hex');
 }
 
-// Cache the encryption key to avoid repeated env parsing
+// Dynamic key cache that respects process.env changes (essential for testing & rotation)
+let _cachedKeyHex: string | null = null;
 let _cachedKey: Buffer | null = null;
 
-function getEncryptionKey(): Buffer {
-    if (_cachedKey) return _cachedKey;
-
-    const keyHex = process.env.ENCRYPTION_KEY;
+export function getEncryptionKey(): Buffer {
+    const keyHex = process.env.ENCRYPTION_KEY?.trim();
     if (!keyHex) {
         throw new Error('ENCRYPTION_KEY not configured in environment variables');
     }
-    if (keyHex.length !== 64) {
+    if (keyHex.length !== 64 || !/^[0-9a-fA-F]{64}$/.test(keyHex)) {
         throw new Error('ENCRYPTION_KEY must be 64 hex characters (256 bits)');
     }
+    if (_cachedKeyHex === keyHex && _cachedKey) {
+        return _cachedKey;
+    }
+    _cachedKeyHex = keyHex;
     _cachedKey = Buffer.from(keyHex, 'hex');
     return _cachedKey;
 }
 
-// Cache the KEK to avoid repeated env parsing
+/** Returns candidate encryption keys for decryption (primary key first, then rotated keys). */
+function getEncryptionKeysForDecryption(): Buffer[] {
+    const primary = getEncryptionKey();
+    const candidateBuffers: Buffer[] = [primary];
+
+    const fallbackHexList = [
+        process.env.ENCRYPTION_KEY_OLD,
+        process.env.ENCRYPTION_KEY_PREVIOUS,
+        ...(process.env.ROTATED_ENCRYPTION_KEYS ? process.env.ROTATED_ENCRYPTION_KEYS.split(',') : []),
+    ].filter((k): k is string => Boolean(k && k.trim().length === 64 && /^[0-9a-fA-F]{64}$/.test(k.trim())));
+
+    for (const hex of fallbackHexList) {
+        const buf = Buffer.from(hex.trim(), 'hex');
+        if (!candidateBuffers.some(existing => existing.equals(buf))) {
+            candidateBuffers.push(buf);
+        }
+    }
+
+    return candidateBuffers;
+}
+
+let _cachedKekHex: string | null = null;
 let _cachedKek: Buffer | null = null;
 
 export function getKekKey(): Buffer {
-    if (_cachedKek) return _cachedKek;
-
-    const keyHex = process.env.KEK_KEY;
+    const keyHex = process.env.KEK_KEY?.trim();
     if (!keyHex) {
         throw new Error('KEK_KEY not configured in environment variables');
     }
-    if (keyHex.length !== 64) {
+    if (keyHex.length !== 64 || !/^[0-9a-fA-F]{64}$/.test(keyHex)) {
         throw new Error('KEK_KEY must be 64 hex characters (256 bits)');
     }
+    if (_cachedKekHex === keyHex && _cachedKek) {
+        return _cachedKek;
+    }
+    _cachedKekHex = keyHex;
     _cachedKek = Buffer.from(keyHex, 'hex');
     return _cachedKek;
 }
 
+/** Returns candidate KEK keys for decryption (primary key first, then rotated KEKs). */
+function getKekKeysForDecryption(): Buffer[] {
+    const primary = getKekKey();
+    const candidateBuffers: Buffer[] = [primary];
+
+    const fallbackHexList = [
+        process.env.KEK_KEY_OLD,
+        process.env.KEK_KEY_PREVIOUS,
+        ...(process.env.ROTATED_KEK_KEYS ? process.env.ROTATED_KEK_KEYS.split(',') : []),
+    ].filter((k): k is string => Boolean(k && k.trim().length === 64 && /^[0-9a-fA-F]{64}$/.test(k.trim())));
+
+    for (const hex of fallbackHexList) {
+        const buf = Buffer.from(hex.trim(), 'hex');
+        if (!candidateBuffers.some(existing => existing.equals(buf))) {
+            candidateBuffers.push(buf);
+        }
+    }
+
+    return candidateBuffers;
+}
+
 /**
  * Encrypts data using AES-256-GCM
- * 
+ *
  * Security features:
- * - Unique IV for each encryption (no pattern leakage)
- * - Authentication tag (detects tampering)
+ * - Unique 96/128-bit IV for each encryption
+ * - 128-bit authentication tag (detects tampering)
  * - 256-bit key strength
- * 
- * @param data - Object to encrypt
- * @returns Encrypted string in format: iv:authTag:ciphertext (all hex encoded)
+ *
+ * Format: iv:authTag:ciphertext (3 parts, preserving 100% backward compatibility)
  */
 export function encryptData(data: object): string {
     const key = getEncryptionKey();
@@ -186,21 +273,34 @@ export function encryptData(data: object): string {
 }
 
 /**
- * Decrypts data encrypted with encryptData
- * 
- * @param encryptedString - String in format iv:authTag:ciphertext
+ * Decrypts data encrypted with encryptData.
+ * Supports legacy unversioned data (`iv:authTag:ciphertext`), versioned data (`v1:iv:authTag:ciphertext`),
+ * and safe key rotation via candidate keys.
+ *
+ * @param encryptedString - String in format [version:]iv:authTag:ciphertext
  * @returns Decrypted object
- * @throws Error if decryption fails (wrong key, tampered data, etc.)
+ * @throws Error if decryption fails (wrong key, tampered data, invalid format)
  */
 export function decryptData<T = object>(encryptedString: string): T {
-    const key = getEncryptionKey();
-
-    const parts = encryptedString.split(':');
-    if (parts.length !== 3) {
+    if (!encryptedString || typeof encryptedString !== 'string') {
         throw new Error('Invalid encrypted data format');
     }
 
-    const [ivHex, authTagHex, ciphertext] = parts;
+    const parts = encryptedString.split(':');
+    let ivHex: string;
+    let authTagHex: string;
+    let ciphertext: string;
+
+    if (parts.length === 4 && parts[0].startsWith('v')) {
+        // Versioned format: e.g. v1:iv:authTag:ciphertext
+        [, ivHex, authTagHex, ciphertext] = parts;
+    } else if (parts.length === 3) {
+        // Standard legacy format: iv:authTag:ciphertext
+        [ivHex, authTagHex, ciphertext] = parts;
+    } else {
+        throw new Error('Invalid encrypted data format');
+    }
+
     const iv = Buffer.from(ivHex, 'hex');
     const authTag = Buffer.from(authTagHex, 'hex');
 
@@ -211,15 +311,29 @@ export function decryptData<T = object>(encryptedString: string): T {
         throw new Error('Invalid auth tag length');
     }
 
-    const decipher = crypto.createDecipheriv(ALGORITHM, key, iv, {
-        authTagLength: AUTH_TAG_LENGTH,
-    });
-    decipher.setAuthTag(authTag);
+    // Safe key rotation strategy: try primary active key first, then rotated keys
+    const candidateKeys = getEncryptionKeysForDecryption();
+    let lastError: Error | null = null;
 
-    let plaintext = decipher.update(ciphertext, 'hex', 'utf8');
-    plaintext += decipher.final('utf8');
+    for (const key of candidateKeys) {
+        try {
+            const decipher = crypto.createDecipheriv(ALGORITHM, key, iv, {
+                authTagLength: AUTH_TAG_LENGTH,
+            });
+            decipher.setAuthTag(authTag);
 
-    return JSON.parse(plaintext) as T;
+            let plaintext = decipher.update(ciphertext, 'hex', 'utf8');
+            plaintext += decipher.final('utf8');
+
+            return JSON.parse(plaintext) as T;
+        } catch (e: any) {
+            lastError = e;
+            // Wrong key or auth tag failure; try next candidate key in rotation ring
+            continue;
+        }
+    }
+
+    throw lastError || new Error('Failed to decrypt data: Invalid key or tampered data');
 }
 
 /**
@@ -254,7 +368,14 @@ export function encryptDek(dek: Buffer): string {
 }
 
 /**
- * Decrypts an encrypted Data Encryption Key string back to the raw key
+ * Decrypts an encrypted Data Encryption Key string back to the raw key.
+ *
+ * Supports:
+ * 1. Current Master KEK (KEK_KEY)
+ * 2. Rotated Master KEKs (KEK_KEY_OLD / KEK_KEY_PREVIOUS)
+ * 3. Backwards compatibility: fallback to legacy ENCRYPTION_KEY for DEKs
+ *    encrypted before KEK_KEY introduction (symmetric AES-GCM decrypt, not HMAC).
+ *
  * @param encryptedDekString - format iv:authTag:ciphertext
  * @returns 32-byte Data Encryption Key
  */
@@ -276,49 +397,46 @@ export function decryptDek(encryptedDekString: string): Buffer {
         throw new Error('Invalid auth tag length for DEK decryption');
     }
 
-    // Try decrypting with new KEK first
+    // Try current KEK and rotated KEKs first
+    const candidateKeks = getKekKeysForDecryption();
+    for (const key of candidateKeks) {
+        try {
+            const decipher = crypto.createDecipheriv(ALGORITHM, key, iv, {
+                authTagLength: AUTH_TAG_LENGTH,
+            });
+            decipher.setAuthTag(authTag);
+
+            return Buffer.concat([
+                decipher.update(ciphertext),
+                decipher.final(),
+            ]);
+        } catch {
+            // Decryption with this candidate KEK failed; try next key in keyring
+            continue;
+        }
+    }
+
+    // Backward-compatibility fallback: legacy ENCRYPTION_KEY for pre-separation DEKs
     try {
-        const key = getKekKey(); // Master KEK
-        const decipher = crypto.createDecipheriv(ALGORITHM, key, iv, {
+        const legacyKey = getEncryptionKey();
+        const legacyDecipher = crypto.createDecipheriv(ALGORITHM, legacyKey, iv, {
             authTagLength: AUTH_TAG_LENGTH,
         });
-        decipher.setAuthTag(authTag);
+        legacyDecipher.setAuthTag(authTag);
 
         return Buffer.concat([
-            decipher.update(ciphertext),
-            decipher.final(),
+            legacyDecipher.update(ciphertext),
+            legacyDecipher.final(),
         ]);
-    } catch (e: any) {
-        // Fallback to legacy ENCRYPTION_KEY only if it's an authentication tag failure.
-        // Node's crypto module throws this specific message when GCM auth fails due to a wrong key.
-        const isAuthTagFailure = e instanceof Error && e.message.includes('Unsupported state or unable to authenticate data');
-
-        if (isAuthTagFailure) {
-            try {
-                const legacyKey = getEncryptionKey();
-                const legacyDecipher = crypto.createDecipheriv(ALGORITHM, legacyKey, iv, {
-                    authTagLength: AUTH_TAG_LENGTH,
-                });
-                legacyDecipher.setAuthTag(authTag);
-
-                return Buffer.concat([
-                    legacyDecipher.update(ciphertext),
-                    legacyDecipher.final(),
-                ]);
-            } catch (legacyError) {
-                throw new Error('Failed to decrypt DEK: Invalid key or tampered data');
-            }
-        }
-
-        // Re-throw if it's any other kind of unexpected error
-        throw e;
+    } catch {
+        throw new Error('Failed to decrypt DEK: Invalid key or tampered data');
     }
 }
 
 /**
  * Encrypts raw binary data (Buffer) for file storage
  * @param buffer - The raw data to encrypt
- * @param explicitKey - Optional per-file DEK. If omitted, falls back to Master KEK (for backwards compatibility).
+ * @param dek - Explicit per-file DEK
  */
 export function encryptBuffer(buffer: Buffer, dek: Buffer): { iv: string; authTag: string; encryptedContent: Buffer } {
     const iv = crypto.randomBytes(IV_LENGTH);
@@ -345,7 +463,7 @@ export function createEncryptionStream(dek: Buffer) {
 
     return {
         iv: iv.toString('hex'),
-        cipher, // This is a Transform stream
+        cipher, // Transform stream
         getAuthTag: () => cipher.getAuthTag().toString('hex')
     };
 }
@@ -355,22 +473,43 @@ export function createEncryptionStream(dek: Buffer) {
  * @param encryptedContent - The encrypted buffer
  * @param ivHex - Hex string of the IV
  * @param authTagHex - Hex string of the Auth Tag
- * @param explicitKey - Optional per-file DEK. If omitted, falls back to Master KEK (for backwards compatibility).
+ * @param explicitKey - Optional per-file DEK. If omitted, tries candidate encryption keys.
  */
 export function decryptBuffer(encryptedContent: Buffer, ivHex: string, authTagHex: string, explicitKey?: Buffer): Buffer {
-    const key = explicitKey || getEncryptionKey();
     const iv = Buffer.from(ivHex, 'hex');
     const authTag = Buffer.from(authTagHex, 'hex');
 
-    const decipher = crypto.createDecipheriv(ALGORITHM, key, iv, {
-        authTagLength: AUTH_TAG_LENGTH,
-    });
-    decipher.setAuthTag(authTag);
+    if (explicitKey) {
+        const decipher = crypto.createDecipheriv(ALGORITHM, explicitKey, iv, {
+            authTagLength: AUTH_TAG_LENGTH,
+        });
+        decipher.setAuthTag(authTag);
 
-    return Buffer.concat([
-        decipher.update(encryptedContent),
-        decipher.final(),
-    ]);
+        return Buffer.concat([
+            decipher.update(encryptedContent),
+            decipher.final(),
+        ]);
+    }
+
+    const candidateKeys = getEncryptionKeysForDecryption();
+    let lastErr: Error | null = null;
+    for (const key of candidateKeys) {
+        try {
+            const decipher = crypto.createDecipheriv(ALGORITHM, key, iv, {
+                authTagLength: AUTH_TAG_LENGTH,
+            });
+            decipher.setAuthTag(authTag);
+
+            return Buffer.concat([
+                decipher.update(encryptedContent),
+                decipher.final(),
+            ]);
+        } catch (e: any) {
+            lastErr = e;
+        }
+    }
+
+    throw lastErr || new Error('Failed to decrypt buffer: Invalid key or tampered data');
 }
 
 /**

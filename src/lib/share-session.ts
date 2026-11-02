@@ -12,27 +12,74 @@
 import crypto from 'crypto';
 import { generateSessionId } from '@/lib/crypto';
 
-function getSessionSecret(): string {
-  // Prefer dedicated secret; fall back for migration (never use ENCRYPTION_KEY alone long-term)
-  const secret =
-    process.env.SESSION_HMAC_SECRET ||
-    process.env.NEXTAUTH_SECRET ||
-    process.env.ENCRYPTION_KEY;
+export function getSessionSecret(): string {
+  const secret = process.env.SESSION_HMAC_SECRET?.trim();
   if (!secret) {
-    throw new Error('SESSION_HMAC_SECRET, NEXTAUTH_SECRET, or ENCRYPTION_KEY is required for share sessions');
+    throw new Error(
+      'SESSION_HMAC_SECRET is required for share session signing. ' +
+      'Set a dedicated >=32-char secret that is NOT shared with ENCRYPTION_KEY or other secrets.'
+    );
+  }
+  if (secret.length < 32) {
+    throw new Error('SESSION_HMAC_SECRET must be at least 32 characters');
+  }
+  // Strict cryptographic separation: never reuse encryption keys
+  if (process.env.ENCRYPTION_KEY && secret === process.env.ENCRYPTION_KEY.trim()) {
+    throw new Error('SESSION_HMAC_SECRET must not match ENCRYPTION_KEY');
+  }
+  if (process.env.KEK_KEY && secret === process.env.KEK_KEY.trim()) {
+    throw new Error('SESSION_HMAC_SECRET must not match KEK_KEY');
   }
   return secret;
+}
+
+/**
+ * Returns all secrets that could have signed existing session cookies,
+ * ordered primary-first. Used only during verification so cookies signed
+ * with a previous session secret (key rotation) or NEXTAUTH_SECRET (migration
+ * window before SESSION_HMAC_SECRET was added) remain valid until expiration.
+ *
+ * NOTE: ENCRYPTION_KEY is NEVER used for HMAC session signing.
+ */
+function getSessionVerificationSecrets(): string[] {
+  const primary = getSessionSecret();
+  const secrets = [primary];
+
+  // 1. Safe key rotation support: previous session secret
+  const prevSecret = (process.env.SESSION_HMAC_SECRET_PREVIOUS || process.env.SESSION_HMAC_SECRET_OLD)?.trim();
+  if (prevSecret && prevSecret !== primary && prevSecret.length >= 32) {
+    secrets.push(prevSecret);
+  }
+
+  // 2. Migration compatibility: accept cookies signed with NEXTAUTH_SECRET
+  // prior to SESSION_HMAC_SECRET separation.
+  const nextauth = process.env.NEXTAUTH_SECRET?.trim();
+  if (nextauth && nextauth !== primary && !secrets.includes(nextauth) && nextauth.length >= 32) {
+    secrets.push(nextauth);
+  }
+
+  return secrets;
 }
 
 function sign(payload: string): string {
   return crypto.createHmac('sha256', getSessionSecret()).update(payload).digest('hex');
 }
 
+function verifySignature(payload: string, mac: string): boolean {
+  for (const secret of getSessionVerificationSecrets()) {
+    const expected = crypto.createHmac('sha256', secret).update(payload).digest('hex');
+    if (timingSafeEqualHex(mac, expected)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function timingSafeEqualHex(a: string, b: string): boolean {
   try {
     const ba = Buffer.from(a, 'hex');
     const bb = Buffer.from(b, 'hex');
-    if (ba.length !== bb.length) return false;
+    if (ba.length !== bb.length || ba.length === 0) return false;
     return crypto.timingSafeEqual(ba, bb);
   } catch {
     return false;
@@ -111,8 +158,7 @@ export function verifyShareSession(
     }
 
     const emailNorm = decodeEmailPart(emailPart);
-    const expected = sign(`${shareToken}:${sessionId}:${expiresAt}:${emailNorm}`);
-    if (!timingSafeEqualHex(mac, expected)) {
+    if (!verifySignature(`${shareToken}:${sessionId}:${expiresAt}:${emailNorm}`, mac)) {
       return { valid: false };
     }
 
@@ -131,10 +177,11 @@ export function verifyShareSession(
       return { valid: false };
     }
 
-    const expected = sign(`${shareToken}:${sessionId}:${expiresAt}`);
-    // Also accept MAC that includes empty email (new signer with legacy cookie)
-    const expectedWithEmptyEmail = sign(`${shareToken}:${sessionId}:${expiresAt}:`);
-    if (!timingSafeEqualHex(mac, expected) && !timingSafeEqualHex(mac, expectedWithEmptyEmail)) {
+    // Accept MAC signed with or without trailing empty email (legacy vs new signer)
+    if (
+      !verifySignature(`${shareToken}:${sessionId}:${expiresAt}`, mac) &&
+      !verifySignature(`${shareToken}:${sessionId}:${expiresAt}:`, mac)
+    ) {
       return { valid: false };
     }
 

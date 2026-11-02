@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { authorizeApiRequest } from '@/lib/api-auth';
+import { logger } from '@/lib/logger';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -38,7 +39,7 @@ export async function GET(
 
     return NextResponse.json({ success: true, annotations });
   } catch (err) {
-    console.error('[annotations GET]', err);
+    logger.error('[annotations GET]', err);
     return NextResponse.json({ error: 'Failed to fetch annotations' }, { status: 500 });
   }
 }
@@ -137,7 +138,7 @@ export async function POST(
 
     return NextResponse.json({ success: true, annotation: saved });
   } catch (err) {
-    console.error('[annotations POST]', err);
+    logger.error('[annotations POST]', err);
     return NextResponse.json({ error: 'Failed to save annotation' }, { status: 500 });
   }
 }
@@ -174,7 +175,7 @@ export async function DELETE(
 
     return NextResponse.json({ success: true });
   } catch (err) {
-    console.error('[annotations DELETE]', err);
+    logger.error('[annotations DELETE]', err);
     return NextResponse.json({ error: 'Failed to delete annotation' }, { status: 500 });
   }
 }

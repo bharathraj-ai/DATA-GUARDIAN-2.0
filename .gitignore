@@ -36,8 +36,15 @@ next-env.d.ts
 *.code-workspace
 /src/generated/prisma
 /secure-storage/
+/.secure-storage/
+/storage-vault/
 /prisma/dev.db
 /src/tests/
+/scratch/
+debug*
+test_*
+verify_*
+tsc-errors.txt
 
 # debug
 npm-debug.log*

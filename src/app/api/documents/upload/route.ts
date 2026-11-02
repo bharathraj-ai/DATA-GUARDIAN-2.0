@@ -1,18 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
+import crypto from 'crypto';
 import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import {
   saveDocument,
   getMimeType,
-  getFileExtension,
   ensureStorageDirectories,
+  deleteDocumentFiles,
 } from '@/lib/storage/secureStorage';
 import { hasRolePermission } from '@/lib/security/rbac';
 import { logDocumentEvent, extractRequestInfo } from '@/lib/security/auditLog';
 import { validateMagicBytesForExtension } from '@/lib/file-magic';
 import { getDbUserRole } from '@/lib/security/roles';
 import { checkUploadRateLimit, extractClientIP } from '@/lib/rate-limit';
+import { sanitizeFileName } from '@/lib/security/filename';
 import { headers } from 'next/headers';
+import { logger } from '@/lib/logger';
 
 /**
  * POST /api/documents/upload
@@ -23,26 +26,34 @@ import { headers } from 'next/headers';
  *   1. Validate session (must be authenticated)
  *   2. Check RBAC (must have 'upload' permission — OWNER role)
  *   3. Parse multipart form data
- *   4. Save file to secure storage
- *   5. Create Document record in DB
- *   6. Log upload event
- *   7. Return document metadata
- *
- * Body: multipart/form-data with fields:
- *   - file: The document file
- *   - classification: Optional ("PUBLIC" | "INTERNAL" | "CONFIDENTIAL" | "RESTRICTED")
+ *   4. Sanitize filename on the server (SV-01)
+ *   5. Validate magic bytes against extension
+ *   6. Secure File Storage Phase (DL-01):
+ *      - File is written to disk BEFORE database record creation
+ *      - Uses unique documentId per upload (concurrency safe)
+ *      - If disk write fails, clean up temp files & return error (no DB record created)
+ *   7. Database Phase (DL-01):
+ *      - Insert Document record with finalized storagePath
+ *      - If DB insert fails, rollback physical file immediately (prevent orphaned files)
+ *   8. Log upload event
+ *   9. Return document metadata
  */
 
-const MAX_FILE_SIZE = 100 * 1024 * 1024; // 20 MB (Reduced temporarily for ByteA survivability)
+const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100 MB max
 
 const ALLOWED_EXTENSIONS = new Set([
   'docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt',
   'odt', 'ods', 'odp', 'pdf', 'csv', 'txt', 'rtf',
 ]);
 
+const VALID_CLASSIFICATIONS = new Set(['PUBLIC', 'INTERNAL', 'CONFIDENTIAL', 'RESTRICTED']);
+
 export async function POST(request: NextRequest) {
+  let createdDocumentId: string | null = null;
+  let fileSavedOnDisk = false;
+
   try {
-    // ── Auth check ──────────────────────────────────────────────
+    // ── 1. Auth check ──────────────────────────────────────────────
     const session = await auth();
     if (!session?.user?.id) {
       return NextResponse.json(
@@ -58,7 +69,7 @@ export async function POST(request: NextRequest) {
     }
     const userRole = dbRole.role;
 
-    // ── RBAC check (Postgres role — never JWT) ──────────────────
+    // ── 2. RBAC check (Postgres role — never JWT) ──────────────────
     if (!hasRolePermission(userRole, 'upload')) {
       return NextResponse.json(
         { error: 'You do not have permission to upload documents' },
@@ -66,7 +77,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // ── Rate Limit check ─────────────────────────────────────────
+    // ── 3. Rate Limit check ─────────────────────────────────────────
     const requestHeaders = await headers();
     const clientIP = extractClientIP(requestHeaders);
     const rateLimit = await checkUploadRateLimit(clientIP);
@@ -77,7 +88,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // ── Parse form data ─────────────────────────────────────────
+    // ── 4. Parse form data ─────────────────────────────────────────
     const formData = await request.formData();
     const file = formData.get('file') as File | null;
     const classification = (formData.get('classification') as string) || 'INTERNAL';
@@ -89,7 +100,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // ── Validate file ───────────────────────────────────────────
+    // ── 5. Validate file size ──────────────────────────────────────
     if (file.size > MAX_FILE_SIZE) {
       return NextResponse.json(
         { error: `File too large. Maximum size: ${MAX_FILE_SIZE / 1024 / 1024}MB` },
@@ -97,26 +108,30 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const fileExtension = getFileExtension(file.name);
-    if (!ALLOWED_EXTENSIONS.has(fileExtension)) {
+    // ── 6. Sanitize filename on the server (SV-01) ─────────────────
+    // Strips path traversal, CRLF, null bytes, control characters, and enforces length.
+    // Validates extension against whitelist before preservation.
+    let sanitized;
+    try {
+      sanitized = sanitizeFileName(file.name, ALLOWED_EXTENSIONS);
+    } catch (err: any) {
       return NextResponse.json(
-        { error: `File type '.${fileExtension}' is not allowed` },
+        { error: err.message || 'Invalid file name or extension' },
         { status: 400 }
       );
     }
 
+    const { sanitizedFileName, extension: fileExtension } = sanitized;
+
     // Validate classification
-    const validClassifications = ['PUBLIC', 'INTERNAL', 'CONFIDENTIAL', 'RESTRICTED'];
-    if (!validClassifications.includes(classification)) {
+    if (!VALID_CLASSIFICATIONS.has(classification)) {
       return NextResponse.json(
         { error: 'Invalid classification level' },
         { status: 400 }
       );
     }
 
-    // ── Save to secure storage ──────────────────────────────────
-    await ensureStorageDirectories();
-
+    // ── 7. Validate magic bytes against declared extension ─────────
     const fileBuffer = Buffer.from(await file.arrayBuffer());
 
     if (!validateMagicBytesForExtension(fileBuffer, fileExtension)) {
@@ -126,29 +141,62 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create document record first to get the ID
-    const document = await prisma.document.create({
-      data: {
-        fileName: file.name,
-        fileType: fileExtension,
-        mimeType: getMimeType(fileExtension),
-        storagePath: '', // Will update after saving
-        fileSize: file.size,
-        ownerId: userId,
-        classification,
-      },
-    });
+    // ── 8. Secure Storage Phase (DL-01) ─────────────────────────────
+    // Requirement: Prevent database records from being created before successful file storage.
+    // Concurrency guarantee: documentId is unique UUIDv4 per upload, preventing race condition collisions.
+    const documentId = crypto.randomUUID();
+    createdDocumentId = documentId;
 
-    // Save file using document ID as directory name
-    const { storagePath } = await saveDocument(document.id, file.name, fileBuffer);
+    let savedStoragePath: string;
+    try {
+      await ensureStorageDirectories();
+      const saved = await saveDocument(documentId, sanitizedFileName, fileBuffer);
+      savedStoragePath = saved.storagePath;
+      fileSavedOnDisk = true;
+    } catch (storageError) {
+      logger.error('[UPLOAD] File storage write failed:', storageError);
+      // Clean up any partially created temporary files / directories
+      try {
+        await deleteDocumentFiles(documentId);
+      } catch {}
+      return NextResponse.json(
+        { error: 'Failed to write document to storage' },
+        { status: 500 }
+      );
+    }
 
-    // Update storage path
-    await prisma.document.update({
-      where: { id: document.id },
-      data: { storagePath },
-    });
+    // ── 9. Database Phase (DL-01) ──────────────────────────────────
+    // File is securely and completely written to disk. Now create DB record with full storagePath.
+    let document;
+    try {
+      document = await prisma.document.create({
+        data: {
+          id: documentId,
+          fileName: sanitizedFileName,
+          fileType: fileExtension,
+          mimeType: getMimeType(fileExtension),
+          storagePath: savedStoragePath,
+          fileSize: file.size,
+          ownerId: userId,
+          classification,
+        },
+      });
+    } catch (dbError) {
+      logger.error('[UPLOAD] Database record creation failed, cleaning up stored file:', dbError);
+      // Requirement: Prevent orphaned physical files when DB operations fail
+      try {
+        await deleteDocumentFiles(documentId);
+        fileSavedOnDisk = false;
+      } catch (cleanupErr) {
+        logger.error('[UPLOAD] Failed to rollback stored file after DB error:', cleanupErr);
+      }
+      return NextResponse.json(
+        { error: 'Failed to record document metadata' },
+        { status: 500 }
+      );
+    }
 
-    // ── Audit log ───────────────────────────────────────────────
+    // ── 10. Audit log ───────────────────────────────────────────────
     const { ipAddress, userAgent } = extractRequestInfo(request);
     logDocumentEvent({
       documentId: document.id,
@@ -157,15 +205,15 @@ export async function POST(request: NextRequest) {
       ipAddress,
       userAgent,
       metadata: {
-        fileName: file.name,
-        fileSize: file.size,
-        fileType: fileExtension,
-        classification,
-        virusScan: 'pending_hook', // Wire async ClamAV / cloud scanner in worker queue
+        fileName: document.fileName,
+        fileSize: document.fileSize,
+        fileType: document.fileType,
+        classification: document.classification,
+        virusScan: 'pending_hook',
       },
     });
 
-    // ── Response ────────────────────────────────────────────────
+    // ── 11. Response ────────────────────────────────────────────────
     return NextResponse.json({
       success: true,
       document: {
@@ -178,7 +226,13 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error('[UPLOAD] Error uploading document:', error);
+    logger.error('[UPLOAD] Error uploading document:', error);
+    // Safety recovery: clean up any physical file if created
+    if (createdDocumentId && fileSavedOnDisk) {
+      try {
+        await deleteDocumentFiles(createdDocumentId);
+      } catch {}
+    }
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

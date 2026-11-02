@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { decryptBuffer, decryptDek } from '@/lib/crypto';
 import { authorizeApiRequest } from '@/lib/api-auth';
+import { logger } from '@/lib/logger';
 
 function bytesToDataUrl(bytes: Buffer, mimeType: string): string {
   return `data:${mimeType};base64,${bytes.toString('base64')}`;
@@ -70,7 +71,7 @@ export async function GET(
       },
     );
   } catch (err) {
-    console.error('[stream] error:', err);
+    logger.error('[stream] error:', err);
     return NextResponse.json({ error: 'Failed to stream file' }, { status: 500 });
   }
 }

@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma';
+import { logger } from '@/lib/logger';
 
 /**
  * Document Audit Logging System
@@ -43,7 +44,7 @@ export async function logDocumentEvent(entry: AuditLogEntry): Promise<void> {
     });
   } catch (error) {
     // Never let audit logging break the main flow
-    console.error('[AUDIT] Failed to log document event:', error);
+    logger.error('[AUDIT] Failed to log document event', error);
   }
 }
 
@@ -63,7 +64,7 @@ export async function logDocumentEvents(entries: AuditLogEntry[]): Promise<void>
       })),
     });
   } catch (error) {
-    console.error('[AUDIT] Failed to batch log document events:', error);
+    logger.error('[AUDIT] Failed to batch log document events', error);
   }
 }
 

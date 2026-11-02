@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { auth } from '@/lib/auth';
 import { executeCleanup, executeSingleLinkCleanup, type CleanupResult } from '@/lib/cleanup-core';
 import { requireOwnerRole } from '@/lib/security/roles';
+import { logger } from '@/lib/logger';
 
 /**
  * Bulk purge expired/revoked links. OWNER-only (DB role).
@@ -27,7 +28,7 @@ export async function cleanupExpiredData(): Promise<CleanupResult> {
 
         return await executeCleanup({ ownerId: session.user.id });
     } catch (error) {
-        console.error('Action cleanup error:', error instanceof Error ? error.message : 'Unknown');
+        logger.error('Action cleanup error:', error);
         return {
             success: false,
             deletedLinks: 0,
@@ -71,7 +72,7 @@ export async function cleanupSingleLink(token: string): Promise<{ success: boole
 
         return await executeSingleLinkCleanup(token);
     } catch (error) {
-        console.error('Single link cleanup error:', error instanceof Error ? error.message : 'Unknown');
+        logger.error('Single link cleanup error:', error);
         return { success: false, error: 'Cleanup failed' };
     }
 }

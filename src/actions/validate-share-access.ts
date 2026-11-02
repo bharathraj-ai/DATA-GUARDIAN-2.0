@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { auth } from '@/lib/auth';
 import { executeSingleLinkCleanup } from '@/lib/cleanup-core';
 import { checkLinkRateLimit } from '@/lib/rate-limit';
+import { logger } from '@/lib/logger';
 
 export type ValidateShareAccessResult = {
     allowed: boolean;
@@ -167,7 +168,7 @@ export async function validateShareAccess(token: string): Promise<ValidateShareA
         // All checks passed
         return { allowed: true, requiresAuth: false, needsFreshOtp };
     } catch (error) {
-        console.error('Error validating share access:', error instanceof Error ? error.message : 'Unknown');
+        logger.error('Error validating share access', error);
         return {
             allowed: false,
             requiresAuth: false,

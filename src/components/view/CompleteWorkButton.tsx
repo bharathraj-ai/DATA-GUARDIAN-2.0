@@ -1,36 +1,49 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useState } from 'react';
 import { completeWork } from '@/actions/complete-work';
 import { CheckCircle2, Check, Loader2 } from 'lucide-react';
 import styles from './vaultDock.module.css';
-import { markInternalNavigation } from './sudden-exit-client';
+import { markInternalNavigation, markWorkCompleted } from './sudden-exit-client';
 
 export function CompleteWorkButton({ token }: { token: string }) {
     const [isLoading, setIsLoading] = useState(false);
     const [isSuccess, setIsSuccess] = useState(false);
-    const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-    useEffect(() => () => {
-        if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
-    }, []);
 
     const handleComplete = async () => {
         setIsLoading(true);
+        // Pre-arm flags before network call so background SSE, blur, or visibility checks know work is completing
+        markWorkCompleted();
+        markInternalNavigation();
+
         try {
             const res = await completeWork(token);
             if (res.success) {
-                setIsSuccess(true);
+                markWorkCompleted();
                 markInternalNavigation();
-                if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
-                reloadTimerRef.current = setTimeout(() => {
-                    window.location.reload();
-                }, 2000);
+                setIsSuccess(true);
+                window.dispatchEvent(new CustomEvent('dg:work-completed', { detail: { token } }));
             } else {
+                try {
+                    sessionStorage.removeItem('dg:work-completed');
+                } catch {
+                    /* ignore */
+                }
+                if (typeof window !== 'undefined') {
+                    (window as Window & { __DG_WORK_COMPLETED__?: boolean }).__DG_WORK_COMPLETED__ = false;
+                }
                 alert(res.error || 'Failed to complete work.');
             }
         } catch (err) {
             console.error('Error completing work:', err);
+            try {
+                sessionStorage.removeItem('dg:work-completed');
+            } catch {
+                /* ignore */
+            }
+            if (typeof window !== 'undefined') {
+                (window as Window & { __DG_WORK_COMPLETED__?: boolean }).__DG_WORK_COMPLETED__ = false;
+            }
             alert('An error occurred.');
         } finally {
             setIsLoading(false);

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authorizeApiRequest } from '@/lib/api-auth';
 import { decryptUserFileBytes } from '@/lib/decrypt-user-file';
+import { logger } from '@/lib/logger';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -59,7 +60,7 @@ export async function GET(
             },
         });
     } catch (err) {
-        console.error('[raw] decrypt error:', err);
+        logger.error('[raw] decrypt error:', err);
         return NextResponse.json({ error: 'Failed to decrypt file' }, { status: 500 });
     }
 }

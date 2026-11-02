@@ -1,9 +1,11 @@
 'use server';
 
+import { prisma } from '@/lib/prisma';
 import { decryptData } from '@/lib/crypto';
 import { maskEmail, maskPhone } from '@/lib/masking';
 import { executeSingleLinkCleanup } from '@/lib/cleanup-core';
 import { authorizeSecureLink, CapabilityFlags } from '@/lib/linkAuthorization';
+import { logger } from '@/lib/logger';
 
 // Decrypted user data type
 interface DecryptedUserData {
@@ -52,7 +54,7 @@ export type GetUserDataResult = {
     success: boolean;
     data?: MaskedUserData;
     error?: string;
-    errorType?: 'EXPIRED' | 'NOT_FOUND' | 'NOT_VERIFIED' | 'SESSION_INVALID' | 'REVOKED';
+    errorType?: 'EXPIRED' | 'NOT_FOUND' | 'NOT_VERIFIED' | 'SESSION_INVALID' | 'REVOKED' | 'COMPLETED';
 };
 
 /**
@@ -72,6 +74,37 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
             includeUserData: true,
         });
         if (!authResult.success) {
+            try {
+                const linkStatus = await prisma.secureLink.findUnique({
+                    where: { token },
+                    select: {
+                        isRevoked: true,
+                        VendorAccess: {
+                            select: { status: true },
+                        },
+                        AuditLog: {
+                            where: { action: 'VENDOR_COMPLETED_WORK' },
+                            take: 1,
+                            select: { id: true },
+                        },
+                    },
+                });
+
+                const isCompleted =
+                    linkStatus?.VendorAccess.some((v) => v.status === 'completed') ||
+                    (linkStatus?.AuditLog && linkStatus.AuditLog.length > 0);
+
+                if (isCompleted) {
+                    return {
+                        success: false,
+                        error: 'This assignment has been completed and all files were delivered to the owner.',
+                        errorType: 'COMPLETED',
+                    };
+                }
+            } catch {
+                /* fall back to normal error mapping */
+            }
+
             const err = authResult.error.toLowerCase();
             return {
                 success: false,
@@ -110,8 +143,8 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
         let decryptedData: DecryptedUserData;
         try {
             decryptedData = decryptData<DecryptedUserData>(encryptedData);
-        } catch {
-            console.error('Decryption failed');
+        } catch (decErr) {
+            logger.error('Decryption failed', decErr);
             return {
                 success: false,
                 error: 'Failed to decrypt data. The encryption key may have changed.',
@@ -172,7 +205,7 @@ export async function getUserData(token: string): Promise<GetUserDataResult> {
             },
         };
     } catch (error) {
-        console.error('Error getting user data:', error instanceof Error ? error.message : 'Unknown');
+        logger.error('Error getting user data:', error);
         return {
             success: false,
             error: 'Failed to retrieve data. Please try again.',

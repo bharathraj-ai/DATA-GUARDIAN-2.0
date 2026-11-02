@@ -34,6 +34,7 @@ async function runCleanup(request: Request) {
         deletedFiles: result.deletedFiles,
         deletedMongoFiles: result.deletedMongoFiles,
         deletedAuditLogs: result.deletedAuditLogs,
+        deletedOrphanFiles: result.deletedOrphanFiles ?? 0,
       },
       { headers },
     );

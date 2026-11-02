@@ -87,17 +87,8 @@ export async function GET(
 
     // Determine current user's level
     let userLevel = 2;
-    // SEC-3: vendor identity from signed session first; encrypted cookie only (no plaintext)
-    const rawVendorEmailCookie = request.cookies.get('vendor_email')?.value;
-    let vendorEmail: string | undefined = verified.vendorEmail || undefined;
-    if (!vendorEmail && rawVendorEmailCookie) {
-        try {
-            const decoded = decryptData<{ email: string }>(rawVendorEmailCookie);
-            vendorEmail = decoded.email;
-        } catch {
-            vendorEmail = undefined;
-        }
-    }
+    // SV-05: Trust ONLY cryptographically verified identity from signed share session (verified.vendorEmail)
+    const vendorEmail: string | undefined = verified.vendorEmail || undefined;
     if (vendorEmail && secureLink.VendorAccess) {
         const vendor = secureLink.VendorAccess.find(v => v.email === vendorEmail!.toLowerCase());
         if (vendor) userLevel = vendor.level;
@@ -302,10 +293,23 @@ export async function GET(
                     }
 
                     if (!link || link.isRevoked) {
-                        safeEnqueue(encoder.encode(`data: ${JSON.stringify({ type: 'revoked' })}\n\n`));
+                        let eventType = 'revoked';
+                        try {
+                            const completedVendor = await prisma.vendorAccess.findFirst({
+                                where: { secureLinkId: link?.id, status: 'completed' },
+                                select: { id: true },
+                            });
+                            if (completedVendor) {
+                                eventType = 'completed';
+                            }
+                        } catch {
+                            /* fallback to revoked */
+                        }
+
+                        safeEnqueue(encoder.encode(`data: ${JSON.stringify({ type: eventType })}\n\n`));
                         clearInterval(heartbeatInterval);
                         safeClose();
-                        await logSessionEnd('revoked');
+                        await logSessionEnd(eventType);
                         executeSingleLinkCleanup(token).catch(() => { });
                         return;
                     }

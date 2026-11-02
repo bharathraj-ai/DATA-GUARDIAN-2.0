@@ -1,10 +1,11 @@
 import { cookies } from 'next/headers';
 import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
-import { trySseAccessCheck } from '@/lib/redis-helpers';
+import { trySseAccessCheck, trySetRevoked } from '@/lib/redis-helpers';
 import { decryptData } from '@/lib/crypto';
 import { Prisma } from '@prisma/client';
 import { verifyShareSession } from '@/lib/share-session';
+import { logger } from '@/lib/logger';
 
 export type CapabilityFlags = {
   canEdit: boolean;
@@ -152,15 +153,15 @@ export async function authorizeSecureLink(
   try {
     const access = await trySseAccessCheck(token, sessionId);
     if (access === 'revoked') {
-      console.warn('[SECURITY] Access blocked: token confirmed revoked in Redis cache');
+      logger.securityEvent('ACCESS_BLOCKED_REVOKED', { token });
       return { success: false, status: 403, error: 'Forbidden: Access revoked' };
     }
     if (access === 'invalid') {
-      console.warn('[SECURITY] Access blocked: session explicitly invalid in Redis cache');
+      logger.securityEvent('ACCESS_BLOCKED_INVALID_SESSION', { token });
       return { success: false, status: 401, error: 'Unauthorized: Session invalid or expired' };
     }
   } catch (err) {
-    console.error('[SECURITY] Exception during session validation:', err);
+    logger.error('[SECURITY] Exception during session validation', err);
     return { success: false, status: 401, error: 'Authentication infrastructure unavailable' };
   }
 
@@ -248,25 +249,19 @@ export async function authorizeSecureLink(
   }
 
   if (secureLink.isRevoked || secureLink.expiresAt < new Date()) {
+    if (secureLink.isRevoked) {
+      void trySetRevoked(token);
+    }
     return { success: false, status: 403, error: 'Forbidden: Link has expired or been revoked' };
   }
 
   const authSession = await auth();
   const sessionEmail = normalizeEmail(authSession?.user?.email);
-  // Identity: prefer MAC-bound email from share session; never accept plaintext vendor_email cookie.
-  // Encrypted vendor_email cookie is legacy fallback only when decrypt succeeds.
-  const rawCookieEmail = cookieStore.get('vendor_email')?.value;
-  let cookieEmail: string | null = null;
-  if (rawCookieEmail) {
-    try {
-      const decoded = decryptData<{ email: string }>(rawCookieEmail);
-      cookieEmail = normalizeEmail(decoded.email);
-    } catch {
-      // Reject plaintext spoof — encrypted cookies contain ':' separators
-      cookieEmail = null;
-    }
-  }
-  const effectiveEmail = signedVendorEmail || cookieEmail || sessionEmail;
+  // SV-05: Identity resolution trusts ONLY cryptographically verified identities:
+  // 1. MAC-bound vendor email from signed share session (HMAC-SHA256 verified)
+  // 2. NextAuth authenticated session email
+  // The unauthenticated / un-bound vendor_email cookie fallback is removed.
+  const effectiveEmail = signedVendorEmail || sessionEmail;
   const isOwner = authSession?.user?.id !== undefined && authSession.user.id === secureLink.ownerId;
 
   // Active session binding: if any vendor holds an activeSessionId, cookie must match

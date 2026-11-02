@@ -79,6 +79,7 @@ export async function takeBreak(
             return { success: false, error: 'Vendor access not found', errorType: 'UNAUTHORIZED' };
         }
 
+        const vendorId = vendorAccess.id;
         const breaksUsed = vendorAccess.breaksUsed ?? 0;
         const allowedBreaks = vendorAccess.allowedBreaks ?? 0;
         const draftVersion = vendorAccess.draftVersion ?? 1;
@@ -104,12 +105,41 @@ export async function takeBreak(
             };
         }
 
+        const { sendOTPEmailWithRetry, isEmailConfigured } = await import('@/lib/email');
+        if (!isEmailConfigured()) {
+            logger.error('[EMAIL] Not configured — cannot take break');
+            return {
+                success: false,
+                error: 'Email delivery is not configured on the server. Cannot start break.',
+                errorType: 'GENERIC',
+            };
+        }
+
         const newOtp = generateOTP();
         const newOtpHash = await hashOTP(newOtp);
         const now = new Date();
         const draft = slimDraft(payload.lastSavedWork);
         const shouldSaveDraft = payload.draftVersion >= draftVersion && draft !== undefined;
         const emailLower = vendorEmail.toLowerCase();
+
+        // Capture previous state for safe rollback if email delivery fails (DL-05)
+        const currentVendor = await prisma.vendorAccess.findUnique({
+            where: { id: vendorAccess.id },
+            select: {
+                otpHash: true,
+                currentOtpHash: true,
+                currentOtpCreatedAt: true,
+                currentOtpExpiresAt: true,
+                breakStartedAt: true,
+            },
+        });
+
+        const previousOtpHash = currentVendor?.otpHash ?? null;
+        const previousCurrentOtpHash = currentVendor?.currentOtpHash ?? null;
+        const previousCurrentOtpCreatedAt = currentVendor?.currentOtpCreatedAt ?? null;
+        const previousCurrentOtpExpiresAt = currentVendor?.currentOtpExpiresAt ?? null;
+        const previousStatus = vendorAccess.status;
+        const previousBreakStartedAt = currentVendor?.breakStartedAt ?? null;
 
         try {
             await prisma.$transaction(async (tx) => {
@@ -217,6 +247,68 @@ export async function takeBreak(
         const remainingMs = secureLink.expiresAt.getTime() - Date.now();
         const validityMinutes = Math.max(1, Math.min(10, Math.floor(remainingMs / 60000)));
 
+        async function revertBreakState() {
+            try {
+                await prisma.$transaction(async (tx) => {
+                    await tx.vendorAccess.update({
+                        where: { id: vendorId },
+                        data: {
+                            breaksUsed: { decrement: 1 },
+                            otpHash: previousOtpHash,
+                            currentOtpHash: previousCurrentOtpHash,
+                            currentOtpCreatedAt: previousCurrentOtpCreatedAt,
+                            currentOtpExpiresAt: previousCurrentOtpExpiresAt,
+                            status: previousStatus,
+                            breakStartedAt: previousBreakStartedAt,
+                        },
+                    });
+
+                    await tx.linkAccess.updateMany({
+                        where: {
+                            secureLinkId: secureLink.id,
+                            vendorEmail: { equals: emailLower, mode: 'insensitive' },
+                        },
+                        data: {
+                            otpHash: previousOtpHash,
+                        },
+                    });
+
+                    await tx.otpHistory.updateMany({
+                        where: { vendorAccessId: vendorId, otpHash: newOtpHash },
+                        data: {
+                            status: 'DELIVERY_FAILED',
+                            invalidatedAt: new Date(),
+                            reason: 'DELIVERY_FAILED',
+                        },
+                    });
+
+                    if (previousCurrentOtpHash) {
+                        await tx.otpHistory.updateMany({
+                            where: { vendorAccessId: vendorId, otpHash: previousCurrentOtpHash },
+                            data: {
+                                status: 'ACTIVE',
+                                invalidatedAt: null,
+                            },
+                        });
+                    }
+
+                    await tx.auditLog.create({
+                        data: {
+                            action: 'BREAK_DELIVERY_FAILED',
+                            linkId: secureLink.id,
+                            reason: 'Break resume email failed to deliver; reverted break rotation',
+                            metadata: JSON.stringify({
+                                vendorEmail: redactEmail(vendorEmail),
+                                reverted: true,
+                            }),
+                        },
+                    });
+                });
+            } catch (revertErr) {
+                logger.error('[REVERT FAILED] Reverting break state failed:', revertErr);
+            }
+        }
+
         runAfterResponse(async () => {
             if (endingSessionId) {
                 try {
@@ -234,15 +326,17 @@ export async function takeBreak(
                 const { sendOTPEmail, isEmailConfigured } = await import('@/lib/email');
                 if (!isEmailConfigured()) {
                     logger.error('[EMAIL] Not configured — break OTP email not sent');
+                    await revertBreakState();
                     return;
                 }
                 await sendOTPEmail(vendorEmail, token, newOtp, validityMinutes);
                 logger.info(`Break OTP sent to ${redactEmail(vendorEmail)}`);
             } catch (err) {
                 logger.error(
-                    'Failed to send break OTP email:',
+                    'Failed to send break OTP email after retries — reverting break rotation:',
                     err instanceof Error ? err.message : 'Unknown',
                 );
+                await revertBreakState();
             }
         });
 

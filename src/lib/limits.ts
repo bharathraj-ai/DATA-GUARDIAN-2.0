@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/prisma';
 import redis from '@/lib/redis';
 import { Prisma } from '@prisma/client';
+import { logger } from '@/lib/logger';
 
 /**
  * Ensures Redis is configured and available
@@ -22,8 +23,50 @@ export interface LimitCheckResult {
 }
 
 /**
- * Atomically increments a usage counter and checks against a maximum limit.
- * Redis INCR when available; Serializable Postgres claim when not.
+ * Atomic Lua script to initialize and increment counters safely (DL-04).
+ * - If key exists and current >= maxLimit: denies immediately without incrementing.
+ * - If key exists and current < maxLimit: atomically increments and refreshes TTL.
+ * - If key does not exist and initCount < 0: returns {-1, 0} to trigger DB count.
+ * - If key does not exist and initCount >= 0: initializes with DB count + 1 (or rejects if count >= maxLimit).
+ * - If another concurrent request initialized the key in the interim, it safely uses the existing value.
+ */
+const ATOMIC_LIMIT_LUA = `
+local key = KEYS[1]
+local maxLimit = tonumber(ARGV[1])
+local ttl = tonumber(ARGV[2])
+local initCount = ARGV[3] and tonumber(ARGV[3]) or -1
+
+local current = redis.call('GET', key)
+
+if current == false then
+    if initCount < 0 then
+        return {-1, 0}
+    end
+    if initCount >= maxLimit then
+        redis.call('SET', key, initCount, 'EX', ttl)
+        return {0, initCount}
+    end
+    local nextVal = initCount + 1
+    redis.call('SET', key, nextVal, 'EX', ttl)
+    return {1, nextVal}
+else
+    local val = tonumber(current)
+    if val >= maxLimit then
+        return {0, val}
+    end
+    local nextVal = redis.call('INCR', key)
+    local curTtl = redis.call('TTL', key)
+    if curTtl == -1 then
+        redis.call('EXPIRE', key, ttl)
+    end
+    return {1, nextVal}
+end
+`;
+
+/**
+ * Atomically increments a usage counter and checks against a maximum limit (DL-04).
+ * Uses Redis Lua scripting for atomic check-and-increment when available;
+ * Serializable Postgres transaction claim when Redis is unavailable.
  */
 export async function incrementAndCheckLimit(
     linkId: string,
@@ -47,33 +90,47 @@ export async function incrementAndCheckLimit(
     const key = `${type}:${linkId}`;
 
     try {
-        const exists = await redis.exists(key);
+        // Step 1: Probe / Atomic increment if key already exists
+        let raw = await redis.eval(
+            ATOMIC_LIMIT_LUA,
+            [key],
+            [maxLimit, ttlSeconds, -1]
+        ) as unknown;
 
-        if (!exists) {
+        let [allowedCode, currentCount] = Array.isArray(raw)
+            ? raw.map(Number)
+            : [Number(raw), 0];
+
+        // Step 2: If key does not exist (-1), fetch historical count from DB and initialize atomically
+        if (allowedCode === -1) {
             const actionType = type === 'view' ? 'ACCESSED' : 'VENDOR_DOWNLOADED_FILE';
             const count = await prisma.auditLog.count({
                 where: { linkId, action: actionType },
             });
-            await redis.set(key, count, { nx: true, ex: ttlSeconds });
+
+            raw = await redis.eval(
+                ATOMIC_LIMIT_LUA,
+                [key],
+                [maxLimit, ttlSeconds, count]
+            ) as unknown;
+
+            [allowedCode, currentCount] = Array.isArray(raw)
+                ? raw.map(Number)
+                : [Number(raw), 0];
         }
 
-        const currentCount = await redis.incr(key);
-        if (currentCount === 1) {
-            await redis.expire(key, ttlSeconds);
-        }
-
-        if (currentCount > maxLimit) {
-            await redis.decr(key);
+        const allowed = allowedCode === 1;
+        if (!allowed) {
             return {
                 allowed: false,
                 error: `Maximum ${type} limit reached`,
-                currentCount: currentCount - 1,
+                currentCount,
             };
         }
 
         return { allowed: true, currentCount };
     } catch (error) {
-        console.error(`[LIMITS] Error checking ${type} limit for ${linkId}:`, error);
+        logger.error(`[LIMITS] Error checking ${type} limit for ${linkId}`, error);
         return atomicDbLimitCheck(linkId, type, maxLimit);
     }
 }
@@ -126,7 +183,7 @@ async function atomicDbLimitCheck(
         );
     } catch (dbError) {
         // Serialization conflict → fail closed
-        console.error('[LIMITS] Atomic DB limit check failed:', dbError);
+        logger.error('[LIMITS] Atomic DB limit check failed', dbError);
         return { allowed: false, error: 'Limit check busy — retry', currentCount: 0 };
     }
 }

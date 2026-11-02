@@ -11,11 +11,59 @@ const nextConfig: NextConfig = {
   productionBrowserSourceMaps: false,
   reactStrictMode: true,
   compiler: {
-    removeConsole: isProd ? { exclude: ['error', 'warn'] } : false,
+    removeConsole: isProd ? { exclude: ['error', 'warn', 'info'] } : false,
   },
 
   typescript: {
     ignoreBuildErrors: false,
+  },
+
+  outputFileTracingRoot: path.join(__dirname),
+
+  // Prevent secret files, tests, scratch scripts, and developer artifacts from entering standalone builds
+  outputFileTracingExcludes: {
+    '*': [
+      './.env*',
+      '**/.env*',
+      './tests/**',
+      '**/tests/**',
+      './scratch/**',
+      '**/scratch/**',
+      './*.md',
+      '**/README.md',
+      './debug*',
+      '**/debug*',
+      './test_*',
+      '**/test_*',
+      './verify_*',
+      '**/verify_*',
+      './tsc-errors.txt',
+      '**/tsc-errors.txt',
+      './package-lock.json',
+      '**/node_modules/typescript/**',
+      '**/node_modules/@esbuild/**',
+    ],
+    '**/*': [
+      './.env*',
+      '**/.env*',
+      './tests/**',
+      '**/tests/**',
+      './scratch/**',
+      '**/scratch/**',
+      './*.md',
+      '**/README.md',
+      './debug*',
+      '**/debug*',
+      './test_*',
+      '**/test_*',
+      './verify_*',
+      '**/verify_*',
+      './tsc-errors.txt',
+      '**/tsc-errors.txt',
+      './package-lock.json',
+      '**/node_modules/typescript/**',
+      '**/node_modules/@esbuild/**',
+    ],
   },
 
   // Keep heavy native/CJS packages out of the bundler graph → faster compiles
@@ -92,36 +140,6 @@ const nextConfig: NextConfig = {
           ...(isProd
             ? [{ key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains; preload' }]
             : []),
-          {
-            key: 'Content-Security-Policy',
-            value: [
-              "default-src 'self'",
-              `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
-              "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-              "font-src 'self' https://fonts.gstatic.com",
-              "img-src 'self' data: blob: https://lh3.googleusercontent.com https://avatars.githubusercontent.com",
-              "connect-src 'self' https://*.upstash.io https://*.neon.tech",
-              // Vendor PDF preview uses blob:/data: iframes (FileList + SecurePDFViewer)
-              "frame-src 'self' blob: data:",
-              "frame-ancestors 'none'",
-              "base-uri 'self'",
-              "form-action 'self'",
-              "object-src 'none'",
-            ].join('; '),
-          },
-        ],
-      },
-      // ONLYOFFICE editor — CSP allowing ONLYOFFICE iframe + local PDF blob preview
-      {
-        source: '/editor/:path*',
-        headers: [
-          {
-            key: 'Content-Security-Policy',
-            value: [
-              `frame-src 'self' blob: data: ${process.env.ONLYOFFICE_SERVER_URL || 'http://localhost:8080'}`,
-              `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""} ${process.env.ONLYOFFICE_SERVER_URL || 'http://localhost:8080'}`,
-            ].join('; '),
-          },
         ],
       },
       ...(isProd

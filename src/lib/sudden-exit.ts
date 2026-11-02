@@ -250,11 +250,11 @@ export async function suddenBrowserExit(
         }
 
         try {
-            const { sendOTPEmail, isEmailConfigured } = await import('@/lib/email');
+            const { sendOTPEmailWithRetry, isEmailConfigured } = await import('@/lib/email');
             if (isEmailConfigured()) {
                 const remainingMs = secureLink.expiresAt.getTime() - Date.now();
                 const validityMinutes = Math.max(1, Math.floor(remainingMs / 60000));
-                await sendOTPEmail(
+                await sendOTPEmailWithRetry(
                     vendorEmail,
                     token,
                     newOtp,

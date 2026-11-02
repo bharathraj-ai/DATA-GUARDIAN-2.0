@@ -270,9 +270,9 @@ export async function invalidateSession(
         pipeline.del(`${SESSION_PREFIX}${token}:${legacyActiveId}`);
     }
 
-    // If permanent revoke, set a revoked marker (24 hour TTL as cleanup)
+    // If permanent revoke, set a revoked marker (DL-03: permanent marker, no TTL)
     if (permanentRevoke) {
-        pipeline.set(`${REVOKED_PREFIX}${token}`, '1', { ex: 86400 });
+        pipeline.set(`${REVOKED_PREFIX}${token}`, '1');
     }
 
     await pipeline.exec();

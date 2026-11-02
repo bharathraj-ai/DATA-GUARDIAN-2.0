@@ -5,6 +5,7 @@ import { cookies } from 'next/headers';
 import { auth } from '@/lib/auth';
 import { decryptData } from '@/lib/crypto';
 import { verifyShareSession } from '@/lib/share-session';
+import { logger } from '@/lib/logger';
 
 /**
  * Presence heartbeat — identity and level are derived server-side.
@@ -56,17 +57,8 @@ export async function POST(req: NextRequest) {
         const session = await auth();
         const sessionEmail = session?.user?.email?.trim().toLowerCase() || null;
 
-        const rawCookie = cookieStore.get('vendor_email')?.value;
-        let cookieEmail: string | null = null;
-        if (rawCookie) {
-            try {
-                cookieEmail = decryptData<{ email: string }>(rawCookie).email.trim().toLowerCase();
-            } catch {
-                cookieEmail = null;
-            }
-        }
-
-        const effectiveEmail = cookieEmail || sessionEmail;
+        // SV-05: Trust ONLY cryptographically verified identities (verified.vendorEmail || sessionEmail)
+        const effectiveEmail = (verified.vendorEmail ? verified.vendorEmail.trim().toLowerCase() : null) || sessionEmail;
         if (!effectiveEmail) {
             return NextResponse.json({ error: 'Forbidden: Identity required' }, { status: 403 });
         }
@@ -136,7 +128,7 @@ export async function POST(req: NextRequest) {
 
         return NextResponse.json({ success: true, email: effectiveEmail, level });
     } catch (error) {
-        console.error('Heartbeat Error:', error);
+        logger.error('Heartbeat Error:', error);
         return NextResponse.json({ error: 'Failed to update heartbeat' }, { status: 500 });
     }
 }

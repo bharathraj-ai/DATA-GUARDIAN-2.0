@@ -4,6 +4,8 @@ import { prisma } from '@/lib/prisma';
 import { readDocument, getMimeType } from '@/lib/storage/secureStorage';
 import { checkDocumentPermission } from '@/lib/security/rbac';
 import { logDocumentEvent, extractRequestInfo } from '@/lib/security/auditLog';
+import { formatContentDisposition } from '@/lib/security/filename';
+import { logger } from '@/lib/logger';
 
 /**
  * GET /api/files/[fileId]
@@ -74,9 +76,10 @@ export async function GET(
     const fileBuffer = await readDocument(document.storagePath);
     const mimeType = getMimeType(document.fileType);
 
-    const disposition = isDownload
-      ? `attachment; filename="${encodeURIComponent(document.fileName)}"`
-      : `inline; filename="${encodeURIComponent(document.fileName)}"`;
+    const disposition = formatContentDisposition(
+      isDownload ? 'attachment' : 'inline',
+      document.fileName
+    );
 
     // ── Audit log (non-blocking) ────────────────────────────────
     const { ipAddress, userAgent } = extractRequestInfo(request);
@@ -104,7 +107,7 @@ export async function GET(
       },
     });
   } catch (error) {
-    console.error('[FILES] Error streaming document:', error);
+    logger.error('[FILES] Error streaming document:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

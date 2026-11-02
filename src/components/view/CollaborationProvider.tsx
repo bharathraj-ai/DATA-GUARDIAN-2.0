@@ -2,7 +2,7 @@
 
 import React, { ReactNode, useEffect, useRef } from 'react';
 import { useCollaborationStore, type EditLockEventPayload, type PublicEditLock } from '@/store/useCollaborationStore';
-import { markInternalNavigation } from './sudden-exit-client';
+import { markInternalNavigation, markWorkCompleted, isWorkCompleted } from './sudden-exit-client';
 
 interface Props {
     children: ReactNode;
@@ -122,9 +122,16 @@ export function CollaborationProvider({
                                 store.setEditLockUi(fileId, 'takeover_warning');
                             }
                         }
-                    } else if (data.type === 'revoked' || data.type === 'expired' || data.type === 'session_invalid') {
+                    } else if (data.type === 'revoked' || data.type === 'expired' || data.type === 'session_invalid' || data.type === 'completed') {
                         store.setAccessStatus(data.type);
                         eventSource?.close();
+
+                        // If work was marked completed, or event is 'completed', do NOT reload or show error screen!
+                        if (data.type === 'completed' || isWorkCompleted()) {
+                            markWorkCompleted();
+                            markInternalNavigation();
+                            return;
+                        }
 
                         // After "Take Break", cookies are cleared on purpose — go to dashboard,
                         // do not reload /view (that shows Access Denied).

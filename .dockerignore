@@ -7,11 +7,20 @@ out
 dist
 build
 
-# Development
+# Development & Diagnostics
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+debug*
+test_*
+verify_*
+tsc-errors.txt
+scratch
+tests
+secure-storage
+.secure-storage
+storage-vault
 
 # Environment files (you'll pass these at runtime)
 .env
