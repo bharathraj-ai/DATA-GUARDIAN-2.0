@@ -14,6 +14,11 @@ export type CapabilityFlags = {
   canDownload: boolean;
 };
 
+/** Original file bytes are download-equivalent, even if served as "preview". */
+export function mayStreamOriginalFileBytes(capabilities: CapabilityFlags): boolean {
+  return capabilities.canDownload === true;
+}
+
 export type AuthorizationResult<T extends boolean = true> =
   | { success: true; context: LinkAuthorizationContext }
   | { success: false; status: number; error: string };

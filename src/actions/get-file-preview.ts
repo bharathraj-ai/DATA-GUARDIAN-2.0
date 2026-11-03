@@ -131,26 +131,20 @@ export async function getFilePreview(token: string, fileId: string): Promise<Fil
             });
         };
 
-        // A. Images -> Base64 Data URI (V2.1: Full image, no scaling in first release)
-        if (mime.startsWith('image/')) {
+        // A/B. Images and PDFs as data URIs are original-byte exports.
+        if (mime.startsWith('image/') || mime === 'application/pdf') {
+            if (!caps.canDownload) {
+                return {
+                    success: false,
+                    error: 'Original-file preview is disabled because download is turned off for this link.',
+                    restricted: true,
+                    restrictionType: 'download_disabled',
+                };
+            }
             const base64 = buffer.toString('base64');
-            // Note: Image scaling can be added in future V2.2 if needed
             return {
                 success: true,
-                type: 'image',
-                content: `data:${mime};base64,${base64}`,
-                restricted: false,
-            };
-        }
-
-        // B. PDF -> Base64 Data URI (V2.1: Full PDF, page restriction coming in V2.2)
-        if (mime === 'application/pdf') {
-            const base64 = buffer.toString('base64');
-            // Note: First-page-only restriction requires PDF parsing library
-            // Can be implemented in V2.2 with pdf-lib or similar
-            return {
-                success: true,
-                type: 'pdf',
+                type: mime === 'application/pdf' ? 'pdf' : 'image',
                 content: `data:${mime};base64,${base64}`,
                 restricted: false,
             };
@@ -191,29 +185,46 @@ export async function getFilePreview(token: string, fileId: string): Promise<Fil
         }
 
         if (looksSpreadsheet) {
-            const workbook = XLSX.read(buffer, { type: 'buffer', sheetRows: PREVIEW_ROW_LIMIT });
-            const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-            if (!firstSheet) {
-                return { success: false, error: 'Spreadsheet has no readable sheets' };
+            if (fileNameLower.endsWith('.csv') || mimeLowerEarly.includes('csv')) {
+                const lines = buffer.toString('utf8').split(/\r?\n/).filter((line) => line.length > 0);
+                const previewRows = lines.slice(0, PREVIEW_ROW_LIMIT).map((line) =>
+                    line.split(',').map((cell) => cellPreviewValue(cell)),
+                );
+                const restricted = lines.length > PREVIEW_ROW_LIMIT;
+                if (restricted) await logRestriction('excel_rows', lines.length);
+                return {
+                    success: true,
+                    type: 'spreadsheet',
+                    content: previewRows,
+                    restricted,
+                    restrictionType: restricted
+                        ? `Showing first ${PREVIEW_ROW_LIMIT} of ${lines.length} rows`
+                        : undefined,
+                    totalSize: lines.length,
+                };
             }
-            const rawRows = (XLSX.utils.sheet_to_json(firstSheet, { header: 1 }) as unknown[][]) || [];
-            const previewRows = rawRows
-                .slice(0, PREVIEW_ROW_LIMIT)
-                .map((row) => (Array.isArray(row) ? row.map(cellPreviewValue) : []));
-            const restricted = previewRows.length >= PREVIEW_ROW_LIMIT;
 
-            if (restricted) {
-                await logRestriction('excel_rows', previewRows.length);
+            try {
+                const { rows, total } = await previewXlsxRows(buffer, PREVIEW_ROW_LIMIT);
+                const restricted = total > PREVIEW_ROW_LIMIT;
+                if (restricted) await logRestriction('excel_rows', total);
+                return {
+                    success: true,
+                    type: 'spreadsheet',
+                    content: rows,
+                    restricted,
+                    restrictionType: restricted
+                        ? `Showing first ${PREVIEW_ROW_LIMIT} of ${total} rows`
+                        : undefined,
+                    totalSize: total,
+                };
+            } catch (err) {
+                logger.error('[PREVIEW] Spreadsheet parse failed', err);
+                return {
+                    success: false,
+                    error: 'Could not preview this spreadsheet. Use Edit to open it.',
+                };
             }
-
-            return {
-                success: true,
-                type: 'spreadsheet',
-                content: previewRows,
-                restricted,
-                restrictionType: restricted ? `Showing first ${PREVIEW_ROW_LIMIT} rows` : undefined,
-                totalSize: previewRows.length,
-            };
         }
 
         // D. Word / ODT -> HTML preview (read-only)

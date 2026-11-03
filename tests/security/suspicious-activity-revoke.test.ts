@@ -38,11 +38,11 @@ import {
 import { prisma } from '@/lib/prisma';
 
 describe('isAllowedSuspiciousReason', () => {
-    it('accepts screenshot, devtools, tab_switch, and copy', () => {
+    it('accepts only screenshot as a purge reason', () => {
         expect(isAllowedSuspiciousReason('screenshot')).toBe(true);
-        expect(isAllowedSuspiciousReason('devtools')).toBe(true);
-        expect(isAllowedSuspiciousReason('tab_switch')).toBe(true);
-        expect(isAllowedSuspiciousReason('copy')).toBe(true);
+        expect(isAllowedSuspiciousReason('devtools')).toBe(false);
+        expect(isAllowedSuspiciousReason('tab_switch')).toBe(false);
+        expect(isAllowedSuspiciousReason('copy')).toBe(false);
         expect(isAllowedSuspiciousReason('printscreen')).toBe(false);
         expect(isAllowedSuspiciousReason('focus-lost')).toBe(false);
         expect(isAllowedSuspiciousReason('')).toBe(false);

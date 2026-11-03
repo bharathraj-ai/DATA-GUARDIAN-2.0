@@ -75,7 +75,7 @@ export const FileList = memo(function FileList({ token, files, isOwner }: FileLi
         setIsEditLoading(fileId);
         markInternalNavigation();
         router.push(`/editor/${token}/${fileId}`);
-    }, [token, capabilities.canEdit, router]);
+    }, [token, capabilities.canEdit, capabilities.canDownload, router]);
 
     const handlePreview = useCallback(async (fileId: string, fileType: string, fileName: string) => {
         if (!capabilities.canPreview) return;
@@ -88,6 +88,11 @@ export const FileList = memo(function FileList({ token, files, isOwner }: FileLi
             });
 
             if (fileType === 'application/pdf' || fileType.startsWith('image/')) {
+                if (!capabilities.canDownload) {
+                    alert('Original-file preview is disabled because download is turned off for this link.');
+                    setPreviewMeta(null);
+                    return;
+                }
                 const response = await fetch(`/api/stream/${token}/preview/${fileId}`);
                 if (!response.ok) {
                     const errorData = await response.json().catch(() => ({}));
@@ -121,7 +126,7 @@ export const FileList = memo(function FileList({ token, files, isOwner }: FileLi
         } finally {
             setIsPreviewLoading(false);
         }
-    }, [token, capabilities.canPreview]);
+    }, [token, capabilities.canPreview, capabilities.canDownload]);
 
     useEffect(() => {
         if (!previewData || previewData.type !== 'pdf' || typeof previewData.content !== 'string') {

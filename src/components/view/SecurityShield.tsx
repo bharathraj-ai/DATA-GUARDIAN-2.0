@@ -190,9 +190,7 @@ export const SecurityShield = memo(function SecurityShield({
     >(() => {});
     const validateAndRestoreRef = useRef<() => Promise<void>>(async () => {});
     const terminateSessionRef = useRef<(reason: string) => void>(() => {});
-    const reportSuspiciousRevokeRef = useRef<
-        (detail: string, reason?: 'screenshot' | 'devtools' | 'tab_switch' | 'copy') => void
-    >(() => {});
+    const reportSuspiciousRevokeRef = useRef<(detail: string, reason?: 'screenshot') => void>(() => {});
     const onTabSwitchRef = useRef(onTabSwitch);
     onTabSwitchRef.current = onTabSwitch;
     const suspiciousRevokeSentRef = useRef(false);
@@ -360,12 +358,11 @@ export const SecurityShield = memo(function SecurityShield({
     );
 
     /**
-     * First suspicious action: blank the frame, end the vendor session immediately,
-     * revoke the share, and notify the owner. No warning strikes.
-     * Super/Alt alone and ordinary focus loss must NOT call this.
+     * Confirmed screenshot/capture only: blank the frame, revoke the share, notify the owner.
+     * Tab switch, copy, and DevTools must NOT call this (they must not purge files).
      */
     const reportSuspiciousActivityAndRevoke = useCallback(
-        (detail: string, reason: 'screenshot' | 'devtools' | 'tab_switch' | 'copy' = 'screenshot') => {
+        (detail: string, reason: 'screenshot' = 'screenshot') => {
             if (isWorkCompleted() || isInternalNavigationActive()) return;
             if (sessionTerminatedRef.current && suspiciousRevokeSentRef.current) return;
 
@@ -602,8 +599,9 @@ export const SecurityShield = memo(function SecurityShield({
             if (key === 'f12') {
                 e.preventDefault();
                 e.stopPropagation();
+                activatePrivacyCoverRef.current('devtools');
                 logSecurityEventRef.current('DEVTOOLS_SHORTCUT');
-                reportSuspiciousRevokeRef.current('f12', 'devtools');
+                flashWarningRef.current('Developer tools shortcut blocked', 'warning');
                 return;
             }
 
@@ -632,7 +630,7 @@ export const SecurityShield = memo(function SecurityShield({
                     return;
                 }
                 if (shortcut.event === 'DEVTOOLS_SHORTCUT' || shortcut.event === 'VIEW_SOURCE_ATTEMPT') {
-                    reportSuspiciousRevokeRef.current(shortcut.event, 'devtools');
+                    flashWarningRef.current(shortcut.message, 'warning');
                     return;
                 }
                 if (
@@ -640,7 +638,7 @@ export const SecurityShield = memo(function SecurityShield({
                     shortcut.event === 'CUT_ATTEMPT' ||
                     shortcut.event === 'SAVE_ATTEMPT'
                 ) {
-                    reportSuspiciousRevokeRef.current(shortcut.event, 'copy');
+                    flashWarningRef.current(shortcut.message, 'warning');
                     return;
                 }
                 flashWarningRef.current(shortcut.message, 'warning');
@@ -723,7 +721,6 @@ export const SecurityShield = memo(function SecurityShield({
                 markWindowLeft('visibilitychange');
                 logSecurityEventRef.current('TAB_SWITCH', { count: 1, max: 1 });
                 onTabSwitchRef.current?.(1);
-                reportSuspiciousRevokeRef.current('tab-switch', 'tab_switch');
             } else {
                 if (sessionTerminatedRef.current || suspiciousRevokeSentRef.current) return;
                 activatePrivacyCoverRef.current('visibility-return');
@@ -823,12 +820,12 @@ export const SecurityShield = memo(function SecurityShield({
             e.preventDefault();
             e.clipboardData?.setData('text/plain', '');
             logSecurityEventRef.current('COPY_ATTEMPT');
-            reportSuspiciousRevokeRef.current('copy', 'copy');
+            flashWarningRef.current('Copy is disabled for security', 'warning');
         };
         const handleCut = (e: ClipboardEvent) => {
             e.preventDefault();
             logSecurityEventRef.current('CUT_ATTEMPT');
-            reportSuspiciousRevokeRef.current('cut', 'copy');
+            flashWarningRef.current('Cut is disabled for security', 'warning');
         };
         const handlePaste = (e: ClipboardEvent) => {
             e.preventDefault();

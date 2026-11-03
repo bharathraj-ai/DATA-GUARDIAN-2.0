@@ -73,7 +73,6 @@ const nextConfig: NextConfig = {
     'mongodb',
     'exceljs',
     'pdf-lib',
-    'xlsx',
     'bcryptjs',
     'nodemailer',
     'qrcode',

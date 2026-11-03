@@ -190,9 +190,8 @@ export async function completeWork(token: string): Promise<CompleteWorkResult> {
                                             }
                                         }
                                         if (allRows.length > 0) {
-                                            const XLSXLib = await import('xlsx');
-                                            const worksheet = XLSXLib.utils.aoa_to_sheet(allRows);
-                                            const csvStr = XLSXLib.utils.sheet_to_csv(worksheet);
+                                            const { rowsToCsv } = await import('@/lib/csv');
+                                            const csvStr = rowsToCsv(allRows);
                                             finalBuffer = Buffer.from(csvStr, 'utf-8');
                                             finalContentType = 'text/csv';
                                         }

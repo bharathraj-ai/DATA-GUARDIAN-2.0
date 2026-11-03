@@ -2,7 +2,7 @@ import { prisma } from '@/lib/prisma';
 import { logger, redactEmail } from '@/lib/logger';
 import { isRedisConfigured } from '@/lib/redis-helpers';
 
-export const SUSPICIOUS_REVOKE_REASONS = ['screenshot', 'devtools', 'tab_switch', 'copy'] as const;
+export const SUSPICIOUS_REVOKE_REASONS = ['screenshot'] as const;
 export type SuspiciousRevokeReason = (typeof SUSPICIOUS_REVOKE_REASONS)[number];
 
 export function isAllowedSuspiciousReason(reason: unknown): reason is SuspiciousRevokeReason {
@@ -50,6 +50,10 @@ export async function revokeForSuspiciousActivity(options: {
     sessionId: string;
 }): Promise<SuspiciousRevokeResult> {
     const { token, reason, vendorEmail, sessionId } = options;
+
+    if (!isAllowedSuspiciousReason(reason)) {
+        return { success: false, error: 'reason_not_purgeable' };
+    }
 
     const secureLink = await prisma.secureLink.findUnique({
         where: { token },
