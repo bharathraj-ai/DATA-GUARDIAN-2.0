@@ -20,15 +20,6 @@ export interface DetectOrphanOptions {
   storageRoot?: string;
 }
 
-/**
- * Structured result for the full cleanup operation.
- *
- * `gridfsStatus`:
- *   - 'skipped'         — MongoDB not configured; GridFS cleanup not attempted.
- *   - 'success'         — All batches processed without a batch failure.
- *   - 'partial_failure' — At least one batch was aborted due to a DB query error.
- *   - 'failed'          — Could not even start the GridFS cleanup.
- */
 export interface CleanupOrphanResult {
   success: boolean;
   /** Execution ID for correlating log entries with audit records. */
@@ -40,6 +31,11 @@ export interface CleanupOrphanResult {
   deletedCount: number;
   deletedPaths: string[];
   skippedRecentCount: number;
+  /** Local filesystem deletion detail. */
+  localDetected: number;
+  localDeleted: number;
+  localAlreadyMissing: number;
+  localDeletionErrors: number;
   /** GridFS-specific counters. */
   gridfsScanned: number;
   gridfsOrphaned: number;
@@ -289,6 +285,10 @@ export async function cleanOrphanFiles(options: DetectOrphanOptions = {}): Promi
       deletedCount: 0,
       deletedPaths: [],
       skippedRecentCount: detection.skippedRecentCount,
+      localDetected: 0,
+      localDeleted: 0,
+      localAlreadyMissing: 0,
+      localDeletionErrors: 0,
       gridfsScanned: 0,
       gridfsOrphaned: 0,
       gridfsDeleted: 0,
@@ -304,17 +304,28 @@ export async function cleanOrphanFiles(options: DetectOrphanOptions = {}): Promi
 
   const { orphans, skippedRecentCount } = detection;
   const deletedPaths: string[] = [];
+  let localDetected = orphans.length;
+  let localDeleted = 0;
+  let localAlreadyMissing = 0;
+  let localDeletionErrors = 0;
 
   for (const orphan of orphans) {
     try {
       await fs.rm(orphan.path, { recursive: true, force: true });
       deletedPaths.push(orphan.path);
+      localDeleted++;
     } catch (rmErr: any) {
-      // If already deleted by another process (idempotent / concurrent safe)
       if (rmErr.code === 'ENOENT') {
+        // Already removed by another worker — idempotent
+        localAlreadyMissing++;
         continue;
       }
-      logger.error(`[ORPHAN_CLEANUP] Failed to remove orphan path: ${orphan.path}`, rmErr);
+      localDeletionErrors++;
+      logger.error(`[ORPHAN_CLEANUP] Failed to remove orphan path: ${orphan.path}`, {
+        executionId,
+        code: rmErr.code,
+        // Never log the file path content or any data within it
+      });
     }
   }
 
@@ -427,6 +438,13 @@ export async function cleanOrphanFiles(options: DetectOrphanOptions = {}): Promi
         for (const r of fileVerRefs) if (r.storageFileId) activeIds.add(r.storageFileId);
         for (const r of mongoFileRefs) if (r.gridFSId) activeIds.add(r.gridFSId);
 
+        const {
+          acquireDeletionLease,
+          releaseDeletionLease,
+          completeDeletionLease,
+          recordDeletionFailure,
+        } = await import('./cleanup-queue');
+
         for (const gf of gridFiles) {
           const idStr = gf._id.toString();
 
@@ -435,12 +453,20 @@ export async function cleanOrphanFiles(options: DetectOrphanOptions = {}): Promi
             continue;
           }
 
+          // ── Two-Phase Coordination: Acquire Deletion Lease (Tombstone) ───
+          // Establishes an atomic IN_PROGRESS record in PostgreSQL BEFORE re-checking references.
+          // Any concurrent upload or restore operation checking assertStorageFileAvailable()
+          // will observe this lease and refuse to reference this object.
+          const lease = await acquireDeletionLease(idStr, 'orphan');
+          if (!lease) {
+            // Active lease held by another worker, or object already deleted / locked
+            gridfsSkipped++;
+            continue;
+          }
+
           gridfsOrphaned++;
 
-          // ── Concurrency guard: re-verify immediately before deletion ───
-          // A concurrent upload or other worker could have created a new DB
-          // reference to this object between when we read the batch above and
-          // now. This final check closes that window.
+          // ── Authoritative Reference Check Under Active Lease ───
           let stillReferenced: boolean;
           try {
             const [d, dv, uf, fv, mf] = await Promise.all([
@@ -452,31 +478,37 @@ export async function cleanOrphanFiles(options: DetectOrphanOptions = {}): Promi
             ]);
             stillReferenced = !!(d || dv || uf || fv || mf);
           } catch {
-            // Fail-closed: treat as still referenced if re-check query fails
-            logger.warn('[ORPHAN_CLEANUP] Pre-delete re-verification failed — skipping (fail-closed)', { executionId, idStr });
+            // Fail-closed: release lease and skip
+            await releaseDeletionLease(idStr);
+            logger.warn('[ORPHAN_CLEANUP] Pre-delete re-verification failed — releasing lease and skipping (fail-closed)', { executionId, idStr });
             gridfsSkipped++;
             gridfsOrphaned--;
             continue;
           }
 
           if (stillReferenced) {
-            logger.warn('[ORPHAN_CLEANUP] Object acquired a reference between scan and delete — skipping', { executionId, idStr });
+            await releaseDeletionLease(idStr);
+            logger.warn('[ORPHAN_CLEANUP] Object acquired a reference between scan and delete — lease released', { executionId, idStr });
             gridfsSkipped++;
             gridfsOrphaned--;
             continue;
           }
 
+          // ── Delete from GridFS and Finalize Lease ───
           try {
             await bucket.delete(new ObjectId(idStr));
+            await completeDeletionLease(idStr);
             deletedPaths.push(`gridfs:${idStr}`);
             gridfsDeleted++;
           } catch (delErr: any) {
             if (delErr?.message?.includes('FileNotFound')) {
-              // Deleted by a concurrent worker — idempotent, count as deleted
+              // Deleted by a concurrent worker — idempotent, mark complete
+              await completeDeletionLease(idStr);
               gridfsDeleted++;
             } else {
               gridfsDeletionErrors++;
               gridfsStatus = 'partial_failure';
+              await recordDeletionFailure(idStr, delErr);
               logger.error(`[ORPHAN_CLEANUP] Failed to delete GridFS orphan: ${idStr}`, {
                 executionId,
                 error: delErr?.message,
@@ -503,7 +535,7 @@ export async function cleanOrphanFiles(options: DetectOrphanOptions = {}): Promi
   const overallStatus: CleanupOrphanResult['status'] =
     gridfsStatus === 'failed'
       ? 'FAILED'
-      : gridfsStatus === 'partial_failure' || gridfsDeletionErrors > 0
+      : gridfsStatus === 'partial_failure' || gridfsDeletionErrors > 0 || localDeletionErrors > 0
         ? 'PARTIAL_FAILURE'
         : 'SUCCESS';
 
@@ -515,8 +547,10 @@ export async function cleanOrphanFiles(options: DetectOrphanOptions = {}): Promi
     finishedAt: finishedAt.toISOString(),
     durationMs: finishedAt.getTime() - startedAt.getTime(),
     gracePeriodMinutes: graceMinutes,
-    localFilesDetected: orphans.length,
-    localFilesDeleted: deletedPaths.filter((p) => !p.startsWith('gridfs:')).length,
+    localDetected,
+    localDeleted,
+    localAlreadyMissing,
+    localDeletionErrors,
     gridfsScanned,
     gridfsOrphaned,
     gridfsDeleted,
@@ -532,7 +566,7 @@ export async function cleanOrphanFiles(options: DetectOrphanOptions = {}): Promi
     await prisma.auditLog.create({
       data: {
         action: 'ORPHAN_FILE_CLEANUP',
-        reason: `[${overallStatus}] Scanned ${gridfsScanned} GridFS objects — deleted ${gridfsDeleted}, skipped ${gridfsSkipped}, errors ${gridfsDeletionErrors}`,
+        reason: `[${overallStatus}] Scanned ${gridfsScanned} GridFS objects — deleted ${gridfsDeleted}, skipped ${gridfsSkipped}, errors ${gridfsDeletionErrors}; local: detected ${localDetected}, deleted ${localDeleted}, errors ${localDeletionErrors}`,
         metadata: JSON.stringify({
           ...auditPayload,
           // Bounded sample of deleted IDs for post-incident tracing (no contents or keys)
@@ -555,6 +589,10 @@ export async function cleanOrphanFiles(options: DetectOrphanOptions = {}): Promi
     deletedCount: deletedPaths.length,
     deletedPaths,
     skippedRecentCount,
+    localDetected,
+    localDeleted,
+    localAlreadyMissing,
+    localDeletionErrors,
     gridfsScanned,
     gridfsOrphaned,
     gridfsDeleted,

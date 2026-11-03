@@ -5,6 +5,7 @@ import { encryptBuffer, generateDek, encryptDek } from '@/lib/crypto';
 import { authorizeSecureLink } from '@/lib/linkAuthorization';
 import { validateMimeType, ALLOWED_EXTENSIONS } from '@/lib/security/file-validator';
 import { logger } from '@/lib/logger';
+import { assertStorageFileAvailable } from '@/lib/storage/cleanup-queue';
 import path from 'path';
 
 export type UpdateFileResult = {
@@ -171,6 +172,11 @@ export async function updateFile(
         );
 
         // 9. Atomic update with OCC.
+        // COORDINATION GUARD: Verify newly uploaded storageFileId is not locked or tombstoned
+        if (uploadResult?.storageFileId) {
+            await assertStorageFileAvailable(uploadResult.storageFileId);
+        }
+
         // Redis edit lock is the writer gate. Client expectedVersion can lag behind
         // our own autosave / access-request snapshot — use the server version, then
         // retry once if a concurrent save from this same holder raced us.

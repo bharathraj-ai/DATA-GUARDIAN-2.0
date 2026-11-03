@@ -587,6 +587,8 @@ model StorageCleanupTask {
   status         String    @default("PENDING") // PENDING | IN_PROGRESS | COMPLETED | FAILED
   attempts       Int       @default(0)
   maxAttempts    Int       @default(5)
+  /// Timestamp when the task was last claimed by a worker (used for lease expiry).
+  claimedAt      DateTime?
   lastAttemptAt  DateTime?
   completedAt    DateTime?
   errorMessage   String?
@@ -595,4 +597,5 @@ model StorageCleanupTask {
 
   @@index([status, createdAt])
   @@index([storageFileId])
+  @@index([status, claimedAt])
 }

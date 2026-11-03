@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { authorizeApiRequest } from '@/lib/api-auth';
 import { logger } from '@/lib/logger';
+import { assertStorageFileAvailable } from '@/lib/storage/cleanup-queue';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -96,6 +97,11 @@ export async function POST(
 
     // Snapshot current state and restore old version reference atomically in a transaction
     await prisma.$transaction(async (tx) => {
+      // COORDINATION GUARD: Verify target version's storageFileId is not locked or deleted
+      if (version.storageFileId) {
+        await assertStorageFileAvailable(version.storageFileId, tx);
+      }
+
       const versionCount = await tx.fileVersion.count({ where: { fileId } });
       await tx.fileVersion.create({
         data: {
@@ -128,8 +134,12 @@ export async function POST(
     });
 
     return NextResponse.json({ success: true, restoredVersion: version.versionNumber });
-  } catch (err) {
+  } catch (err: any) {
     logger.error('[versions POST] error:', err);
-    return NextResponse.json({ error: 'Failed to restore version' }, { status: 500 });
+    const isConflict = err?.message?.includes('deleted') || err?.message?.includes('locked');
+    return NextResponse.json(
+      { error: err?.message || 'Failed to restore version' },
+      { status: isConflict ? 409 : 500 }
+    );
   }
 }

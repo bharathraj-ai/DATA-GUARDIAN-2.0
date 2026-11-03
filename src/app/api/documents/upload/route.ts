@@ -16,6 +16,7 @@ import { checkUploadRateLimit, extractClientIP } from '@/lib/rate-limit';
 import { sanitizeFileName } from '@/lib/security/filename';
 import { headers } from 'next/headers';
 import { logger } from '@/lib/logger';
+import { assertStorageFileAvailable } from '@/lib/storage/cleanup-queue';
 
 /**
  * POST /api/documents/upload
@@ -172,6 +173,9 @@ export async function POST(request: NextRequest) {
     // File is securely and completely written. Now create DB record with full metadata.
     let document;
     try {
+      if (saved.storageFileId) {
+        await assertStorageFileAvailable(saved.storageFileId);
+      }
       document = await prisma.document.create({
         data: {
           id: documentId,

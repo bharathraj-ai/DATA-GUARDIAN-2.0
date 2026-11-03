@@ -5,7 +5,7 @@ import { authorizeApiRequest } from '@/lib/api-auth';
 import { checkUploadRateLimit, extractClientIP } from '@/lib/rate-limit';
 import { headers } from 'next/headers';
 import { logger } from '@/lib/logger';
-import { scheduleGridFSCleanup, processCleanupQueue } from '@/lib/storage/cleanup-queue';
+import { scheduleGridFSCleanup, processCleanupQueue, assertStorageFileAvailable } from '@/lib/storage/cleanup-queue';
 
 function dataUrlToBytes(dataUrl: string): Buffer {
   const base64 = dataUrl.split(',')[1] || dataUrl;
@@ -95,6 +95,9 @@ export async function POST(
     for (let attempt = 0; attempt < 5; attempt++) {
       try {
         versionNumber = await prisma.$transaction(async (tx) => {
+          // COORDINATION GUARD: Verify newly uploaded storageFileId is available and not tombstoned
+          await assertStorageFileAvailable(uploadResult.storageFileId, tx);
+
           const agg = await tx.fileVersion.aggregate({
             where: { fileId },
             _max: { versionNumber: true },
