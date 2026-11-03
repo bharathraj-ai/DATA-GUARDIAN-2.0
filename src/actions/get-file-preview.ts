@@ -1,7 +1,7 @@
 'use server';
 
 import { prisma } from '@/lib/prisma';
-import * as XLSX from 'xlsx';
+import { previewXlsxRows } from '@/lib/spreadsheet-preview';
 import { authorizeSecureLink } from '@/lib/linkAuthorization';
 import { checkDownloadRateLimit, extractClientIP, formatRateLimitError } from '@/lib/rate-limit';
 import { headers } from 'next/headers';
