@@ -575,3 +575,24 @@ model MongoAccessLog {
   @@index([createdAt])
   @@index([revokedAt])
 }
+
+/// Durable outbox for deferred GridFS object deletion.
+/// Written inside database transactions BEFORE commit.
+/// Processed asynchronously by a background cleanup worker.
+/// Idempotent: repeated processing is safe.
+model StorageCleanupTask {
+  id             String    @id @default(cuid())
+  storageFileId  String                      // GridFS ObjectId string
+  bucketName     String    @default("data_guardian_files")
+  status         String    @default("PENDING") // PENDING | IN_PROGRESS | COMPLETED | FAILED
+  attempts       Int       @default(0)
+  maxAttempts    Int       @default(5)
+  lastAttemptAt  DateTime?
+  completedAt    DateTime?
+  errorMessage   String?
+  reason         String?                     // pruned_version | orphan | rollback | deleted_document
+  createdAt      DateTime  @default(now())
+
+  @@index([status, createdAt])
+  @@index([storageFileId])
+}

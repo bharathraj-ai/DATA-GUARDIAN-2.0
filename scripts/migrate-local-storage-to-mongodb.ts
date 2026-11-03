@@ -24,12 +24,17 @@ function computeSha256(buf: Buffer): string {
 }
 
 async function runMigration() {
-  const isDryRun = process.argv.includes('--dry-run') || process.argv.includes('-d');
+  // SAFETY: Dry-run is the default. Pass --execute to perform actual migration.
+  const isExecute = process.argv.includes('--execute');
+  const isDryRun = !isExecute || process.argv.includes('--dry-run') || process.argv.includes('-d');
   const isRollback = process.argv.includes('--rollback');
 
   console.log('='.repeat(70));
   console.log('DATA GUARDIAN 2.0 — LOCAL STORAGE TO MONGODB GRIDFS MIGRATION');
   console.log('='.repeat(70));
+  if (!isRollback && isDryRun && isExecute === false) {
+    console.log('NOTE: Running in DRY-RUN mode (default). Pass --execute to perform actual migration.');
+  }
   console.log(`Mode: ${isRollback ? 'ROLLBACK' : isDryRun ? 'DRY-RUN (Simulated)' : 'ACTUAL MIGRATION'}`);
   console.log(`Timestamp: ${new Date().toISOString()}`);
 
@@ -66,7 +71,15 @@ async function runMigration() {
     for (const doc of docsToRollback) {
       await prisma.document.update({
         where: { id: doc.id },
-        data: { storageProvider: 'local' },
+        data: {
+          storageProvider: 'local',
+          storageFileId: null,
+          encryptedDEK: null,
+          encryptionIV: null,
+          authenticationTag: null,
+          encryptionAlgorithm: null,
+          storageCreatedAt: null,
+        },
       });
       console.log(`Reverted document ${doc.id} -> local (${doc.storagePath})`);
     }
@@ -77,7 +90,15 @@ async function runMigration() {
     for (const ver of versToRollback) {
       await prisma.documentVersion.update({
         where: { id: ver.id },
-        data: { storageProvider: 'local' },
+        data: {
+          storageProvider: 'local',
+          storageFileId: null,
+          encryptedDEK: null,
+          encryptionIV: null,
+          authenticationTag: null,
+          encryptionAlgorithm: null,
+          storageCreatedAt: null,
+        },
       });
       console.log(`Reverted version ${ver.id} -> local (${ver.storagePath})`);
     }
@@ -291,7 +312,9 @@ async function runMigration() {
   }
 
   console.log('\nNote: Original local files have been preserved on disk.');
+  console.log('      Rollback ONLY reverts PostgreSQL references — GridFS objects are NOT auto-deleted.');
   console.log('To rollback, run: npx tsx scripts/migrate-local-storage-to-mongodb.ts --rollback');
+  console.log('To perform actual migration, pass --execute. Without it, this is a dry-run.');
   console.log('='.repeat(70));
 
   await prisma.$disconnect();

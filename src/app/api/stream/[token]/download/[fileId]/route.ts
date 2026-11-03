@@ -109,7 +109,9 @@ export async function GET(
                         dek
                     );
                 } else {
-                    buffer = downloadedBuffer;
+                    // SECURITY: Decryption metadata is missing — fail closed.
+                    // Returning raw ciphertext as plaintext is forbidden.
+                    throw new Error('Decryption metadata missing (iv/authTag) — refusing to return unauthenticated data');
                 }
             } catch (e) {
                 logger.error('[DOWNLOAD] Mongo retrieval/decryption failed', e);

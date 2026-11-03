@@ -276,34 +276,66 @@ export async function cleanOrphanFiles(options: DetectOrphanOptions = {}): Promi
     if (config.isConfigured) {
       const bucket = await getGridFSBucket();
       const cutoff = new Date(Date.now() - (options.gracePeriodMinutes ?? 30) * 60 * 1000);
-      const gridFiles = await bucket.find({ uploadDate: { $lt: cutoff } }).toArray();
 
-      if (gridFiles.length > 0) {
+      // Cursor-based pagination: never load entire GridFS collection into memory.
+      const BATCH_SIZE = 500;
+      let skip = 0;
+
+      while (true) {
+        const gridFiles = await bucket
+          .find({ uploadDate: { $lt: cutoff } })
+          .skip(skip)
+          .limit(BATCH_SIZE)
+          .toArray();
+
+        if (gridFiles.length === 0) break;
+        skip += BATCH_SIZE;
+
         const candidateIds = gridFiles.map((f) => f._id.toString());
-        const [docRefs, docVerRefs, userFileRefs, fileVerRefs] = await Promise.all([
-          prisma.document.findMany({
-            where: { storageFileId: { in: candidateIds }, isDeleted: false },
-            select: { storageFileId: true },
-          }),
-          prisma.documentVersion.findMany({
-            where: { storageFileId: { in: candidateIds } },
-            select: { storageFileId: true },
-          }),
-          prisma.userFile.findMany({
-            where: { storageFileId: { in: candidateIds } },
-            select: { storageFileId: true },
-          }),
-          prisma.fileVersion.findMany({
-            where: { storageFileId: { in: candidateIds } },
-            select: { storageFileId: true },
-          }),
-        ]);
+
+        // Check all 5 reference sources — fail-closed if any query throws
+        let docRefs: { storageFileId: string | null }[];
+        let docVerRefs: { storageFileId: string | null }[];
+        let userFileRefs: { storageFileId: string | null }[];
+        let fileVerRefs: { storageFileId: string | null }[];
+        let mongoFileRefs: { gridFSId: string | null }[];
+
+        try {
+          [docRefs, docVerRefs, userFileRefs, fileVerRefs, mongoFileRefs] = await Promise.all([
+            prisma.document.findMany({
+              where: { storageFileId: { in: candidateIds }, isDeleted: false },
+              select: { storageFileId: true },
+            }),
+            prisma.documentVersion.findMany({
+              where: { storageFileId: { in: candidateIds } },
+              select: { storageFileId: true },
+            }),
+            prisma.userFile.findMany({
+              where: { storageFileId: { in: candidateIds } },
+              select: { storageFileId: true },
+            }),
+            prisma.fileVersion.findMany({
+              where: { storageFileId: { in: candidateIds } },
+              select: { storageFileId: true },
+            }),
+            // Legacy: MongoFile.gridFSId references (old upload path)
+            prisma.mongoFile.findMany({
+              where: { gridFSId: { in: candidateIds }, isDeleted: false },
+              select: { gridFSId: true },
+            }),
+          ]);
+        } catch (refQueryErr) {
+          // Fail-closed: if reference queries fail, skip this batch entirely
+          logger.error('[ORPHAN_CLEANUP] Reference query failed for GridFS batch — skipping batch to protect data', refQueryErr);
+          break;
+        }
 
         const activeIds = new Set<string>();
         for (const r of docRefs) if (r.storageFileId) activeIds.add(r.storageFileId);
         for (const r of docVerRefs) if (r.storageFileId) activeIds.add(r.storageFileId);
         for (const r of userFileRefs) if (r.storageFileId) activeIds.add(r.storageFileId);
         for (const r of fileVerRefs) if (r.storageFileId) activeIds.add(r.storageFileId);
+        for (const r of mongoFileRefs) if (r.gridFSId) activeIds.add(r.gridFSId);
 
         for (const gf of gridFiles) {
           const idStr = gf._id.toString();
@@ -318,6 +350,10 @@ export async function cleanOrphanFiles(options: DetectOrphanOptions = {}): Promi
             }
           }
         }
+
+        // If we got a full batch, there may be more; loop continues.
+        // If partial batch, we are done.
+        if (gridFiles.length < BATCH_SIZE) break;
       }
     }
   } catch (gridErr) {

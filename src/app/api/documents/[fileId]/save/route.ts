@@ -5,6 +5,7 @@ import { authorizeApiRequest } from '@/lib/api-auth';
 import { checkUploadRateLimit, extractClientIP } from '@/lib/rate-limit';
 import { headers } from 'next/headers';
 import { logger } from '@/lib/logger';
+import { scheduleGridFSCleanup, processCleanupQueue } from '@/lib/storage/cleanup-queue';
 
 function dataUrlToBytes(dataUrl: string): Buffer {
   const base64 = dataUrl.split(',')[1] || dataUrl;
@@ -87,6 +88,9 @@ export async function POST(
       }
     );
 
+    // IDs of pruned versions whose GridFS objects need deferred deletion
+    const prunedGridFSIds: string[] = [];
+
     let versionNumber = 0;
     for (let attempt = 0; attempt < 5; attempt++) {
       try {
@@ -123,25 +127,30 @@ export async function POST(
               fileSize: rawBytes.length,
             },
           });
-          // SECURITY: Cap FileVersion history to 10 versions to prevent unbounded DB growth
+
+          // SECURITY: Cap FileVersion history to 10 versions to prevent unbounded DB growth.
+          // IMPORTANT: GridFS objects must NOT be deleted inside a transaction.
+          // Instead, we record them in the StorageCleanupTask outbox (also inside the
+          // transaction) so deletion is deferred until AFTER the transaction commits.
           const MAX_VERSIONS = 10;
           const versionCount = await tx.fileVersion.count({ where: { fileId } });
           if (versionCount > MAX_VERSIONS) {
-              const versionsToDelete = await tx.fileVersion.findMany({
-                  where: { fileId },
-                  orderBy: { versionNumber: 'asc' },
-                  take: versionCount - MAX_VERSIONS,
-                  select: { id: true, storageFileId: true }
-              });
-              await tx.fileVersion.deleteMany({
-                  where: { id: { in: versionsToDelete.map(v => v.id) } }
-              });
-              // Clean up pruned GridFS objects
-              for (const v of versionsToDelete) {
-                if (v.storageFileId) {
-                  storageProvider.delete(v.storageFileId).catch(() => {});
-                }
+            const versionsToDelete = await tx.fileVersion.findMany({
+              where: { fileId },
+              orderBy: { versionNumber: 'asc' },
+              take: versionCount - MAX_VERSIONS,
+              select: { id: true, storageFileId: true },
+            });
+            await tx.fileVersion.deleteMany({
+              where: { id: { in: versionsToDelete.map(v => v.id) } },
+            });
+            // Schedule deferred GridFS cleanup (written inside tx, executed after commit)
+            for (const v of versionsToDelete) {
+              if (v.storageFileId) {
+                prunedGridFSIds.push(v.storageFileId);
+                await scheduleGridFSCleanup(tx, v.storageFileId, 'pruned_version');
               }
+            }
           }
 
           return next;
@@ -155,20 +164,33 @@ export async function POST(
     }
 
     if (versionNumber === 0) {
+      // Transaction failed entirely — schedule rollback cleanup for the uploaded GridFS object
       if (uploadResult?.storageFileId) {
-        await storageProvider.delete(uploadResult.storageFileId).catch(() => {});
+        await scheduleGridFSCleanup(prisma, uploadResult.storageFileId, 'rollback').catch((e) =>
+          logger.error('[save] Failed to schedule rollback cleanup:', e)
+        );
+        void processCleanupQueue(1).catch(() => {});
       }
       return NextResponse.json({ error: 'Could not persist document version' }, { status: 503 });
+    }
+
+    // ── Post-commit: execute deferred GridFS deletions (non-blocking) ───
+    // Transaction has committed. Now safe to delete pruned GridFS objects.
+    if (prunedGridFSIds.length > 0) {
+      void processCleanupQueue(prunedGridFSIds.length + 5).catch((e) =>
+        logger.warn('[save] Background cleanup queue processing failed:', e)
+      );
     }
 
     return NextResponse.json({ success: true, versionNumber });
   } catch (err) {
     logger.error('[save] error:', err);
     if (uploadResult?.storageFileId) {
-      try {
-        const { getStorageProvider } = await import('@/lib/storage/storage-provider');
-        await getStorageProvider().delete(uploadResult.storageFileId).catch(() => {});
-      } catch {}
+      // Schedule cleanup rather than fire-and-forget .catch(() => {})
+      await scheduleGridFSCleanup(prisma, uploadResult.storageFileId, 'rollback').catch((e) =>
+        logger.error('[save] Failed to schedule rollback cleanup:', e)
+      );
+      void processCleanupQueue(1).catch(() => {});
     }
     return NextResponse.json({ error: 'Failed to save document' }, { status: 500 });
   }

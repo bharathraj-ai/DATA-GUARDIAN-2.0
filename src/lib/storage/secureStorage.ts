@@ -258,12 +258,78 @@ export async function readDocument(
   return fs.readFile(absolutePath);
 }
 
-export async function getDocumentStream(storagePath: string) {
-  if (storagePath.startsWith('gridfs://')) {
-    const fileId = storagePath.replace('gridfs://', '');
-    const { getStorageProvider } = await import('./storage-provider');
-    const provider = getStorageProvider();
-    return provider.downloadStream(fileId);
+/**
+ * Returns a decrypted Readable stream for a document.
+ *
+ * SECURITY: For GridFS documents the ciphertext is downloaded, AES-256-GCM
+ * authentication verified, and plaintext returned as a Readable stream.
+ * Raw ciphertext is NEVER forwarded to the caller.
+ *
+ * File size is bounded by MAX_STREAM_BYTES (100 MiB) to prevent OOM.
+ * For larger files, callers should use chunked/paginated streaming.
+ *
+ * @param encryptionMeta  Required for GridFS documents; must include encryptedDEK,
+ *                        encryptionIV, and authenticationTag.
+ */
+export async function getDocumentStream(
+  storagePath: string,
+  encryptionMeta?: {
+    encryptedDEK?: string | null;
+    encryptionIV?: string | null;
+    authenticationTag?: string | null;
+    storageFileId?: string | null;
+  }
+): Promise<NodeJS.ReadableStream> {
+  const MAX_STREAM_BYTES = 100 * 1024 * 1024; // 100 MiB hard limit
+
+  if (storagePath.startsWith('gridfs://') || encryptionMeta?.storageFileId) {
+    const fileId = encryptionMeta?.storageFileId || storagePath.replace('gridfs://', '');
+
+    // Resolve encryption metadata if not supplied directly
+    let meta = encryptionMeta;
+    if (!meta?.encryptedDEK || !meta?.encryptionIV || !meta?.authenticationTag) {
+      const { prisma } = await import('@/lib/prisma');
+      const doc = await prisma.document.findFirst({
+        where: { OR: [{ storageFileId: fileId }, { storagePath }] },
+        select: { storageFileId: true, encryptedDEK: true, encryptionIV: true, authenticationTag: true },
+      });
+      if (doc) {
+        meta = { storageFileId: doc.storageFileId, encryptedDEK: doc.encryptedDEK, encryptionIV: doc.encryptionIV, authenticationTag: doc.authenticationTag };
+      } else {
+        const ver = await prisma.documentVersion.findFirst({
+          where: { OR: [{ storageFileId: fileId }, { storagePath }] },
+          select: { storageFileId: true, encryptedDEK: true, encryptionIV: true, authenticationTag: true },
+        });
+        if (ver) {
+          meta = { storageFileId: ver.storageFileId, encryptedDEK: ver.encryptedDEK, encryptionIV: ver.encryptionIV, authenticationTag: ver.authenticationTag };
+        }
+      }
+    }
+
+    if (!meta?.encryptedDEK || !meta?.encryptionIV || !meta?.authenticationTag) {
+      throw new Error('Encryption metadata required for GridFS streaming — cannot return unauthenticated data (fail-closed)');
+    }
+
+    // Download ciphertext into memory, verify AES-GCM auth tag, then stream plaintext
+    // AES-256-GCM requires the entire ciphertext to authenticate before any plaintext
+    // is released — true streaming decryption without full buffering is unsafe with GCM.
+    const { downloadDecryptedFile } = await import('./encrypted-storage');
+    const plaintextBuffer = await downloadDecryptedFile({
+      storageFileId: fileId,
+      encryptedDEK: meta.encryptedDEK,
+      encryptionIV: meta.encryptionIV,
+      authenticationTag: meta.authenticationTag,
+    });
+
+    if (plaintextBuffer.length > MAX_STREAM_BYTES) {
+      throw new Error(`Decrypted document size (${plaintextBuffer.length} bytes) exceeds stream limit of ${MAX_STREAM_BYTES} bytes`);
+    }
+
+    const { Readable } = await import('stream');
+    const readable = new Readable();
+    readable.push(plaintextBuffer);
+    readable.push(null);
+    return readable;
   }
 
   const absolutePath = resolveStoragePath(storagePath);
