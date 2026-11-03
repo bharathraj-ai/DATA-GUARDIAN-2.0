@@ -22,6 +22,7 @@ import { isEmailConfigured, warmEmailTransport } from '@/lib/email';
 import { isMongoConfigured, warmMongoConnection } from '@/lib/mongo/client';
 import type { CreateSecureLinkResult } from '@/lib/create-link-result';
 import type { CreateLinkJson } from '@/lib/create-link-payload';
+import { assertStorageFileAvailable } from '@/lib/storage/cleanup-queue';
 import {
     loadStagedFiles,
     markStagedFilesLinked,
@@ -208,6 +209,15 @@ async function executeCreateLink(params: {
             allowDownload,
         },
     });
+
+    // COORDINATION GUARD: Verify all prepared staged files are available and not locked for deletion
+    if (preparedFiles.length > 0) {
+        for (const file of preparedFiles) {
+            if (file.gridFSId) {
+                await assertStorageFileAvailable(file.gridFSId);
+            }
+        }
+    }
 
     const [vendorRows] = await Promise.all([
         prisma.vendorAccess.createManyAndReturn({

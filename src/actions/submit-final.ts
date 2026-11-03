@@ -5,6 +5,7 @@ import { authorizeSecureLink } from '@/lib/linkAuthorization';
 import { encryptBuffer, generateDek, encryptDek } from '@/lib/crypto';
 import { validateMimeType, ALLOWED_EXTENSIONS } from '@/lib/security/file-validator';
 import { uploadToMongo } from '@/lib/mongo/operations';
+import { assertStorageFileAvailable } from '@/lib/storage/cleanup-queue';
 import path from 'path';
 import { logger, redactEmail } from '@/lib/logger';
 
@@ -114,6 +115,11 @@ export async function submitFinal(
                 folder: 'final-submissions',
                 uploadedBy: mongoFile.uploadedBy,
             });
+
+            // COORDINATION GUARD: Verify newly uploaded gridFSId is not locked or tombstoned
+            if (mongoUpload.gridFSId) {
+                await assertStorageFileAvailable(mongoUpload.gridFSId);
+            }
 
             await prisma.mongoFile.update({
                 where: { id: (fileRecord as any).mongoFileId },

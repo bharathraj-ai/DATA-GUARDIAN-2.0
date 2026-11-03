@@ -479,7 +479,7 @@ export async function cleanOrphanFiles(options: DetectOrphanOptions = {}): Promi
             stillReferenced = !!(d || dv || uf || fv || mf);
           } catch {
             // Fail-closed: release lease and skip
-            await releaseDeletionLease(idStr);
+            await releaseDeletionLease(lease);
             logger.warn('[ORPHAN_CLEANUP] Pre-delete re-verification failed — releasing lease and skipping (fail-closed)', { executionId, idStr });
             gridfsSkipped++;
             gridfsOrphaned--;
@@ -487,7 +487,7 @@ export async function cleanOrphanFiles(options: DetectOrphanOptions = {}): Promi
           }
 
           if (stillReferenced) {
-            await releaseDeletionLease(idStr);
+            await releaseDeletionLease(lease);
             logger.warn('[ORPHAN_CLEANUP] Object acquired a reference between scan and delete — lease released', { executionId, idStr });
             gridfsSkipped++;
             gridfsOrphaned--;
@@ -497,18 +497,18 @@ export async function cleanOrphanFiles(options: DetectOrphanOptions = {}): Promi
           // ── Delete from GridFS and Finalize Lease ───
           try {
             await bucket.delete(new ObjectId(idStr));
-            await completeDeletionLease(idStr);
+            await completeDeletionLease(lease);
             deletedPaths.push(`gridfs:${idStr}`);
             gridfsDeleted++;
           } catch (delErr: any) {
             if (delErr?.message?.includes('FileNotFound')) {
               // Deleted by a concurrent worker — idempotent, mark complete
-              await completeDeletionLease(idStr);
+              await completeDeletionLease(lease);
               gridfsDeleted++;
             } else {
               gridfsDeletionErrors++;
               gridfsStatus = 'partial_failure';
-              await recordDeletionFailure(idStr, delErr);
+              await recordDeletionFailure(lease, delErr, true);
               logger.error(`[ORPHAN_CLEANUP] Failed to delete GridFS orphan: ${idStr}`, {
                 executionId,
                 error: delErr?.message,
