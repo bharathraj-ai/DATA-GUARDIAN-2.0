@@ -40,7 +40,7 @@
     "exceljs": "^4.4.0",
     "framer-motion": "^12.40.0",
     "lucide-react": "^1.18.0",
-    "mammoth": "^1.12.1",
+    "mammoth": "^1.13.0",
     "mongodb": "^7.2.0",
     "next": "^16.2.6",
     "next-auth": "^4.24.15",
