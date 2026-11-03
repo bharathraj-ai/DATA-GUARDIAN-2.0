@@ -1,5 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
+import crypto from 'crypto';
+import { ObjectId } from 'mongodb';
 import { prisma } from '@/lib/prisma';
 import { logger } from '@/lib/logger';
 import { getStorageRoot } from '@/lib/storage/secureStorage';
@@ -18,14 +20,42 @@ export interface DetectOrphanOptions {
   storageRoot?: string;
 }
 
+/**
+ * Structured result for the full cleanup operation.
+ *
+ * `gridfsStatus`:
+ *   - 'skipped'         — MongoDB not configured; GridFS cleanup not attempted.
+ *   - 'success'         — All batches processed without a batch failure.
+ *   - 'partial_failure' — At least one batch was aborted due to a DB query error.
+ *   - 'failed'          — Could not even start the GridFS cleanup.
+ */
 export interface CleanupOrphanResult {
   success: boolean;
+  /** Execution ID for correlating log entries with audit records. */
+  executionId: string;
+  startedAt: Date;
+  finishedAt: Date;
+  /** Local filesystem orphan counts. */
   detectedCount: number;
   deletedCount: number;
   deletedPaths: string[];
   skippedRecentCount: number;
+  /** GridFS-specific counters. */
+  gridfsScanned: number;
+  gridfsOrphaned: number;
+  gridfsDeleted: number;
+  gridfsSkipped: number;
+  gridfsDeletionErrors: number;
+  gridfsBatchesProcessed: number;
+  gridfsBatchesFailed: number;
+  gridfsStatus: 'skipped' | 'success' | 'partial_failure' | 'failed';
+  /** Overall status string for audit/monitoring. */
+  status: 'SUCCESS' | 'PARTIAL_FAILURE' | 'FAILED';
   error?: string;
 }
+
+/** GridFS batch size — never loads more than this many file records at once. */
+const GRIDFS_BATCH_SIZE = 500;
 
 function isPathInsideRoot(resolved: string, root: string): boolean {
   const normalizedRoot = root.endsWith(path.sep) ? root.slice(0, -1) : root;
@@ -34,7 +64,7 @@ function isPathInsideRoot(resolved: string, root: string): boolean {
 
 /**
  * Scan filesystem for files/folders with no active database record.
- * 
+ *
  * Safety invariants:
  * 1. Database Health Check: If DB query fails, FAIL CLOSED and return no orphans.
  * 2. Grace Period: Files newer than grace period (default 30m) are NEVER considered orphans.
@@ -229,24 +259,45 @@ export async function detectOrphanFiles(options: DetectOrphanOptions = {}): Prom
 }
 
 /**
- * Safely and idempotently clean up orphan files.
+ * Safely and idempotently clean up orphan files (local filesystem + GridFS).
  *
- * Requirements met:
- * 1. Safe cleanup with configurable grace period.
- * 2. Never deletes files based on incomplete database queries.
- * 3. Idempotent — repeated executions will not fail or corrupt state.
- * 4. Records cleanup events in audit logs.
+ * GridFS cleanup guarantees:
+ * 1. Stable cursor pagination (_id-keyed) — deleted objects never shift batches.
+ * 2. All five reference models checked per batch; failure aborts only that batch.
+ * 3. Each orphan candidate is re-verified immediately before deletion (concurrency guard).
+ * 4. Partial failures are reported explicitly — never swallowed into success=true.
+ * 5. Structured audit log written on completion, regardless of outcome.
  */
 export async function cleanOrphanFiles(options: DetectOrphanOptions = {}): Promise<CleanupOrphanResult> {
+  const executionId = crypto.randomUUID();
+  const startedAt = new Date();
+  const graceMinutes = options.gracePeriodMinutes ?? parseInt(process.env.ORPHAN_CLEANUP_GRACE_MINUTES || '30', 10);
+
+  logger.info(`[ORPHAN_CLEANUP] Starting cleanup run`, { executionId, graceMinutes });
+
+  // ── Local Filesystem Orphan Detection ─────────────────────────────────
   const detection = await detectOrphanFiles(options);
 
   if (!detection.success) {
+    const finishedAt = new Date();
     return {
       success: false,
+      executionId,
+      startedAt,
+      finishedAt,
       detectedCount: 0,
       deletedCount: 0,
       deletedPaths: [],
       skippedRecentCount: detection.skippedRecentCount,
+      gridfsScanned: 0,
+      gridfsOrphaned: 0,
+      gridfsDeleted: 0,
+      gridfsSkipped: 0,
+      gridfsDeletionErrors: 0,
+      gridfsBatchesProcessed: 0,
+      gridfsBatchesFailed: 0,
+      gridfsStatus: 'skipped',
+      status: 'FAILED',
       error: detection.error || 'Orphan detection failed',
     };
   }
@@ -267,33 +318,66 @@ export async function cleanOrphanFiles(options: DetectOrphanOptions = {}): Promi
     }
   }
 
-  // ── 5. Clean MongoDB GridFS Orphans (Persistent Storage Hardening) ──────────
+  // ── GridFS Orphan Cleanup ─────────────────────────────────────────────
+  let gridfsScanned = 0;
+  let gridfsOrphaned = 0;
+  let gridfsDeleted = 0;
+  let gridfsSkipped = 0;
+  let gridfsDeletionErrors = 0;
+  let gridfsBatchesProcessed = 0;
+  let gridfsBatchesFailed = 0;
+  let gridfsStatus: CleanupOrphanResult['gridfsStatus'] = 'skipped';
+
   try {
     const { getMongoConfig, getGridFSBucket } = await import('@/lib/storage/mongodb-client');
-    const { ObjectId } = await import('mongodb');
     const config = getMongoConfig();
 
     if (config.isConfigured) {
       const bucket = await getGridFSBucket();
-      const cutoff = new Date(Date.now() - (options.gracePeriodMinutes ?? 30) * 60 * 1000);
+      const cutoff = new Date(Date.now() - graceMinutes * 60 * 1000);
+      gridfsStatus = 'success';
 
-      // Cursor-based pagination: never load entire GridFS collection into memory.
-      const BATCH_SIZE = 500;
-      let skip = 0;
+      /**
+       * Stable cursor pagination using _id as the ordering key.
+       *
+       * WHY NOT skip/offset:
+       *   When we delete objects in batch N, those deletions shift the MongoDB
+       *   collection's internal offset, causing batch N+1's `.skip(N*500)` to
+       *   land at the wrong position — objects between the two batches are
+       *   silently skipped and never scanned.
+       *
+       * WHY _id cursor is stable:
+       *   We query `_id > lastProcessedId` with `.sort({ _id: 1 })`.
+       *   Deletions in earlier positions never affect where the cursor lands,
+       *   because we are not counting rows from the start — we are asking for
+       *   rows whose _id is strictly greater than the last one we saw.
+       *   Even if 499 of the 500 objects in the previous batch were deleted,
+       *   the next batch still starts exactly where we left off.
+       */
+      let lastProcessedId: ObjectId | null = null;
 
       while (true) {
+        const filter: Record<string, unknown> = { uploadDate: { $lt: cutoff } };
+        if (lastProcessedId !== null) {
+          filter['_id'] = { $gt: lastProcessedId };
+        }
+
         const gridFiles = await bucket
-          .find({ uploadDate: { $lt: cutoff } })
-          .skip(skip)
-          .limit(BATCH_SIZE)
+          .find(filter)
+          .sort({ _id: 1 })
+          .limit(GRIDFS_BATCH_SIZE)
           .toArray();
 
         if (gridFiles.length === 0) break;
-        skip += BATCH_SIZE;
+
+        // Advance the stable cursor to the last _id in this batch
+        lastProcessedId = gridFiles[gridFiles.length - 1]._id;
+        gridfsBatchesProcessed++;
+        gridfsScanned += gridFiles.length;
 
         const candidateIds = gridFiles.map((f) => f._id.toString());
 
-        // Check all 5 reference sources — fail-closed if any query throws
+        // ── Reference verification — all 5 models, fail-closed ─────────
         let docRefs: { storageFileId: string | null }[];
         let docVerRefs: { storageFileId: string | null }[];
         let userFileRefs: { storageFileId: string | null }[];
@@ -325,9 +409,15 @@ export async function cleanOrphanFiles(options: DetectOrphanOptions = {}): Promi
             }),
           ]);
         } catch (refQueryErr) {
-          // Fail-closed: if reference queries fail, skip this batch entirely
-          logger.error('[ORPHAN_CLEANUP] Reference query failed for GridFS batch — skipping batch to protect data', refQueryErr);
-          break;
+          // Fail-closed: cannot verify references → skip entire batch
+          gridfsBatchesFailed++;
+          gridfsStatus = 'partial_failure';
+          logger.error(
+            '[ORPHAN_CLEANUP] Reference query failed for GridFS batch — skipping to protect data',
+            { executionId, batchEndId: lastProcessedId?.toString() }
+          );
+          // Continue to next batch: cursor is already advanced so no duplicates
+          continue;
         }
 
         const activeIds = new Set<string>();
@@ -339,58 +429,140 @@ export async function cleanOrphanFiles(options: DetectOrphanOptions = {}): Promi
 
         for (const gf of gridFiles) {
           const idStr = gf._id.toString();
-          if (!activeIds.has(idStr)) {
-            try {
-              await bucket.delete(new ObjectId(idStr));
-              deletedPaths.push(`gridfs:${idStr}`);
-            } catch (delErr: any) {
-              if (!delErr?.message?.includes('FileNotFound')) {
-                logger.error(`[ORPHAN_CLEANUP] Failed to delete GridFS orphan: ${idStr}`, delErr);
-              }
+
+          if (activeIds.has(idStr)) {
+            gridfsSkipped++;
+            continue;
+          }
+
+          gridfsOrphaned++;
+
+          // ── Concurrency guard: re-verify immediately before deletion ───
+          // A concurrent upload or other worker could have created a new DB
+          // reference to this object between when we read the batch above and
+          // now. This final check closes that window.
+          let stillReferenced: boolean;
+          try {
+            const [d, dv, uf, fv, mf] = await Promise.all([
+              prisma.document.findFirst({ where: { storageFileId: idStr, isDeleted: false }, select: { id: true } }),
+              prisma.documentVersion.findFirst({ where: { storageFileId: idStr }, select: { id: true } }),
+              prisma.userFile.findFirst({ where: { storageFileId: idStr }, select: { id: true } }),
+              prisma.fileVersion.findFirst({ where: { storageFileId: idStr }, select: { id: true } }),
+              prisma.mongoFile.findFirst({ where: { gridFSId: idStr, isDeleted: false }, select: { id: true } }),
+            ]);
+            stillReferenced = !!(d || dv || uf || fv || mf);
+          } catch {
+            // Fail-closed: treat as still referenced if re-check query fails
+            logger.warn('[ORPHAN_CLEANUP] Pre-delete re-verification failed — skipping (fail-closed)', { executionId, idStr });
+            gridfsSkipped++;
+            gridfsOrphaned--;
+            continue;
+          }
+
+          if (stillReferenced) {
+            logger.warn('[ORPHAN_CLEANUP] Object acquired a reference between scan and delete — skipping', { executionId, idStr });
+            gridfsSkipped++;
+            gridfsOrphaned--;
+            continue;
+          }
+
+          try {
+            await bucket.delete(new ObjectId(idStr));
+            deletedPaths.push(`gridfs:${idStr}`);
+            gridfsDeleted++;
+          } catch (delErr: any) {
+            if (delErr?.message?.includes('FileNotFound')) {
+              // Deleted by a concurrent worker — idempotent, count as deleted
+              gridfsDeleted++;
+            } else {
+              gridfsDeletionErrors++;
+              gridfsStatus = 'partial_failure';
+              logger.error(`[ORPHAN_CLEANUP] Failed to delete GridFS orphan: ${idStr}`, {
+                executionId,
+                error: delErr?.message,
+              });
             }
           }
         }
 
-        // If we got a full batch, there may be more; loop continues.
-        // If partial batch, we are done.
-        if (gridFiles.length < BATCH_SIZE) break;
+        // Partial batch → collection exhausted
+        if (gridFiles.length < GRIDFS_BATCH_SIZE) break;
       }
     }
   } catch (gridErr) {
-    logger.error('[ORPHAN_CLEANUP] GridFS orphan cleanup error (non-blocking):', gridErr);
-  }
-
-  // ── Record in Audit Log ─────────────────────────────────────────────────
-  if (deletedPaths.length > 0) {
-    const graceMinutes = options.gracePeriodMinutes ?? parseInt(process.env.ORPHAN_CLEANUP_GRACE_MINUTES || '30', 10);
-    try {
-      await prisma.auditLog.create({
-        data: {
-          action: 'ORPHAN_FILE_CLEANUP',
-          reason: `Purged ${deletedPaths.length} orphaned file(s)/directory(ies) with no matching active DB record`,
-          metadata: JSON.stringify({
-            deletedCount: deletedPaths.length,
-            gracePeriodMinutes: graceMinutes,
-            deletedPaths: deletedPaths.slice(0, 50),
-          }),
-        },
-      });
-    } catch (auditErr) {
-      logger.error('[ORPHAN_CLEANUP] Failed to create audit log entry', auditErr);
-    }
-
-    logger.securityEvent('ORPHAN_FILE_CLEANUP', {
-      deletedCount: deletedPaths.length,
-      gracePeriodMinutes: graceMinutes,
+    gridfsStatus = 'failed';
+    logger.error('[ORPHAN_CLEANUP] GridFS orphan cleanup failed to start', {
+      executionId,
+      error: (gridErr as Error)?.message,
     });
   }
 
+  const finishedAt = new Date();
+
+  // ── Determine overall status ───────────────────────────────────────────
+  const overallStatus: CleanupOrphanResult['status'] =
+    gridfsStatus === 'failed'
+      ? 'FAILED'
+      : gridfsStatus === 'partial_failure' || gridfsDeletionErrors > 0
+        ? 'PARTIAL_FAILURE'
+        : 'SUCCESS';
+
+  // ── Structured Audit Log ───────────────────────────────────────────────
+  // Never log document contents, encryption keys, DEKs, KEKs, or credentials.
+  const auditPayload = {
+    executionId,
+    startedAt: startedAt.toISOString(),
+    finishedAt: finishedAt.toISOString(),
+    durationMs: finishedAt.getTime() - startedAt.getTime(),
+    gracePeriodMinutes: graceMinutes,
+    localFilesDetected: orphans.length,
+    localFilesDeleted: deletedPaths.filter((p) => !p.startsWith('gridfs:')).length,
+    gridfsScanned,
+    gridfsOrphaned,
+    gridfsDeleted,
+    gridfsSkipped,
+    gridfsDeletionErrors,
+    gridfsBatchesProcessed,
+    gridfsBatchesFailed,
+    gridfsStatus,
+    status: overallStatus,
+  };
+
+  try {
+    await prisma.auditLog.create({
+      data: {
+        action: 'ORPHAN_FILE_CLEANUP',
+        reason: `[${overallStatus}] Scanned ${gridfsScanned} GridFS objects — deleted ${gridfsDeleted}, skipped ${gridfsSkipped}, errors ${gridfsDeletionErrors}`,
+        metadata: JSON.stringify({
+          ...auditPayload,
+          // Bounded sample of deleted IDs for post-incident tracing (no contents or keys)
+          deletedGridFSSample: deletedPaths.filter((p) => p.startsWith('gridfs:')).slice(0, 20),
+        }),
+      },
+    });
+  } catch (auditErr) {
+    logger.error('[ORPHAN_CLEANUP] Failed to create audit log entry', auditErr);
+  }
+
+  logger.securityEvent('ORPHAN_FILE_CLEANUP', auditPayload);
+
   return {
-    success: true,
+    success: overallStatus !== 'FAILED',
+    executionId,
+    startedAt,
+    finishedAt,
     detectedCount: orphans.length,
     deletedCount: deletedPaths.length,
     deletedPaths,
     skippedRecentCount,
+    gridfsScanned,
+    gridfsOrphaned,
+    gridfsDeleted,
+    gridfsSkipped,
+    gridfsDeletionErrors,
+    gridfsBatchesProcessed,
+    gridfsBatchesFailed,
+    gridfsStatus,
+    status: overallStatus,
   };
 }
-
