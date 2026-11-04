@@ -46,6 +46,18 @@ const RATE_LIMITS = {
     MAX_ATTEMPTS: 20,
     WINDOW_SECONDS: 15 * 60,
   },
+  REGISTER_IP: {
+    MAX_ATTEMPTS: 10,
+    WINDOW_SECONDS: 60 * 60,
+  },
+  RESET_PASSWORD_IP: {
+    MAX_ATTEMPTS: 5,
+    WINDOW_SECONDS: 15 * 60,
+  },
+  AUTH_ACCOUNT: {
+    MAX_ATTEMPTS: 5,
+    WINDOW_SECONDS: 15 * 60,
+  },
 };
 
 export interface RateLimitResult {
@@ -278,6 +290,82 @@ export async function checkLoginRateLimit(
     RATE_LIMITS.LOGIN_IP.WINDOW_SECONDS,
     { securitySensitive: true, ...options },
   );
+}
+
+export async function checkRegisterRateLimit(
+  ip: string,
+  options?: CheckRateLimitOptions
+): Promise<RateLimitResult> {
+  const sanitizedIP = sanitizeIP(ip);
+  return checkRateLimit(
+    `ratelimit:register:${sanitizedIP}`,
+    RATE_LIMITS.REGISTER_IP.MAX_ATTEMPTS,
+    RATE_LIMITS.REGISTER_IP.WINDOW_SECONDS,
+    { securitySensitive: true, ...options },
+  );
+}
+
+export async function checkForgotPasswordRateLimit(
+  ip: string,
+  email?: string,
+  options?: CheckRateLimitOptions
+): Promise<RateLimitResult> {
+  const sanitizedIP = sanitizeIP(ip);
+  const ipRes = await checkRateLimit(
+    `ratelimit:forgot:${sanitizedIP}`,
+    RATE_LIMITS.RESET_PASSWORD_IP.MAX_ATTEMPTS,
+    RATE_LIMITS.RESET_PASSWORD_IP.WINDOW_SECONDS,
+    { securitySensitive: true, ...options },
+  );
+  if (!ipRes.allowed || !email) return ipRes;
+
+  const emailHash = crypto.createHash('sha256').update(email.trim().toLowerCase()).digest('hex').slice(0, 16);
+  return checkRateLimit(
+    `ratelimit:forgot:acc:${emailHash}`,
+    RATE_LIMITS.RESET_PASSWORD_IP.MAX_ATTEMPTS,
+    RATE_LIMITS.RESET_PASSWORD_IP.WINDOW_SECONDS,
+    { securitySensitive: true, ...options },
+  );
+}
+
+export async function checkResetPasswordRateLimit(
+  ip: string,
+  options?: CheckRateLimitOptions
+): Promise<RateLimitResult> {
+  const sanitizedIP = sanitizeIP(ip);
+  return checkRateLimit(
+    `ratelimit:reset:${sanitizedIP}`,
+    RATE_LIMITS.RESET_PASSWORD_IP.MAX_ATTEMPTS,
+    RATE_LIMITS.RESET_PASSWORD_IP.WINDOW_SECONDS,
+    { securitySensitive: true, ...options },
+  );
+}
+
+export async function checkAccountBruteForce(
+  email: string,
+  options?: CheckRateLimitOptions
+): Promise<RateLimitResult> {
+  const emailHash = crypto.createHash('sha256').update(email.trim().toLowerCase()).digest('hex').slice(0, 16);
+  return checkRateLimit(
+    `ratelimit:account_bruteforce:${emailHash}`,
+    RATE_LIMITS.AUTH_ACCOUNT.MAX_ATTEMPTS,
+    RATE_LIMITS.AUTH_ACCOUNT.WINDOW_SECONDS,
+    { securitySensitive: true, ...options },
+  );
+}
+
+export async function resetAccountBruteForce(email: string): Promise<void> {
+  const emailHash = crypto.createHash('sha256').update(email.trim().toLowerCase()).digest('hex').slice(0, 16);
+  const key = `ratelimit:account_bruteforce:${emailHash}`;
+  memoryBuckets.delete(key);
+  try {
+    const redis = await getRedis();
+    if (redis) {
+      await redis.del(key);
+    }
+  } catch (error) {
+    logger.warn('[RateLimit] Failed to clear account brute-force key', error);
+  }
 }
 
 export async function checkDownloadRateLimit(

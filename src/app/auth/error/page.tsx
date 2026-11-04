@@ -26,6 +26,10 @@ function ErrorContent() {
             title: 'Verification Error',
             description: 'The verification link may have expired or already been used.',
         },
+        OAuthAccountNotLinked: {
+            title: 'Account Already Exists',
+            description: 'An account with this email address is registered with email/password authentication. Please sign in with your password to access your account.',
+        },
         Default: {
             title: 'Authentication Error',
             description: 'An error occurred during authentication. Please try again.',

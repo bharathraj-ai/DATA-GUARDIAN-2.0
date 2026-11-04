@@ -72,6 +72,10 @@ const nextConfig: NextConfig = {
     'prisma',
     'mongodb',
     'exceljs',
+    // exceljs transitive deps — must also be external so Turbopack/Vercel
+    // can resolve bluebird's internal require('./debuggability') at runtime
+    'bluebird',
+    'unzipper',
     'pdf-lib',
     'bcryptjs',
     'nodemailer',

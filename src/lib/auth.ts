@@ -1,11 +1,15 @@
 import { cache } from 'react';
 import { NextAuthOptions, getServerSession } from 'next-auth';
 import GoogleProvider from 'next-auth/providers/google';
+import CredentialsProvider from 'next-auth/providers/credentials';
 import { prisma } from '@/lib/prisma';
 import { createRaceSafePrismaAdapter } from '@/lib/auth-adapter';
 import { normalizeRole } from '@/lib/security/roles';
 import { getOnboardingStep } from '@/lib/onboarding';
 import { logger, redactEmail } from '@/lib/logger';
+import { verifyPassword } from '@/lib/security/password';
+import { signInSchema } from '@/lib/validations';
+import { checkAccountBruteForce, resetAccountBruteForce } from '@/lib/rate-limit';
 
 /**
  * NextAuth Configuration for Data Guardian (v4 Compatible)
@@ -42,6 +46,67 @@ export const authOptions: NextAuthOptions = {
                 params: {
                     prompt: 'select_account',
                 },
+            },
+        }),
+        CredentialsProvider({
+            id: 'credentials',
+            name: 'Email and Password',
+            credentials: {
+                email: { label: 'Email', type: 'email' },
+                password: { label: 'Password', type: 'password' },
+            },
+            async authorize(credentials) {
+                const parsed = signInSchema.safeParse(credentials);
+                if (!parsed.success) {
+                    logger.warn(`[Auth] Credentials rejected: invalid schema validation: ${parsed.error.message}`);
+                    throw new Error('INVALID_CREDENTIALS');
+                }
+
+                const { email, password } = parsed.data;
+                const normalizedEmail = email.trim().toLowerCase();
+
+                // Prevent brute-force password guessing against targeted accounts
+                const accountRateCheck = await checkAccountBruteForce(normalizedEmail);
+                if (!accountRateCheck.allowed) {
+                    logger.warn(`[Auth] Brute-force protection: account locked out email=${redactEmail(normalizedEmail)}`);
+                    throw new Error('ACCOUNT_LOCKED');
+                }
+
+                const user = await prisma.user.findUnique({
+                    where: { email: normalizedEmail },
+                });
+
+                if (!user || !user.passwordHash) {
+                    logger.warn(`[Auth] Credentials rejected: no user or password hash email=${redactEmail(normalizedEmail)}`);
+                    throw new Error('INVALID_CREDENTIALS');
+                }
+
+                const isValidPassword = await verifyPassword(user.passwordHash, password);
+                if (!isValidPassword) {
+                    logger.warn(`[Auth] Credentials rejected: incorrect password email=${redactEmail(normalizedEmail)}`);
+                    throw new Error('INVALID_CREDENTIALS');
+                }
+
+                if (!user.emailVerified) {
+                    logger.warn(`[Auth] Credentials rejected: email not verified email=${redactEmail(normalizedEmail)}`);
+                    throw new Error('EMAIL_NOT_VERIFIED');
+                }
+
+                // Reset brute-force lockout counter on successful authentication
+                await resetAccountBruteForce(normalizedEmail);
+
+                logger.info(`[Auth] Credentials login successful email=${redactEmail(normalizedEmail)}`);
+                return {
+                    id: user.id,
+                    email: user.email,
+                    name: user.name,
+                    role: user.role,
+                    roleSelected: user.roleSelected,
+                    emailVerified: user.emailVerified,
+                    passwordHash: user.passwordHash,
+                    hasPassword: true,
+                    passwordSet: true,
+                };
             },
         }),
     ],
@@ -116,6 +181,15 @@ export const authOptions: NextAuthOptions = {
             logger.info(
                 `[Google OAuth] Sign-in email=${redactEmail(user.email)} provider=${account?.provider} onboardingStep=${onboardingStep}`
             );
+
+            if (account?.provider === 'google' && user.id) {
+                // Google accounts are verified by Google. Ensure existing users without an emailVerified timestamp are marked verified.
+                await prisma.user.update({
+                    where: { id: user.id },
+                    data: { emailVerified: new Date() },
+                }).catch(() => {});
+            }
+
             return true;
         },
 
@@ -142,6 +216,7 @@ export const authOptions: NextAuthOptions = {
                 if (
                     target.pathname === '/auth/continue' ||
                     target.pathname === '/auth/signin' ||
+                    target.pathname === '/auth/set-password' ||
                     target.pathname === '/auth/error'
                 ) {
                     return `${canonicalBase}${path}`;
@@ -176,22 +251,53 @@ export const authOptions: NextAuthOptions = {
                 token.id = user.id;
                 token.role = normalizeRole((user as { role?: string }).role);
                 token.roleSelected = roleSelected;
+                let emailVerified = (user as { emailVerified?: Date | string | null }).emailVerified ?? null;
+                // If user has a linked Google account or is logging in via Google, email is verified
+                if (!emailVerified && user.id) {
+                    const hasGoogle = await prisma.account.findFirst({
+                        where: { userId: user.id, provider: 'google' },
+                        select: { id: true },
+                    });
+                    if (hasGoogle) {
+                        emailVerified = new Date();
+                        await prisma.user.update({
+                            where: { id: user.id },
+                            data: { emailVerified },
+                        }).catch(() => {});
+                    }
+                }
+                token.emailVerified = emailVerified;
                 token.onboardingStep = getOnboardingStep(roleSelected);
+
+                let hasPassword = Boolean((user as { passwordHash?: string | null }).passwordHash ?? (user as { hasPassword?: boolean }).hasPassword);
+                if (!hasPassword && user.id) {
+                    const dbUser = await prisma.user.findUnique({
+                        where: { id: user.id },
+                        select: { passwordHash: true },
+                    });
+                    hasPassword = Boolean(dbUser?.passwordHash);
+                }
+                token.hasPassword = hasPassword;
+                token.passwordSet = hasPassword;
+
                 logger.info(
-                    `[Google OAuth] JWT issued userId=${user.id} onboardingStep=${token.onboardingStep}`
+                    `[Auth] JWT issued userId=${user.id} hasPassword=${hasPassword} onboardingStep=${token.onboardingStep}`
                 );
             }
 
-            // Client called update() after role selection — ALWAYS refresh from DB.
-            // Never trust client-supplied role / roleSelected (privilege-escalation vector).
+            // Client called update() after role selection or password setup — ALWAYS refresh from DB.
+            // Never trust client-supplied values (privilege-escalation vector).
             if (trigger === 'update' && token.id) {
                 const dbUser = await prisma.user.findUnique({
                     where: { id: token.id as string },
-                    select: { role: true, roleSelected: true },
+                    select: { role: true, roleSelected: true, emailVerified: true, passwordHash: true },
                 });
                 if (dbUser) {
                     token.role = normalizeRole(dbUser.role);
                     token.roleSelected = dbUser.roleSelected ?? false;
+                    token.emailVerified = dbUser.emailVerified ?? null;
+                    token.hasPassword = Boolean(dbUser.passwordHash);
+                    token.passwordSet = token.hasPassword;
                     token.onboardingStep = getOnboardingStep(dbUser.roleSelected);
                 }
             }
@@ -208,6 +314,9 @@ export const authOptions: NextAuthOptions = {
                 session.user.id = (token.id as string) ?? '';
                 session.user.role = normalizeRole(token.role as string | undefined);
                 session.user.roleSelected = Boolean(token.roleSelected);
+                session.user.emailVerified = (token.emailVerified as Date | string | null) ?? null;
+                session.user.hasPassword = Boolean(token.hasPassword);
+                session.user.passwordSet = Boolean(token.passwordSet);
                 session.user.onboardingStep = getOnboardingStep(
                     Boolean(token.roleSelected)
                 );
