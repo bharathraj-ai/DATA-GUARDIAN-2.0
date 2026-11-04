@@ -1,5 +1,4 @@
 import 'server-only';
-import ExcelJS from 'exceljs';
 
 export type PreviewCell = string | number | boolean | '';
 
@@ -20,6 +19,10 @@ function cellToPreview(value: unknown): PreviewCell {
 /**
  * First `limit` rows of an XLSX via ExcelJS — never SheetJS (xlsx@0.18.x).
  * Rejects OLE2 .xls; callers should treat CSV separately.
+ *
+ * ExcelJS is loaded via dynamic import() so Turbopack/Vercel never statically
+ * bundles it (and its bluebird/unzipper deps) into the SSR chunk.  It is still
+ * listed in next.config serverExternalPackages so Node resolves it at runtime.
  */
 export async function previewXlsxRows(
   buffer: Buffer,
@@ -33,6 +36,9 @@ export async function previewXlsxRows(
     throw new Error('Only .xlsx spreadsheets can be previewed on the server');
   }
 
+  // Dynamic import keeps exceljs (and its bluebird/unzipper deps) out of the
+  // static bundle graph — resolving the Vercel "Cannot find module ./debuggability" error.
+  const { default: ExcelJS } = await import('exceljs');
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(buffer as unknown as ArrayBuffer);
   const sheet = workbook.worksheets[0];
