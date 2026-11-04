@@ -301,17 +301,6 @@ export default function LandingPage() {
                 <p className="cta-subtitle">
                   Start sharing sensitive information with confidence. No credit card required.
                 </p>
-                <div className="cta-buttons">
-                  <Link href="/how-it-works" className="btn btn-primary btn-large">
-                    <span>Learn How It Works</span>
-                    <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clipRule="evenodd" />
-                    </svg>
-                  </Link>
-                  <Link href="/create-link" className="btn btn-outline-light btn-large">
-                    <span>Create Secure Link</span>
-                  </Link>
-                </div>
               </div>
               <div className="cta-illustration" aria-hidden="true">
                 <div className="cta-shield">
