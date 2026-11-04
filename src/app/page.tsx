@@ -1,7 +1,6 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import ScrollReveal from '@/components/ScrollReveal';
-import HeroActions from '@/components/HeroActions';
 
 export default function LandingPage() {
   return (
@@ -61,8 +60,6 @@ export default function LandingPage() {
               Share sensitive information with encrypted links that expire on your terms —
               by time, day count, or month. Complete control. Zero compromise.
             </p>
-
-            <HeroActions />
 
             {/* Trust Indicators */}
             <div className="trust-badges">
