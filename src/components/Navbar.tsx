@@ -114,7 +114,16 @@ function NavbarView({
         <nav className={`navbar ${isScrolled ? 'navbar-scrolled' : ''}`}>
             <div className="container navbar-container">
                 <Link href="/" className="navbar-logo">
-                    <Image src="/DG logo.png" alt="Data Guardian" width={32} height={32} style={{ opacity: 0.9, borderRadius: '4px' }} />
+                    <Image 
+                        src="/DG logo.png" 
+                        alt="Data Guardian" 
+                        width={64} 
+                        height={64} 
+                        quality={100}
+                        priority
+                        unoptimized
+                        style={{ width: '32px', height: '32px', opacity: 1, objectFit: 'contain' }} 
+                    />
                     <span style={{ fontWeight: 600, letterSpacing: '-0.02em', fontSize: '18px' }}>Data Guardian</span>
                 </Link>
 
