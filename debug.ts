@@ -1,3 +1,4 @@
+// @ts-nocheck
 import * as fs from 'fs';
 import * as XLSX from 'xlsx';
 import { parseExcel } from './src/components/editors/utils/fileParsers';

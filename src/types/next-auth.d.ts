@@ -9,6 +9,9 @@ declare module 'next-auth' {
       id: string;
       role: SessionAppRole;
       roleSelected: boolean;
+      emailVerified?: Date | string | null;
+      hasPassword?: boolean;
+      passwordSet?: boolean;
       /** Server-derived onboarding state (from roleSelected). */
       onboardingStep: OnboardingStep;
     } & DefaultSession['user'];
@@ -17,6 +20,10 @@ declare module 'next-auth' {
   interface User extends DefaultUser {
     role?: string;
     roleSelected?: boolean;
+    emailVerified?: Date | string | null;
+    passwordHash?: string | null;
+    hasPassword?: boolean;
+    passwordSet?: boolean;
   }
 }
 
@@ -25,6 +32,9 @@ declare module 'next-auth/jwt' {
     id?: string;
     role?: SessionAppRole | string;
     roleSelected?: boolean;
+    emailVerified?: Date | string | null;
+    hasPassword?: boolean;
+    passwordSet?: boolean;
     onboardingStep?: OnboardingStep;
   }
 }
@@ -33,5 +43,9 @@ declare module 'next-auth/adapters' {
   interface AdapterUser {
     role?: string;
     roleSelected?: boolean;
+    emailVerified?: Date | string | null;
+    passwordHash?: string | null;
+    hasPassword?: boolean;
+    passwordSet?: boolean;
   }
 }
