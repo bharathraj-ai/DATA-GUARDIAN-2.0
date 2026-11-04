@@ -15,9 +15,9 @@ import {
 } from 'lucide-react';
 
 export const metadata: Metadata = {
-    title: 'How It Works | Secure Protocol',
+    title: 'How It Works | Data Guardian',
     description:
-        'Learn how Secure Protocol secures your data in three simple steps — military-grade encryption, OTP authentication and instant revocation.',
+        'Learn how Data Guardian secures your data in three simple steps — military-grade encryption, OTP authentication and instant revocation.',
 };
 
 const STEPS = [

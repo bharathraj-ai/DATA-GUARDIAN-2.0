@@ -258,13 +258,16 @@ export default function SiteFooter() {
             <div className="footer-brand">
               <Link href="/" className="footer-logo">
                 <Image
-                  src="/logo.jpg"
-                  alt="Secure Protocol"
-                  width={28}
-                  height={28}
-                  style={{ opacity: 0.9, borderRadius: '4px' }}
+                  src="/dg logo ( blue and black ).png"
+                  alt="Data Guardian"
+                  width={128}
+                  height={128}
+                  quality={100}
+                  priority
+                  unoptimized
+                  style={{ width: '64px', height: '64px', opacity: 1, objectFit: 'contain' }}
                 />
-                <span className="footer-logo-text">Secure Protocol</span>
+                <span className="footer-logo-text">Data Guardian</span>
               </Link>
               <p className="footer-motto">
                 Enterprise-grade data security. Protect, share, and control your sensitive information with zero-knowledge architecture.
@@ -288,7 +291,7 @@ export default function SiteFooter() {
           </div>
 
           <div className="footer-bottom">
-            <p>&copy; {new Date().getFullYear()} Secure Protocol. All rights reserved.</p>
+            <p>&copy; {new Date().getFullYear()} Data Guardian. All rights reserved.</p>
             <div className="footer-bottom-links">
               <span>English (US)</span>
               <span>ISO 27001 Certified</span>

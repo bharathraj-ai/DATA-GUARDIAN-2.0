@@ -27,13 +27,13 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
   title: {
-    default: "Secure Protocol - Enterprise Data Security",
-    template: "%s | Secure Protocol",
+    default: "Data Guardian - Enterprise Data Security",
+    template: "%s | Data Guardian",
   },
   description: "Protect your sensitive data with military-grade encryption, ephemeral sessions, and complete access control. Share securely with OTP protection and instant revocation.",
   keywords: ["data protection", "encryption", "secure sharing", "privacy", "cybersecurity", "OTP", "self-destructing links", "zero trust"],
-  authors: [{ name: "Secure Protocol" }],
-  creator: "Secure Protocol",
+  authors: [{ name: "Data Guardian" }],
+  creator: "Data Guardian",
   robots: {
     index: true,
     follow: true,
@@ -41,13 +41,13 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     locale: "en_US",
-    siteName: "Secure Protocol",
-    title: "Secure Protocol - Enterprise Secure Data Sharing",
+    siteName: "Data Guardian",
+    title: "Data Guardian - Enterprise Secure Data Sharing",
     description: "Share sensitive data with military-grade AES-256 encryption, OTP protection, and instant revocation. Zero-knowledge architecture ensures complete privacy.",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Secure Protocol - Secure Data Protection",
+    title: "Data Guardian - Secure Data Protection",
     description: "Military-grade encryption. OTP protection. Instant revocation. Share sensitive data with confidence.",
   },
 };

@@ -114,8 +114,26 @@ function NavbarView({
         <nav className={`navbar ${isScrolled ? 'navbar-scrolled' : ''}`}>
             <div className="container navbar-container">
                 <Link href="/" className="navbar-logo">
-                    <Image src="/logo.jpg" alt="Secure Protocol" width={32} height={32} style={{ opacity: 0.9, borderRadius: '4px' }} />
-                    <span style={{ fontWeight: 600, letterSpacing: '-0.02em', fontSize: '18px' }}>Secure Protocol</span>
+                    <Image 
+                        src="/dg logo ( blue and black ).png" 
+                        alt="Data Guardian" 
+                        width={160} 
+                        height={160} 
+                        quality={100}
+                        priority
+                        unoptimized
+                        style={{ width: '80px', height: '80px', opacity: 1, objectFit: 'contain' }} 
+                    />
+                    <span style={{ 
+                        fontWeight: 600, 
+                        letterSpacing: '-0.02em', 
+                        fontSize: '24px',
+                        background: 'linear-gradient(90deg, #0EA5E9 0%, #0369A1 40%, #1F2937 100%)',
+                        WebkitBackgroundClip: 'text',
+                        WebkitTextFillColor: 'transparent',
+                        backgroundClip: 'text',
+                        display: 'inline-block'
+                    }}>Data Guardian</span>
                 </Link>
 
                 {/* Desktop Menu */}
