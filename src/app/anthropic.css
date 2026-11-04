@@ -445,10 +445,7 @@ body, html {
 .footer-logo-text {
   font-weight: 600 !important;
   font-size: 22px !important;
-  background: linear-gradient(135deg, #1E88E5 0%, #1565C0 40%, #0D47A1 100%) !important;
-  -webkit-background-clip: text !important;
-  -webkit-text-fill-color: transparent !important;
-  background-clip: text !important;
+  color: #0EA5E9 !important;
 }
 .footer-motto, .footer-link {
   color: #6B7280 !important;

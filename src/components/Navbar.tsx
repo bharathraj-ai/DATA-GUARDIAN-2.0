@@ -128,10 +128,7 @@ function NavbarView({
                         fontWeight: 600, 
                         letterSpacing: '-0.02em', 
                         fontSize: '24px',
-                        background: 'linear-gradient(135deg, #1E88E5 0%, #1565C0 40%, #0D47A1 100%)',
-                        WebkitBackgroundClip: 'text',
-                        WebkitTextFillColor: 'transparent',
-                        backgroundClip: 'text'
+                        color: '#0EA5E9'
                     }}>Data Guardian</span>
                 </Link>
 
