@@ -445,7 +445,7 @@ body, html {
 .footer-logo-text {
   font-weight: 600 !important;
   font-size: 22px !important;
-  background: linear-gradient(90deg, #0EA5E9 0%, #06B6D4 30%, #0369A1 60%, #1F2937 100%) !important;
+  background: linear-gradient(90deg, #0EA5E9 0%, #0369A1 40%, #1F2937 100%) !important;
   -webkit-background-clip: text !important;
   -webkit-text-fill-color: transparent !important;
   background-clip: text !important;
