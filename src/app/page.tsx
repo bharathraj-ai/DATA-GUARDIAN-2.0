@@ -12,7 +12,7 @@ export default function LandingPage() {
           __html: JSON.stringify({
             '@context': 'https://schema.org',
             '@type': 'WebApplication',
-            name: 'Secure Protocol',
+            name: 'Data Guardian',
             description: 'Secure data sharing platform with military-grade AES-256 encryption, OTP protection, and instant revocation.',
             applicationCategory: 'SecurityApplication',
             operatingSystem: 'Web',
@@ -126,7 +126,7 @@ export default function LandingPage() {
         <div className="container">
           <ScrollReveal>
             <div className="section-header">
-              <h2 className="section-title">Why Choose Secure Protocol?</h2>
+              <h2 className="section-title">Why Choose Data Guardian?</h2>
               <p className="section-subtitle">
                 Enterprise-grade security meets simplicity
               </p>
