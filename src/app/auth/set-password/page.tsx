@@ -233,7 +233,7 @@ function SetPasswordContent() {
 
                 <div className={styles.trust}>
                     <Shield size={16} strokeWidth={2} />
-                    <span>Argon2id Hashed · Enables Independent Login</span>
+                    <span>Bcrypt Hashed · Enables Independent Login</span>
                 </div>
             </article>
         </main>

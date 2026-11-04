@@ -245,7 +245,7 @@ function ResetPasswordContent() {
 
                 <div className={styles.trust}>
                     <Shield size={16} strokeWidth={2} />
-                    <span>Argon2id Hashing · Session Invalidation</span>
+                    <span>Bcrypt Hashing · Session Invalidation</span>
                 </div>
 
                 <div className={styles.foot}>

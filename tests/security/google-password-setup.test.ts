@@ -99,7 +99,7 @@ describe('PHASE 10 – MANDATORY PASSWORD SETUP FOR GOOGLE OAUTH USERS', () => {
             const userWithPassword = {
                 id: 'existing_usr_pwd',
                 email: 'haspwd@example.com',
-                passwordHash: '$argon2id$mockhash',
+                passwordHash: '$2b$12$mockhash',
             };
 
             const requiresPasswordSetup = !userWithPassword.passwordHash;
@@ -111,7 +111,7 @@ describe('PHASE 10 – MANDATORY PASSWORD SETUP FOR GOOGLE OAUTH USERS', () => {
     // TEST 4: GOOGLE USER CREATES PASSWORD → MANUAL LOGIN WORKS
     // ============================================
     describe('4. Google user creates password and enables manual sign in', () => {
-        it('saves Argon2id hash and enables CredentialsProvider authentication', async () => {
+        it('saves bcrypt hash and enables CredentialsProvider authentication', async () => {
             const parsed = setPasswordSchema.safeParse({
                 password: initialPassword,
                 confirmPassword: initialPassword,
@@ -125,7 +125,7 @@ describe('PHASE 10 – MANDATORY PASSWORD SETUP FOR GOOGLE OAUTH USERS', () => {
                 data: { passwordHash },
             });
 
-            expect(updatedUser.passwordHash).toMatch(/^\$argon2id\$/);
+            expect(updatedUser.passwordHash).toMatch(/^\$2[aby]\$/);
 
             // Manual Credentials login with the same Google email
             const credentialsProvider = authOptions.providers.find(
