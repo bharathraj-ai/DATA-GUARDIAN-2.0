@@ -59,9 +59,9 @@ describe('DATA GUARDIAN 2.0 - COMPLETE AUTHENTICATION SECURITY SUITE', () => {
     // TEST 1: NEW USER REGISTRATION
     // ============================================
     describe('1. New User Registration', () => {
-        it('hashes password with Argon2id and stores unverified user with verification token hash', async () => {
+        it('hashes password with bcrypt and stores unverified user with verification token hash', async () => {
             const passwordHash = await hashPassword(strongPassword);
-            expect(passwordHash).toMatch(/^\$argon2id\$/);
+            expect(passwordHash).toMatch(/^\$2[aby]\$/);
 
             const user = await prisma.user.create({
                 data: {
