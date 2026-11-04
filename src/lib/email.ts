@@ -400,3 +400,127 @@ export async function sendNotificationEmail(
         'Notification email',
     );
 }
+
+// ============================================
+// AUTHENTICATION EMAILS
+// ============================================
+
+export async function sendVerificationEmail(
+    email: string,
+    token: string,
+    name?: string,
+): Promise<void> {
+    if (!isEmailConfigured()) {
+        logger.warn(`[Email] SMTP not configured. Verification token for ${redactEmail(email)}: ${token}`);
+        return;
+    }
+
+    const appUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_BASE_URL || process.env.NEXTAUTH_URL || 'http://localhost:3000';
+    const verificationLink = `${appUrl}/auth/verify-email?token=${encodeURIComponent(token)}`;
+    const senderName = process.env.EMAIL_FROM_NAME || 'Data Guardian Security';
+    const { from, user } = readEmailEnv();
+    const safeLink = escapeHtml(verificationLink);
+    const displayName = name ? escapeHtml(name) : 'there';
+
+    const bodyHtml = `
+      <p style="margin:0 0 16px;color:#334155;font-size:15px;line-height:1.6;">
+        Hello ${displayName},
+      </p>
+      <p style="margin:0 0 24px;color:#475569;font-size:14px;line-height:1.6;">
+        Thank you for creating an account on <strong>Data Guardian</strong>. Please click the button below to verify your email address and activate your account.
+      </p>
+      <table role="presentation" cellpadding="0" cellspacing="0" style="margin:28px 0;">
+        <tr>
+          <td align="center" style="border-radius:12px;background:#0284c7;">
+            <a href="${safeLink}" target="_blank" style="display:inline-block;padding:14px 28px;font-size:15px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:12px;background:#0284c7;letter-spacing:0.02em;">
+              Verify Email Address
+            </a>
+          </td>
+        </tr>
+      </table>
+      <p style="margin:0 0 12px;color:#64748b;font-size:13px;line-height:1.5;">
+        Or copy and paste this link into your browser:
+      </p>
+      <p style="margin:0 0 24px;font-size:12px;word-break:break-all;color:#0284c7;">
+        <a href="${safeLink}" style="color:#0284c7;">${safeLink}</a>
+      </p>
+      <p style="margin:0;padding-top:16px;border-top:1px solid #e2e8f0;color:#94a3b8;font-size:12px;line-height:1.5;">
+        This link expires in 24 hours. If you did not create an account, you can safely ignore this email.
+      </p>
+    `;
+
+    await sendWithTimeout(
+        getTransporter().sendMail({
+            from: `"${senderName}" <${from || user}>`,
+            to: email,
+            subject: 'Verify your email address - Data Guardian',
+            text: `Hello ${displayName},\n\nPlease verify your email address for Data Guardian by opening this link:\n\n${verificationLink}\n\nThis link expires in 24 hours.`,
+            html: emailShell({
+                title: 'Verify Your Email',
+                subtitle: 'Data Guardian Account Activation',
+                preheader: 'Please verify your email address to activate your account.',
+                bodyHtml,
+            }),
+        }),
+        'Verification email',
+    );
+}
+
+export async function sendPasswordResetEmail(
+    email: string,
+    token: string,
+): Promise<void> {
+    if (!isEmailConfigured()) {
+        logger.warn(`[Email] SMTP not configured. Password reset token for ${redactEmail(email)}: ${token}`);
+        return;
+    }
+
+    const appUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_BASE_URL || process.env.NEXTAUTH_URL || 'http://localhost:3000';
+    const resetLink = `${appUrl}/auth/reset-password?token=${encodeURIComponent(token)}`;
+    const senderName = process.env.EMAIL_FROM_NAME || 'Data Guardian Security';
+    const { from, user } = readEmailEnv();
+    const safeLink = escapeHtml(resetLink);
+
+    const bodyHtml = `
+      <p style="margin:0 0 16px;color:#334155;font-size:15px;line-height:1.6;">
+        Hello,
+      </p>
+      <p style="margin:0 0 24px;color:#475569;font-size:14px;line-height:1.6;">
+        We received a request to reset the password for your Data Guardian account. Click the button below to choose a new password.
+      </p>
+      <table role="presentation" cellpadding="0" cellspacing="0" style="margin:28px 0;">
+        <tr>
+          <td align="center" style="border-radius:12px;background:#0284c7;">
+            <a href="${safeLink}" target="_blank" style="display:inline-block;padding:14px 28px;font-size:15px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:12px;background:#0284c7;letter-spacing:0.02em;">
+              Reset Password
+            </a>
+          </td>
+        </tr>
+      </table>
+      <p style="margin:0 0 12px;color:#64748b;font-size:13px;line-height:1.5;">
+        Or copy and paste this link into your browser:
+      </p>
+      <p style="margin:0 0 24px;font-size:12px;word-break:break-all;color:#0284c7;">
+        <a href="${safeLink}" style="color:#0284c7;">${safeLink}</a>
+      </p>
+      <p style="margin:0;padding-top:16px;border-top:1px solid #e2e8f0;color:#94a3b8;font-size:12px;line-height:1.5;">
+        This link expires in 1 hour. If you did not request a password reset, please ignore this email and your password will remain unchanged.
+      </p>
+    `;
+
+    await sendWithTimeout(
+        getTransporter().sendMail({
+            from: `"${senderName}" <${from || user}>`,
+            to: email,
+            subject: 'Reset your password - Data Guardian',
+            text: `Hello,\n\nWe received a request to reset your password. Use the following link:\n\n${resetLink}\n\nThis link expires in 1 hour. If you did not request this, you can safely ignore this email.`,
+            html: emailShell({
+                title: 'Reset Your Password',
+                subtitle: 'Security Request',
+                preheader: 'Use this link to securely reset your Data Guardian password.',
+                bodyHtml,
+            }),
+        }),
+        'Password reset email',
+    );
+}

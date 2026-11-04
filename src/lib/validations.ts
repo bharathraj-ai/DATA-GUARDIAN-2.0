@@ -82,3 +82,81 @@ export const SharePurposeSchema = z.enum([
 });
 
 export type SharePurpose = z.infer<typeof SharePurposeSchema>;
+
+// ============================================
+// AUTHENTICATION SCHEMAS
+// ============================================
+
+export const passwordComplexityRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,128}$/;
+
+export const signUpSchema = z.object({
+    name: z.string().trim().min(2, 'Name must be at least 2 characters').max(100, 'Name cannot exceed 100 characters'),
+    email: z.string().trim().email('Invalid email address').max(255, 'Email cannot exceed 255 characters').toLowerCase(),
+    password: z.string().min(8, 'Password must be at least 8 characters').max(128, 'Password cannot exceed 128 characters')
+        .regex(/[A-Z]/, 'Password must contain at least one uppercase letter')
+        .regex(/[a-z]/, 'Password must contain at least one lowercase letter')
+        .regex(/[0-9]/, 'Password must contain at least one number')
+        .regex(/[^A-Za-z0-9]/, 'Password must contain at least one special character'),
+    confirmPassword: z.string(),
+    terms: z.boolean().refine((val) => val === true, {
+        message: 'You must agree to the Terms and Conditions to register',
+    }),
+}).refine((data) => data.password === data.confirmPassword, {
+    message: 'Passwords do not match',
+    path: ['confirmPassword'],
+});
+
+export type SignUpInput = z.infer<typeof signUpSchema>;
+
+export const signInSchema = z.object({
+    email: z.string().trim().email('Invalid email address').toLowerCase(),
+    password: z.string().min(1, 'Password is required'),
+    rememberMe: z.preprocess(
+        (val) => val === true || val === 'true' || val === '1' || val === 'on',
+        z.boolean()
+    ).optional().default(false),
+});
+
+export type SignInInput = z.infer<typeof signInSchema>;
+
+export const forgotPasswordSchema = z.object({
+    email: z.string().trim().email('Invalid email address').toLowerCase(),
+});
+
+export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
+
+export const resetPasswordSchema = z.object({
+    token: z.string().min(10, 'Invalid reset token'),
+    password: z.string().min(8, 'Password must be at least 8 characters').max(128, 'Password cannot exceed 128 characters')
+        .regex(/[A-Z]/, 'Password must contain at least one uppercase letter')
+        .regex(/[a-z]/, 'Password must contain at least one lowercase letter')
+        .regex(/[0-9]/, 'Password must contain at least one number')
+        .regex(/[^A-Za-z0-9]/, 'Password must contain at least one special character'),
+    confirmPassword: z.string(),
+}).refine((data) => data.password === data.confirmPassword, {
+    message: 'Passwords do not match',
+    path: ['confirmPassword'],
+});
+
+export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
+
+export const verifyEmailSchema = z.object({
+    token: z.string().min(10, 'Invalid verification token'),
+});
+
+export type VerifyEmailInput = z.infer<typeof verifyEmailSchema>;
+
+export const setPasswordSchema = z.object({
+    password: z.string().min(8, 'Password must be at least 8 characters').max(128, 'Password cannot exceed 128 characters')
+        .regex(/[A-Z]/, 'Password must contain at least one uppercase letter')
+        .regex(/[a-z]/, 'Password must contain at least one lowercase letter')
+        .regex(/[0-9]/, 'Password must contain at least one number')
+        .regex(/[^A-Za-z0-9]/, 'Password must contain at least one special character'),
+    confirmPassword: z.string(),
+}).refine((data) => data.password === data.confirmPassword, {
+    message: 'Passwords do not match',
+    path: ['confirmPassword'],
+});
+
+export type SetPasswordInput = z.infer<typeof setPasswordSchema>;
+

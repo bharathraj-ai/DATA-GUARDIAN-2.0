@@ -182,6 +182,8 @@ model User {
   emailVerified DateTime?
   name          String?
   image         String?
+  passwordHash  String?
+  authProvider  String?      @default("email")
   role          String       @default("VENDOR")
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
@@ -267,6 +269,28 @@ model VerificationToken {
   expires    DateTime
 
   @@unique([identifier, token])
+}
+
+model EmailVerificationToken {
+  id        String   @id @default(cuid())
+  email     String
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([email])
+  @@index([expiresAt])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  email     String
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([email])
+  @@index([expiresAt])
 }
 
 /// Preserved record of data sharing — survives data deletion.

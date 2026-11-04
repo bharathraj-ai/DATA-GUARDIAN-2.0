@@ -23,6 +23,8 @@ export function safeCallbackPath(raw: string | null | undefined): string | null 
         raw.startsWith('/auth/continue?') ||
         raw === '/auth/signin' ||
         raw.startsWith('/auth/signin?') ||
+        raw === '/auth/set-password' ||
+        raw.startsWith('/auth/set-password?') ||
         raw === '/auth/role-select' ||
         raw.startsWith('/auth/role-select?')
     ) {

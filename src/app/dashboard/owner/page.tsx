@@ -42,6 +42,14 @@ export default async function OwnerDashboardPage({
         redirect('/auth/signin?callbackUrl=/dashboard/owner');
     }
 
+    if (!session.user.emailVerified) {
+        redirect('/auth/verify-email');
+    }
+
+    if (!session.user.hasPassword) {
+        redirect('/auth/set-password');
+    }
+
     if (getOnboardingStep(session.user.roleSelected) === 'ROLE_SELECTION') {
         redirect('/auth/role-select?callbackUrl=/dashboard/owner');
     }

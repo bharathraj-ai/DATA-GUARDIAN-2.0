@@ -12,6 +12,14 @@ export default async function DashboardPage() {
         redirect('/auth/signin?callbackUrl=/dashboard');
     }
 
+    if (!session.user.emailVerified) {
+        redirect('/auth/verify-email');
+    }
+
+    if (!session.user.hasPassword) {
+        redirect('/auth/set-password');
+    }
+
     if (getOnboardingStep(session.user.roleSelected) === 'ROLE_SELECTION') {
         redirect('/auth/role-select?callbackUrl=/dashboard');
     }
