@@ -260,12 +260,12 @@ export default function SiteFooter() {
                 <Image
                   src="/dg logo ( blue and black ).png"
                   alt="Data Guardian"
-                  width={96}
-                  height={96}
+                  width={128}
+                  height={128}
                   quality={100}
                   priority
                   unoptimized
-                  style={{ width: '48px', height: '48px', opacity: 1, objectFit: 'contain' }}
+                  style={{ width: '64px', height: '64px', opacity: 1, objectFit: 'contain' }}
                 />
                 <span className="footer-logo-text">Data Guardian</span>
               </Link>

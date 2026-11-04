@@ -117,12 +117,12 @@ function NavbarView({
                     <Image 
                         src="/dg logo ( blue and black ).png" 
                         alt="Data Guardian" 
-                        width={120} 
-                        height={120} 
+                        width={160} 
+                        height={160} 
                         quality={100}
                         priority
                         unoptimized
-                        style={{ width: '56px', height: '56px', opacity: 1, objectFit: 'contain' }} 
+                        style={{ width: '80px', height: '80px', opacity: 1, objectFit: 'contain' }} 
                     />
                     <span style={{ fontWeight: 600, letterSpacing: '-0.02em', fontSize: '18px' }}>Data Guardian</span>
                 </Link>
