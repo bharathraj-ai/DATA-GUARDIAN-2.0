@@ -124,7 +124,15 @@ function NavbarView({
                         unoptimized
                         style={{ width: '80px', height: '80px', opacity: 1, objectFit: 'contain' }} 
                     />
-                    <span style={{ fontWeight: 600, letterSpacing: '-0.02em', fontSize: '24px' }}>Data Guardian</span>
+                    <span style={{ 
+                        fontWeight: 600, 
+                        letterSpacing: '-0.02em', 
+                        fontSize: '24px',
+                        background: 'linear-gradient(135deg, #0EA5E9 0%, #1E40AF 50%, #1F2937 100%)',
+                        WebkitBackgroundClip: 'text',
+                        WebkitTextFillColor: 'transparent',
+                        backgroundClip: 'text'
+                    }}>Data Guardian</span>
                 </Link>
 
                 {/* Desktop Menu */}
