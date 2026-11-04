@@ -258,14 +258,14 @@ export default function SiteFooter() {
             <div className="footer-brand">
               <Link href="/" className="footer-logo">
                 <Image
-                  src="/DG logo.png"
+                  src="/dg logo ( blue and black ).png"
                   alt="Data Guardian"
-                  width={80}
-                  height={80}
+                  width={96}
+                  height={96}
                   quality={100}
                   priority
                   unoptimized
-                  style={{ width: '40px', height: '40px', opacity: 1, objectFit: 'contain' }}
+                  style={{ width: '48px', height: '48px', opacity: 1, objectFit: 'contain' }}
                 />
                 <span className="footer-logo-text">Data Guardian</span>
               </Link>
