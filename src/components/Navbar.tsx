@@ -124,7 +124,7 @@ function NavbarView({
                         unoptimized
                         style={{ width: '80px', height: '80px', opacity: 1, objectFit: 'contain' }} 
                     />
-                    <span style={{ fontWeight: 600, letterSpacing: '-0.02em', fontSize: '18px' }}>Data Guardian</span>
+                    <span style={{ fontWeight: 600, letterSpacing: '-0.02em', fontSize: '24px' }}>Data Guardian</span>
                 </Link>
 
                 {/* Desktop Menu */}
