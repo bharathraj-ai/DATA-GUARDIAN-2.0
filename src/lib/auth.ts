@@ -10,6 +10,7 @@ import { logger, redactEmail } from '@/lib/logger';
 import { verifyPassword } from '@/lib/security/password';
 import { signInSchema } from '@/lib/validations';
 import { checkAccountBruteForce, resetAccountBruteForce } from '@/lib/rate-limit';
+import { isUserSessionRevoked } from '@/lib/security/user-session-revocation';
 
 /**
  * NextAuth Configuration for Data Guardian (v4 Compatible)
@@ -279,10 +280,21 @@ export const authOptions: NextAuthOptions = {
                 }
                 token.hasPassword = hasPassword;
                 token.passwordSet = hasPassword;
+                token.authTime = Math.floor(Date.now() / 1000);
 
                 logger.info(
                     `[Auth] JWT issued userId=${user.id} hasPassword=${hasPassword} onboardingStep=${token.onboardingStep}`
                 );
+            }
+
+            // Revocation Check: Invalidate active JWTs if password was reset or sessions revoked
+            if (token.id && typeof token.id === 'string') {
+                const tokenAuthTime = (token.authTime as number) || (token.iat as number) || 0;
+                const revoked = await isUserSessionRevoked(token.id, tokenAuthTime);
+                if (revoked) {
+                    token.isRevoked = true;
+                    return { isRevoked: true };
+                }
             }
 
             // Client called update() after role selection or password setup — ALWAYS refresh from DB.
@@ -310,6 +322,10 @@ export const authOptions: NextAuthOptions = {
         },
 
         async session({ session, token }) {
+            if (token.isRevoked || !token.id) {
+                return {} as any;
+            }
+
             if (session.user) {
                 session.user.id = (token.id as string) ?? '';
                 session.user.role = normalizeRole(token.role as string | undefined);

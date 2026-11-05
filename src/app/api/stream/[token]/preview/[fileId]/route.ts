@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { decryptBuffer, decryptDek } from '@/lib/crypto';
-import { authorizeSecureLink } from '@/lib/linkAuthorization';
+import { authorizeSecureLink, mayStreamOriginalFileBytes } from '@/lib/linkAuthorization';
 import { downloadFromMongo } from '@/lib/mongo/operations';
 import { logger } from '@/lib/logger';
 import { gridFsIdForFile } from '@/lib/security/resource-ownership';
@@ -33,6 +33,14 @@ export async function GET(
             return NextResponse.json(
                 { error: authResult.error || 'Access denied' },
                 { status: authResult.status || 403 }
+            );
+        }
+
+        // Zero-Trust: original file bytes are download-equivalent; require download permission
+        if (!mayStreamOriginalFileBytes(authResult.context.capabilities)) {
+            return NextResponse.json(
+                { error: 'Original-file preview is disabled because download is restricted for this link.' },
+                { status: 403 }
             );
         }
 
@@ -94,7 +102,7 @@ export async function GET(
                         dek
                     );
                 } else {
-                    buffer = downloadedBuffer;
+                    throw new Error('Decryption metadata missing (iv/authTag) — refusing to return unauthenticated data');
                 }
             } catch (e) {
                 logger.error('[PREVIEW-STREAM] Mongo retrieve/decrypt failed', e);

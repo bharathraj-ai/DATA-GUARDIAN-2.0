@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { prisma } from '@/lib/prisma';
 import { hashPassword, validatePasswordStrength } from '@/lib/security/password';
 import { logger, redactEmail } from '@/lib/logger';
+import { revokeAllUserSessions } from '@/lib/security/user-session-revocation';
 
 const VERIFICATION_TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const PASSWORD_RESET_TOKEN_TTL_MS = 60 * 60 * 1000;    // 1 hour
@@ -222,6 +223,9 @@ export async function verifyAndConsumePasswordResetToken(
             await tx.session.deleteMany({
                 where: { userId: user.id },
             });
+
+            // Invalidate all active stateless JWT sessions for this user across all devices
+            await revokeAllUserSessions(user.id);
 
             return { success: true };
         });

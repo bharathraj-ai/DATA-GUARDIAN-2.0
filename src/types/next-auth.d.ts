@@ -36,6 +36,8 @@ declare module 'next-auth/jwt' {
     hasPassword?: boolean;
     passwordSet?: boolean;
     onboardingStep?: OnboardingStep;
+    authTime?: number;
+    isRevoked?: boolean;
   }
 }
 

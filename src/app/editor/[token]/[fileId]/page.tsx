@@ -11,6 +11,7 @@ import { EditLockProvider, getEditClientInstanceId, useEditLock } from '@/compon
 import { useCollaborationStore } from '@/store/useCollaborationStore';
 import { markInternalNavigation } from '@/components/view/sudden-exit-client';
 import { isWordLikeFile } from '@/components/editors/word/isWordLikeFile';
+import { secureFetch } from '@/lib/security/secure-fetch';
 
 const UniversalEditor = dynamic(() => import('@/components/editors/core/UniversalEditor'), {
     ssr: false,
@@ -57,7 +58,9 @@ function EditorWorkspace({
     const highestActiveLevel = useCollaborationStore((s) => s.highestActiveLevel);
     const clientInstanceId = editLock?.clientInstanceId || getEditClientInstanceId(fileId);
     const versionRef = useRef(version);
-    versionRef.current = version;
+    useEffect(() => {
+        versionRef.current = version;
+    }, [version]);
 
     const handleSaveFile = useCallback(async (editedFile: File) => {
         const send = async (expected: number) => {
@@ -142,7 +145,7 @@ export default function EditorPage({ params }: EditorPageProps) {
         const loadFile = async () => {
             try {
                 setLoading(true);
-                const rawRes = await fetch(
+                const rawRes = await secureFetch(
                     `/api/documents/${encodeURIComponent(fileId)}/raw?token=${encodeURIComponent(token)}`,
                     { credentials: 'include', cache: 'no-store' },
                 );
@@ -193,7 +196,7 @@ export default function EditorPage({ params }: EditorPageProps) {
         markInternalNavigation();
         try {
             const clientInstanceId = getEditClientInstanceId(fileId);
-            await fetch(`/api/documents/${fileId}/edit-lock/release`, {
+            await secureFetch(`/api/documents/${fileId}/edit-lock/release`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'x-edit-client-instance': clientInstanceId },
                 body: JSON.stringify({ token, clientInstanceId }),
