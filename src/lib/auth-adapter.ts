@@ -22,6 +22,30 @@ export function createRaceSafePrismaAdapter(prisma: PrismaClient): Adapter {
     return {
         ...base,
 
+        async getUserByEmail(email: string) {
+            const user = await base.getUserByEmail!(email);
+            if (!user) return null;
+
+            // If an unverified manual account exists with no linked OAuth accounts,
+            // the registrant has not proven ownership of this email address.
+            // Returning null allows verified Google OAuth to claim and sanitize the account in createUser
+            // without being blocked by OAuthAccountNotLinked or exposing pre-hijacked passwords.
+            if (!user.emailVerified) {
+                const hasLinkedAccounts = await prisma.account.findFirst({
+                    where: { userId: user.id },
+                    select: { id: true },
+                });
+                if (!hasLinkedAccounts) {
+                    logger.info(
+                        `[Google OAuth] Found unverified manual account without linked OAuth for email=${redactEmail(email)}. Yielding to verified OAuth claim.`
+                    );
+                    return null;
+                }
+            }
+
+            return user;
+        },
+
         async createUser(data: AdapterUserCreate) {
             try {
                 const user = await base.createUser!(data);
@@ -35,6 +59,37 @@ export function createRaceSafePrismaAdapter(prisma: PrismaClient): Adapter {
                         where: { email: data.email },
                     });
                     if (existing) {
+                        // If existing user is unverified and has a passwordHash, wipe the unverified password
+                        // to prevent pre-hijacking attacks where an attacker pre-registered the victim's email.
+                        if (!existing.emailVerified && existing.passwordHash) {
+                            logger.warn(
+                                `[Google OAuth] Wiping unverified password for email=${redactEmail(existing.email)} upon verified Google sign-in`
+                            );
+                            const sanitized = await prisma.user.update({
+                                where: { id: existing.id },
+                                data: {
+                                    passwordHash: null,
+                                    emailVerified: new Date(),
+                                },
+                            });
+                            return sanitized as AdapterUser;
+                        }
+
+                        // If user is already verified with a password and has no Google account,
+                        // block automatic linking to prevent unsafe account takeover.
+                        if (existing.emailVerified && existing.passwordHash) {
+                            const hasGoogle = await prisma.account.findFirst({
+                                where: { userId: existing.id, provider: 'google' },
+                                select: { id: true },
+                            });
+                            if (!hasGoogle) {
+                                logger.warn(
+                                    `[Google OAuth] Blocked automatic linking to verified password account email=${redactEmail(existing.email)}`
+                                );
+                                throw new Error('OAuthAccountNotLinked');
+                            }
+                        }
+
                         logger.info(
                             `[Google OAuth] createUser race: reused existing user email=${redactEmail(existing.email)} roleSelected=${existing.roleSelected}`
                         );

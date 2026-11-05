@@ -524,3 +524,47 @@ export async function sendPasswordResetEmail(
         'Password reset email',
     );
 }
+
+export async function sendPasswordChangedNotificationEmail(
+    email: string,
+    action: 'changed' | 'established' = 'changed',
+): Promise<void> {
+    if (!isEmailConfigured()) {
+        logger.info(`[Email] SMTP not configured. Password ${action} notification skipped for ${redactEmail(email)}`);
+        return;
+    }
+
+    const senderName = process.env.EMAIL_FROM_NAME || 'Data Guardian Security';
+    const { from, user } = readEmailEnv();
+
+    const bodyHtml = `
+      <p style="margin:0 0 16px;color:#334155;font-size:15px;line-height:1.6;">
+        Hello,
+      </p>
+      <p style="margin:0 0 24px;color:#475569;font-size:14px;line-height:1.6;">
+        The password for your Data Guardian account was successfully ${escapeHtml(action)}.
+      </p>
+      <p style="margin:0 0 24px;color:#475569;font-size:14px;line-height:1.6;">
+        If you performed this action, no further steps are needed.
+      </p>
+      <p style="margin:0;padding-top:16px;border-top:1px solid #e2e8f0;color:#dc2626;font-size:13px;line-height:1.5;">
+        <strong>Important:</strong> If you did NOT initiate this change, your account may be compromised. Please reset your password immediately and contact support.
+      </p>
+    `;
+
+    await sendWithTimeout(
+        getTransporter().sendMail({
+            from: `"${senderName}" <${from || user}>`,
+            to: email,
+            subject: `Security Alert: Account password ${action} - Data Guardian`,
+            text: `Hello,\n\nThe password for your Data Guardian account was successfully ${action}.\n\nIf you did not perform this change, please reset your password immediately.`,
+            html: emailShell({
+                title: 'Security Alert',
+                subtitle: `Password ${action === 'established' ? 'Established' : 'Changed'}`,
+                preheader: `Your Data Guardian password was successfully ${action}.`,
+                bodyHtml,
+            }),
+        }),
+        'Password changed notification email',
+    );
+}

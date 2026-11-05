@@ -34,11 +34,17 @@ export default async function RoleSelectPage({ searchParams }: Props) {
 
     const dbUser = await prisma.user.findUnique({
         where: { id: session.user.id },
-        select: { email: true, role: true, roleSelected: true },
+        select: { email: true, role: true, roleSelected: true, passwordHash: true },
     });
 
     if (!dbUser) {
         redirect('/auth/signin');
+    }
+
+    // Mandatory password setup for OAuth users without a password
+    if (!dbUser.passwordHash) {
+        logger.info(`[Auth] /auth/role-select redirecting to set-password email=${redactEmail(dbUser.email)}`);
+        redirect('/auth/set-password');
     }
 
     const onboardingStep = getOnboardingStep(dbUser.roleSelected);

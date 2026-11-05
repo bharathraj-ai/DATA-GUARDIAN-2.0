@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { hashPassword, validatePasswordStrength } from '@/lib/security/password';
 import { logger, redactEmail } from '@/lib/logger';
 import { revokeAllUserSessions } from '@/lib/security/user-session-revocation';
+import { sendPasswordChangedNotificationEmail } from '@/lib/email';
 
 const VERIFICATION_TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const PASSWORD_RESET_TOKEN_TTL_MS = 60 * 60 * 1000;    // 1 hour
@@ -227,14 +228,17 @@ export async function verifyAndConsumePasswordResetToken(
             // Invalidate all active stateless JWT sessions for this user across all devices
             await revokeAllUserSessions(user.id);
 
-            return { success: true };
+            return { success: true, email: user.email };
         });
 
-        if (result.success) {
+        if (result.success && result.email) {
             logger.info(`[Auth Tokens] Password successfully reset for token hash=${tokenHash.slice(0, 10)}...`);
+            sendPasswordChangedNotificationEmail(result.email, 'changed').catch((err) => {
+                logger.warn('[Auth Tokens] Failed to send password reset notification email', err);
+            });
         }
 
-        return result;
+        return { success: result.success, error: result.error };
     } catch (err) {
         logger.error('[Auth Tokens] Error resetting password', err);
         return { success: false, error: 'Failed to reset password. Please try again.' };

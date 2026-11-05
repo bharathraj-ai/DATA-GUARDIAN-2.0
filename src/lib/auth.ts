@@ -27,6 +27,9 @@ import { isUserSessionRevoked } from '@/lib/security/user-session-revocation';
 const useSecureCookies = process.env.NEXTAUTH_URL?.startsWith('https://') ?? false;
 const cookiePrefix = useSecureCookies ? '__Secure-' : '';
 
+// Pre-computed valid bcrypt hash used to equalize execution time during invalid credential checks
+const DUMMY_BCRYPT_HASH = '$2b$12$e80yEa5.O7/xQO2q0Ue.y.2uN9Y5.2iM8tE3qJ9s7u0v2u0u0u0u0';
+
 function postLoginContinueUrl(canonicalBase: string, callbackPath?: string | null): string {
     if (callbackPath && callbackPath.startsWith('/') && !callbackPath.startsWith('//')) {
         return `${canonicalBase}/auth/continue?callbackUrl=${encodeURIComponent(callbackPath)}`;
@@ -78,6 +81,7 @@ export const authOptions: NextAuthOptions = {
                 });
 
                 if (!user || !user.passwordHash) {
+                    await verifyPassword(DUMMY_BCRYPT_HASH, password);
                     logger.warn(`[Auth] Credentials rejected: no user or password hash email=${redactEmail(normalizedEmail)}`);
                     throw new Error('INVALID_CREDENTIALS');
                 }
@@ -174,7 +178,7 @@ export const authOptions: NextAuthOptions = {
         maxAge: 24 * 60 * 60, // 24 hours
     },
     callbacks: {
-        async signIn({ user, account }) {
+        async signIn({ user, account, profile }) {
             const roleSelected = Boolean(
                 (user as { roleSelected?: boolean }).roleSelected
             );
@@ -183,12 +187,20 @@ export const authOptions: NextAuthOptions = {
                 `[Google OAuth] Sign-in email=${redactEmail(user.email)} provider=${account?.provider} onboardingStep=${onboardingStep}`
             );
 
-            if (account?.provider === 'google' && user.id) {
-                // Google accounts are verified by Google. Ensure existing users without an emailVerified timestamp are marked verified.
-                await prisma.user.update({
-                    where: { id: user.id },
-                    data: { emailVerified: new Date() },
-                }).catch(() => {});
+            if (account?.provider === 'google') {
+                // Reject Google OAuth callback if Google profile explicitly marks email as unverified
+                if (profile && 'email_verified' in profile && (profile as { email_verified?: boolean }).email_verified === false) {
+                    logger.warn(`[Google OAuth] Rejected unverified Google email=${redactEmail(user.email)}`);
+                    return false;
+                }
+
+                if (user.id) {
+                    // Google accounts are verified by Google. Ensure existing users without an emailVerified timestamp are marked verified.
+                    await prisma.user.update({
+                        where: { id: user.id },
+                        data: { emailVerified: new Date() },
+                    }).catch(() => {});
+                }
             }
 
             return true;

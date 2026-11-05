@@ -29,11 +29,12 @@ export async function setUserRole(role: AppRole): Promise<SetUserRoleResult> {
     return { success: false, error: 'Invalid role selection' };
   }
 
-  // Atomic: only update if onboarding is still incomplete
+  // Atomic: only update if onboarding is still incomplete and password has been established
   const updated = await prisma.user.updateMany({
     where: {
       id: session.user.id,
       roleSelected: false,
+      passwordHash: { not: null },
     },
     data: {
       role: normalized,
