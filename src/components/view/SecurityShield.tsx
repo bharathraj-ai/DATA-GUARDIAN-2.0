@@ -13,7 +13,7 @@
  * What we CAN do:
  *   - Body-owned blank cover the instant we see PrtSc / Super / screenshot chords
  *   - On the FIRST screenshot, copy, print, tab-hide, or similar suspicious action:
- *     terminate the vendor session immediately (no warning strikes), revoke the
+ *     terminate the vendor session immediately (No warning strikes), revoke the
  *     share, and email the data owner
  *   - Super/Alt alone and ordinary window blur still only hide content
  */

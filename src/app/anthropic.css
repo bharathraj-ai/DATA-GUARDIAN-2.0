@@ -91,8 +91,17 @@ body, html {
 /* 5. Hero Section */
 .hero-section {
   background: #FFFFFF !important;
-  padding-top: 112px !important;
+  min-height: 100vh !important;
+  min-height: 100dvh !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding-top: 72px !important;
   padding-bottom: 48px !important;
+  box-sizing: border-box !important;
+}
+.hero-section .container {
+  width: 100% !important;
 }
 .hero-grid, .hero-glow {
   display: none !important; 

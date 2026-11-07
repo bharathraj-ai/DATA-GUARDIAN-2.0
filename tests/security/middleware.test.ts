@@ -3,7 +3,7 @@
  */
 
 import { NextRequest } from 'next/server';
-import { middleware, config } from '@/middleware';
+import { middleware, config } from '@/proxy';
 
 describe('Next.js Middleware Execution & Security Headers', () => {
   it('middleware exports required handlers and matcher configuration', () => {
